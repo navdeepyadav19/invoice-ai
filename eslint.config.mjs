@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Scratch files written by the Remember plugin, not project source.
+    ".remember/**",
   ]),
 ]);
 
