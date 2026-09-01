@@ -6,6 +6,7 @@ import { Check, Eye, Loader2, PenLine } from 'lucide-react'
 import { FormProvider, useForm, useWatch } from 'react-hook-form'
 import { toast } from 'sonner'
 
+import { AiPanel } from '@/components/invoice/ai-panel'
 import { InvoiceDocument } from '@/components/invoice/invoice-document'
 import { LineItems } from '@/components/invoice/line-items'
 import { SendControls } from '@/components/invoice/send-controls'
@@ -31,6 +32,7 @@ import {
   type InvoiceFormValues,
 } from '@/lib/invoice-form'
 import { snapshotBusiness, type InvoiceView } from '@/lib/invoice-view'
+import type { NormalisedInvoiceDraft } from '@/lib/ai/normalise'
 import { cn } from '@/lib/utils'
 import type { BusinessRow, InvoiceStatus } from '@/lib/database.types'
 
@@ -42,12 +44,15 @@ export function InvoiceBuilder({
   initialValues,
   invoiceNumber = null,
   status = 'draft',
+  aiEnabled = false,
 }: {
   business: BusinessRow
   invoiceId?: string
   initialValues?: InvoiceFormValues
   invoiceNumber?: string | null
   status?: InvoiceStatus
+  /** False when OPENAI_API_KEY is unset, so the prompt box is hidden entirely. */
+  aiEnabled?: boolean
 }) {
   const router = useRouter()
   const [invoiceId, setInvoiceId] = useState(initialInvoiceId)
@@ -144,6 +149,53 @@ export function InvoiceBuilder({
 
   const showTax = business.is_gst_registered && !values.is_export
 
+  /**
+   * Apply an AI-parsed draft to the form.
+   *
+   * Only fields the model actually returned are written — a null means "the user
+   * didn't say", not "clear it". That's what lets someone dictate an amount,
+   * then dictate a client name, without the second instruction wiping the first.
+   *
+   * `shouldDirty` is essential: autosave watches dirty state, so without it a
+   * fully AI-filled invoice would sit there unsaved.
+   */
+  function applyDraft(draft: NormalisedInvoiceDraft) {
+    const dirty = { shouldDirty: true } as const
+
+    if (draft.client_name) form.setValue('client.name', draft.client_name, dirty)
+    if (draft.client_gstin) form.setValue('client.gstin', draft.client_gstin, dirty)
+    if (draft.client_city) form.setValue('client.city', draft.client_city, dirty)
+    if (draft.client_email) form.setValue('client.email', draft.client_email, dirty)
+
+    if (draft.place_of_supply_state_code) {
+      form.setValue('place_of_supply_state_code', draft.place_of_supply_state_code, dirty)
+    }
+
+    if (draft.notes) form.setValue('notes', draft.notes, dirty)
+
+    if (draft.due_in_days !== null) {
+      const issued = new Date(form.getValues('issue_date') || new Date().toISOString().slice(0, 10))
+      issued.setDate(issued.getDate() + draft.due_in_days)
+      form.setValue('due_date', issued.toISOString().slice(0, 10), dirty)
+    }
+
+    if (draft.items.length > 0) {
+      form.setValue(
+        'items',
+        draft.items.map((item) => ({
+          description: item.description,
+          hsn_sac: item.hsn_sac,
+          quantity: String(item.quantity),
+          unit: item.unit,
+          rate: String(item.rate),
+          discount_percent: '0',
+          gst_rate: String(item.gst_rate),
+          cess_rate: '0',
+        })),
+        dirty,
+      )
+    }
+  }
 
   return (
     <FormProvider {...form}>
@@ -217,6 +269,15 @@ export function InvoiceBuilder({
           )}
 
           <fieldset disabled={isIssued} className="space-y-8 disabled:opacity-70">
+          {aiEnabled && !isIssued && (
+            <AiPanel
+              onDraft={applyDraft}
+              business={business}
+              currency={values.currency || 'INR'}
+              disabled={isSaving}
+            />
+          )}
+
           <Section title="Bill to" description="Who is this invoice for?">
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Client name" htmlFor="client.name" required className="sm:col-span-2">
