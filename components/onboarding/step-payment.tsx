@@ -2,7 +2,7 @@
 
 import { useActionState } from 'react'
 
-import { savePaymentStep } from '@/lib/actions/onboarding'
+import { savePaymentSettings } from '@/lib/actions/business'
 import type { StepState } from '@/lib/form-state'
 import { FormError } from '@/components/auth/form-error'
 import { Field } from '@/components/onboarding/field'
@@ -17,7 +17,7 @@ const DEFAULT_NOTES = 'Thank you for your business.'
 
 export function StepPayment({
   business,
-  action = savePaymentStep,
+  action = savePaymentSettings,
   standalone = false,
 }: {
   business: BusinessRow | null
