@@ -4,7 +4,7 @@ import { useActionState, useState } from 'react'
 
 import { saveNumberingSettings } from '@/lib/actions/business'
 import type { StepState } from '@/lib/form-state'
-import { FormError } from '@/components/auth/form-error'
+import { FormError, FormSuccess } from '@/components/auth/form-error'
 import { Field } from '@/components/onboarding/field'
 import { StepFooter } from '@/components/onboarding/step-footer'
 import { SubmitButton } from '@/components/submit-button'
@@ -85,6 +85,7 @@ export function StepNumbering({
       </div>
 
       <FormError message={state.error} />
+      {state.saved && <FormSuccess message="Saved." />}
 
       {standalone ? (
         <div className="flex justify-end">

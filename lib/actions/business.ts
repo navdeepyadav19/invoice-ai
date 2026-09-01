@@ -14,6 +14,23 @@ function nullable(value: FormDataEntryValue | null): string | null {
 }
 
 /**
+ * Read a form field as `string | undefined`.
+ *
+ * `formData.get()` returns **null** for a field the form doesn't contain, and
+ * Zod's `.optional()` accepts `undefined` but rejects `null`. Passing the raw
+ * result straight to the schema means any form that omits an optional field
+ * fails validation — and the error lands under a field name that form doesn't
+ * render, so the user sees "fix the highlighted fields" with nothing
+ * highlighted. This is exactly what happened once step-identity.tsx's manual
+ * form stopped rendering email/phone: onboarding was completely blocked.
+ * Every optional field must come through here.
+ */
+function field(formData: FormData, name: string): string | undefined {
+  const value = formData.get(name)
+  return value === null ? undefined : String(value)
+}
+
+/**
  * Pull the GST registry metadata that the lookup step posts as hidden fields.
  * Returns an empty object when absent, so a plain settings edit never blanks
  * out previously fetched registry data.
@@ -49,23 +66,23 @@ export async function persistBusiness(formData: FormData): Promise<StepState> {
   const user = await requireUser()
 
   const parsed = businessSchema.safeParse({
-    legal_name: formData.get('legal_name'),
-    trade_name: formData.get('trade_name'),
+    legal_name: field(formData, 'legal_name'),
+    trade_name: field(formData, 'trade_name'),
     is_gst_registered: formData.get('is_gst_registered') === 'on',
-    gstin: formData.get('gstin'),
-    pan: formData.get('pan'),
-    address_line1: formData.get('address_line1'),
-    address_line2: formData.get('address_line2'),
-    city: formData.get('city'),
-    state_code: formData.get('state_code'),
-    pincode: formData.get('pincode'),
-    country: formData.get('country') || 'India',
-    email: formData.get('email'),
-    phone: formData.get('phone'),
-    business_type: formData.get('business_type') || undefined,
+    gstin: field(formData, 'gstin'),
+    pan: field(formData, 'pan'),
+    address_line1: field(formData, 'address_line1'),
+    address_line2: field(formData, 'address_line2'),
+    city: field(formData, 'city'),
+    state_code: field(formData, 'state_code'),
+    pincode: field(formData, 'pincode'),
+    country: field(formData, 'country') || 'India',
+    email: field(formData, 'email'),
+    phone: field(formData, 'phone'),
+    business_type: field(formData, 'business_type') || undefined,
   })
 
-  if (!parsed.success) return toFieldErrors(parsed.error)
+  if (!parsed.success) return toFieldErrors(parsed.error, formData)
 
   const supabase = await createClient()
   const existing = await getPrimaryBusiness()
@@ -110,16 +127,16 @@ export async function persistPayment(formData: FormData): Promise<StepState> {
   if (!business) return { error: 'Add your business details first.' }
 
   const parsed = paymentDetailsSchema.safeParse({
-    bank_name: formData.get('bank_name'),
-    account_name: formData.get('account_name'),
-    account_number: formData.get('account_number'),
-    ifsc: formData.get('ifsc'),
-    upi_id: formData.get('upi_id'),
-    default_terms: formData.get('default_terms'),
-    default_notes: formData.get('default_notes'),
+    bank_name: field(formData, 'bank_name'),
+    account_name: field(formData, 'account_name'),
+    account_number: field(formData, 'account_number'),
+    ifsc: field(formData, 'ifsc'),
+    upi_id: field(formData, 'upi_id'),
+    default_terms: field(formData, 'default_terms'),
+    default_notes: field(formData, 'default_notes'),
   })
 
-  if (!parsed.success) return toFieldErrors(parsed.error)
+  if (!parsed.success) return toFieldErrors(parsed.error, formData)
 
   const supabase = await createClient()
   const { error } = await supabase
@@ -150,7 +167,7 @@ export async function persistNumbering(formData: FormData): Promise<StepState> {
     next_invoice_number: formData.get('next_invoice_number') || 1,
   })
 
-  if (!parsed.success) return toFieldErrors(parsed.error)
+  if (!parsed.success) return toFieldErrors(parsed.error, formData)
 
   const supabase = await createClient()
   const { error } = await supabase

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState, useTransition } from 'react'
+import { useCallback, useEffect, useMemo, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { Check, Eye, Loader2, PenLine } from 'lucide-react'
 import { FormProvider, useForm, useWatch } from 'react-hook-form'
@@ -23,7 +23,7 @@ import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { saveInvoiceDraft } from '@/lib/actions/invoice'
 import { computeInvoice } from '@/lib/gst'
-import { GST_STATES } from '@/lib/india'
+import { GST_STATES, stateName } from '@/lib/india'
 import {
   defaultInvoiceValues,
   toGstInput,
@@ -96,33 +96,42 @@ export function InvoiceBuilder({
     [business, values, computed, invoiceNumber, status],
   )
 
-  function save(silent: boolean) {
-    startSaving(async () => {
-      const result = await saveInvoiceDraft({ ...toSavePayload(form.getValues()), id: invoiceId })
+  const save = useCallback(
+    (silent: boolean) => {
+      startSaving(async () => {
+        const result = await saveInvoiceDraft({ ...toSavePayload(form.getValues()), id: invoiceId })
 
-      if (result.error) {
-        // Autosave failures are announced too. Silently dropping them is how
-        // someone loses twenty minutes of typing and only finds out later.
-        toast.error(result.error)
-        return
-      }
+        if (result.error) {
+          // Autosave failures are announced too. Silently dropping them is how
+          // someone loses twenty minutes of typing and only finds out later.
+          toast.error(result.error)
+          return
+        }
 
-      if (result.invoiceId && result.invoiceId !== invoiceId) {
-        setInvoiceId(result.invoiceId)
-        // Replace rather than push so Back doesn't return to a blank /new that
-        // would start a second draft.
-        router.replace(`/invoices/${result.invoiceId}/edit`)
-      }
+        if (result.invoiceId && result.invoiceId !== invoiceId) {
+          setInvoiceId(result.invoiceId)
+          // Replace rather than push so Back doesn't return to a blank /new that
+          // would start a second draft.
+          router.replace(`/invoices/${result.invoiceId}/edit`)
+        }
 
-      setSavedAt(result.savedAt ?? new Date().toISOString())
-      if (!silent) toast.success('Draft saved')
-    })
-  }
+        setSavedAt(result.savedAt ?? new Date().toISOString())
+        if (!silent) toast.success('Draft saved')
+      })
+    },
+    [form, invoiceId, router],
+  )
+
+  // Once issued, an invoice is a document rather than a draft: the number is
+  // allocated, the client may already have the PDF, and the server refuses
+  // writes. Locking the form here means the user is never invited to make an
+  // edit that cannot land.
+  const isIssued = status !== 'draft'
 
   const isDirty = form.formState.isDirty
   const hasClient = Boolean(values.client?.name?.trim())
   const hasLine = computed.lines.some((line) => line.description.trim() && line.taxablePaise > 0)
-  const canSave = hasClient && hasLine
+  const canSave = hasClient && hasLine && !isIssued
 
   // Debounced autosave. Only runs once the invoice is worth saving — otherwise
   // opening the page would immediately create an empty draft.
@@ -131,10 +140,10 @@ export function InvoiceBuilder({
 
     const timer = setTimeout(() => save(true), AUTOSAVE_DELAY_MS)
     return () => clearTimeout(timer)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [values, isDirty, canSave])
+  }, [values, isDirty, canSave, save])
 
   const showTax = business.is_gst_registered && !values.is_export
+
 
   return (
     <FormProvider {...form}>
@@ -165,21 +174,25 @@ export function InvoiceBuilder({
               </TabButton>
             </div>
 
-            <Button
-              variant={invoiceId ? 'outline' : 'default'}
-              size="sm"
-              onClick={() => save(false)}
-              disabled={!canSave || isSaving}
-            >
-              {isSaving && <Loader2 className="size-4 animate-spin" />}
-              Save draft
-            </Button>
+            {!isIssued && (
+              <Button
+                variant={invoiceId ? 'outline' : 'default'}
+                size="sm"
+                onClick={() => save(false)}
+                disabled={!canSave || isSaving}
+              >
+                {isSaving && <Loader2 className="size-4 animate-spin" />}
+                Save draft
+              </Button>
+            )}
 
             <SendControls
               invoiceId={invoiceId}
               status={status}
               clientEmail={values.client?.email ?? ''}
-              disabled={!canSave || isSaving}
+              // An issued invoice fails `canSave` by design, but re-fetching its
+              // share link is exactly what someone comes back here to do.
+              disabled={isSaving || (!isIssued && !canSave)}
             />
           </div>
         </div>
@@ -193,6 +206,17 @@ export function InvoiceBuilder({
             save(false)
           }}
         >
+          {isIssued && (
+            <p className="rounded-lg border border-border bg-muted/50 px-4 py-3 text-sm text-muted-foreground">
+              <span className="font-medium text-foreground">
+                This invoice has been issued as {invoiceNumber}.
+              </span>{' '}
+              It can no longer be edited — your client may already have the PDF. Raise a new invoice
+              or a credit note instead.
+            </p>
+          )}
+
+          <fieldset disabled={isIssued} className="space-y-8 disabled:opacity-70">
           <Section title="Bill to" description="Who is this invoice for?">
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Client name" htmlFor="client.name" required className="sm:col-span-2">
@@ -262,7 +286,13 @@ export function InvoiceBuilder({
                   }
                 >
                   <SelectTrigger id="place_of_supply_state_code" className="w-full">
-                    <SelectValue placeholder="Select a state" />
+                    {/* Base UI renders the raw value, which would show a bare
+                        "29" where the user needs to read "Karnataka". */}
+                    <SelectValue placeholder="Select a state">
+                      {(value) =>
+                        value ? `${value} — ${stateName(String(value))}` : 'Select a state'
+                      }
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {GST_STATES.map((s) => (
@@ -310,6 +340,7 @@ export function InvoiceBuilder({
               </Field>
             </div>
           </Section>
+          </fieldset>
         </form>
 
         <div className={cn('lg:sticky lg:top-24 lg:self-start', mobileTab === 'edit' && 'hidden lg:block')}>

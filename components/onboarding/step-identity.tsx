@@ -367,10 +367,31 @@ function ManualForm({
   seedState: string
   onBack: () => void
 }) {
-  const [gstin, setGstin] = useState(prefill?.gstin ?? seedGstin ?? business?.gstin ?? '')
+  const initialGstin = prefill?.gstin ?? seedGstin ?? business?.gstin ?? ''
+
+  const [gstin, setGstin] = useState(initialGstin)
+
+  // Derive the state from the GSTIN we arrived with, not just from ones typed
+  // here. Someone who entered a GSTIN on the lookup screen and fell through to
+  // this form has already told us their state — asking again is the app failing
+  // to read its own input.
   const [stateCode, setStateCode] = useState(
-    prefill?.state_code || seedState || business?.state_code || '',
+    prefill?.state_code ||
+      seedState ||
+      business?.state_code ||
+      (GSTIN_REGEX.test(initialGstin) ? (stateCodeFromGstin(initialGstin) ?? '') : ''),
   )
+
+  /**
+   * Controlled, because a failed server validation re-renders this form and
+   * React resets it — uncontrolled inputs would silently drop everything the
+   * user typed at exactly the moment they're being asked to correct it.
+   */
+  const [legalName, setLegalName] = useState(prefill?.legal_name ?? business?.legal_name ?? '')
+  const [tradeName, setTradeName] = useState(prefill?.trade_name ?? business?.trade_name ?? '')
+  const [address, setAddress] = useState(prefill?.address_line1 ?? business?.address_line1 ?? '')
+  const [city, setCity] = useState(prefill?.city ?? business?.city ?? '')
+  const [pincode, setPincode] = useState(prefill?.pincode ?? business?.pincode ?? '')
 
   const registered = gstin.trim().length > 0
   const errors = saveState.fieldErrors ?? {}
@@ -411,7 +432,8 @@ function ManualForm({
           <Input
             id="legal_name"
             name="legal_name"
-            defaultValue={prefill?.legal_name ?? business?.legal_name ?? ''}
+            value={legalName}
+            onChange={(e) => setLegalName(e.target.value)}
             placeholder="Umbrella Design Studio"
             required
           />
@@ -426,7 +448,8 @@ function ManualForm({
           <Input
             id="trade_name"
             name="trade_name"
-            defaultValue={prefill?.trade_name ?? business?.trade_name ?? ''}
+            value={tradeName}
+            onChange={(e) => setTradeName(e.target.value)}
           />
         </Field>
 
@@ -458,7 +481,8 @@ function ManualForm({
           <Input
             id="address_line1"
             name="address_line1"
-            defaultValue={prefill?.address_line1 ?? business?.address_line1 ?? ''}
+            value={address}
+            onChange={(e) => setAddress(e.target.value)}
             placeholder="4th Floor, Trade Centre"
             required
           />
@@ -474,7 +498,8 @@ function ManualForm({
           <Input
             id="city"
             name="city"
-            defaultValue={prefill?.city ?? business?.city ?? ''}
+            value={city}
+            onChange={(e) => setCity(e.target.value)}
             placeholder="Mumbai"
             required
           />
@@ -513,7 +538,8 @@ function ManualForm({
           <Input
             id="pincode"
             name="pincode"
-            defaultValue={prefill?.pincode ?? business?.pincode ?? ''}
+            value={pincode}
+            onChange={(e) => setPincode(e.target.value)}
             placeholder="400051"
             maxLength={6}
             inputMode="numeric"
