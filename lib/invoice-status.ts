@@ -25,25 +25,38 @@ export function deriveStatus(
 }
 
 /**
- * An invoice due on the 20th is not overdue *during* the 20th — it becomes
- * overdue once the 21st starts. Comparing whole dates rather than timestamps is
- * what makes that true regardless of what time of day the page is loaded.
+ * GST invoices are Indian documents, so "today" means the calendar date in
+ * India, not on whatever machine runs the code. Vercel and CI run in UTC, which
+ * is 5h30m behind: using the server's local date left yesterday's invoices
+ * not-yet-overdue until 05:30 IST every morning.
+ *
+ * en-CA formats as YYYY-MM-DD, the same shape as a Postgres `date` column.
  */
-export function isPastDue(dueDate: string, now: Date = new Date()): boolean {
-  const today = toDateOnly(now)
-  const due = new Date(`${dueDate}T00:00:00`)
-  return today.getTime() > due.getTime()
+const INDIA_DATE = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Asia/Kolkata',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+})
+
+function todayInIndia(now: Date): string {
+  return INDIA_DATE.format(now)
 }
 
-function toDateOnly(date: Date): Date {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate())
+/**
+ * An invoice due on the 20th is not overdue *during* the 20th — it becomes
+ * overdue once the 21st starts in India. Comparing YYYY-MM-DD strings compares
+ * whole dates, so the time of day never changes the answer.
+ */
+export function isPastDue(dueDate: string, now: Date = new Date()): boolean {
+  return todayInIndia(now) > dueDate.slice(0, 10)
 }
 
 /** Whole days past due, for wording like "12 days overdue". Zero if not late. */
 export function daysOverdue(dueDate: string, now: Date = new Date()): number {
   if (!isPastDue(dueDate, now)) return 0
 
-  const today = toDateOnly(now)
-  const due = new Date(`${dueDate}T00:00:00`)
-  return Math.round((today.getTime() - due.getTime()) / 86_400_000)
+  const today = Date.parse(`${todayInIndia(now)}T00:00:00Z`)
+  const due = Date.parse(`${dueDate.slice(0, 10)}T00:00:00Z`)
+  return Math.round((today - due) / 86_400_000)
 }
