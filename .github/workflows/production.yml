@@ -1,0 +1,86 @@
+# Production pipeline: runs on every merge (push) to main.
+#
+#   CI  ──►  Deploy production  ──►  Smoke test live site  ──(fails?)──►  Roll back
+#
+# Production is only touched after CI passes on the merged code, and a deploy
+# that breaks the live site is automatically reverted to the previous one.
+
+name: Production Pipeline
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: # "Run workflow" button: redeploy main by hand.
+
+permissions:
+  contents: read
+
+# Queue production runs one at a time and never cancel one halfway through a deploy.
+concurrency:
+  group: production
+  cancel-in-progress: false
+
+env:
+  PRODUCTION_URL: ${{ vars.PRODUCTION_URL || 'https://invoice-ai-horizonpay.vercel.app' }}
+
+jobs:
+  ci:
+    name: CI
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    name: Deploy production
+    needs: ci
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: production
+      url: ${{ env.PRODUCTION_URL }}
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+    outputs:
+      previous-deployment: ${{ steps.deploy.outputs.previous-deployment }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+
+      - name: Deploy to Vercel (production)
+        id: deploy
+        uses: ./.github/actions/vercel-deploy
+        with:
+          target: production
+
+  smoke-test:
+    name: Smoke test
+    needs: deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - run: bash .github/scripts/smoke-test.sh "$PRODUCTION_URL"
+
+  rollback:
+    name: Roll back production
+    needs: [deploy, smoke-test]
+    # Only when the deploy went out but the live site then failed its smoke test.
+    if: failure() && needs.deploy.result == 'success' && needs.smoke-test.result == 'failure'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      PREVIOUS_DEPLOYMENT: ${{ needs.deploy.outputs.previous-deployment }}
+    steps:
+      - name: Roll back to the deployment recorded before this deploy
+        run: |
+          if [ -z "$PREVIOUS_DEPLOYMENT" ]; then
+            echo "::error::Smoke test failed and there is no earlier production deployment to roll back to."
+            exit 1
+          fi
+          npm install --global vercel@59.16.0
+          # Re-points production at the old deployment instantly; nothing is rebuilt.
+          vercel rollback "$PREVIOUS_DEPLOYMENT" --yes --token="$VERCEL_TOKEN"
+          echo "::error::Smoke test failed. Production was rolled back to $PREVIOUS_DEPLOYMENT."
