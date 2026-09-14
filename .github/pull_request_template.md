@@ -4,7 +4,7 @@
 
 ## How to verify
 
-<!-- Steps a reviewer can follow on the preview deployment linked below by the bot. -->
+<!-- Steps a reviewer can follow on the Vercel preview deployment linked below. -->
 
 ## Review checklist
 

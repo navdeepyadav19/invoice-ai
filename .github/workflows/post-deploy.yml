@@ -1,0 +1,27 @@
+# Post-deploy check: runs when Vercel reports a finished production deployment.
+#
+#   Vercel deploys main  ──►  GitHub "deployment_status: success"  ──►  Smoke test live site
+#
+# Vercel's GitHub integration posts a deployment status for every build it
+# makes. Only production is checked, and against the public domain: preview and
+# per-deployment URLs sit behind Vercel Authentication and would answer 401.
+
+name: Post-deploy Smoke Test
+
+on: deployment_status
+
+permissions:
+  contents: read
+
+env:
+  PRODUCTION_URL: ${{ vars.PRODUCTION_URL || 'https://invoice-ai-horizonpay.vercel.app' }}
+
+jobs:
+  smoke-test:
+    name: Smoke test
+    if: github.event.deployment_status.state == 'success' && github.event.deployment.environment == 'Production'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - run: bash .github/scripts/smoke-test.sh "$PRODUCTION_URL"
