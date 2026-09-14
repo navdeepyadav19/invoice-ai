@@ -3,22 +3,8 @@ import { NextResponse, type NextRequest } from 'next/server'
 
 import { supabasePublishableKey, supabaseUrl } from './env'
 
-/**
- * Paths reachable without any session at all.
- *
- * `/api/public/` is here for the same reason as `/i/`: it IS the client-facing
- * surface. Leaving it out sent every "Download PDF" click to the login page —
- * the page rendered fine, so the failure only showed up on the download.
- */
-const PUBLIC_PREFIXES = [
-  '/login',
-  '/signup',
-  '/forgot-password',
-  '/reset-password',
-  '/auth',
-  '/i/',
-  '/api/public/',
-]
+/** Paths reachable without any session at all. */
+const PUBLIC_PREFIXES = ['/login', '/signup', '/forgot-password', '/reset-password', '/auth', '/i/']
 
 function isPublicPath(pathname: string): boolean {
   if (pathname === '/') return true

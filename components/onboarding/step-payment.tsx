@@ -2,9 +2,9 @@
 
 import { useActionState } from 'react'
 
-import { savePaymentSettings } from '@/lib/actions/business'
+import { savePaymentStep } from '@/lib/actions/onboarding'
 import type { StepState } from '@/lib/form-state'
-import { FormError, FormSuccess } from '@/components/auth/form-error'
+import { FormError } from '@/components/auth/form-error'
 import { Field } from '@/components/onboarding/field'
 import { StepFooter } from '@/components/onboarding/step-footer'
 import { SubmitButton } from '@/components/submit-button'
@@ -17,7 +17,7 @@ const DEFAULT_NOTES = 'Thank you for your business.'
 
 export function StepPayment({
   business,
-  action = savePaymentSettings,
+  action = savePaymentStep,
   standalone = false,
 }: {
   business: BusinessRow | null
@@ -27,21 +27,20 @@ export function StepPayment({
 }) {
   const [state, formAction] = useActionState<StepState, FormData>(action, {})
   const errors = state.fieldErrors ?? {}
-  const kept = state.values ?? {}
 
   return (
     <form action={formAction} className="space-y-6">
       <div className="grid gap-5 sm:grid-cols-2">
         <Field label="Bank name" htmlFor="bank_name" error={errors.bank_name}>
-          <Input id="bank_name" name="bank_name" defaultValue={kept.bank_name ?? business?.bank_name ?? ''} placeholder="HDFC Bank" />
+          <Input id="bank_name" name="bank_name" defaultValue={business?.bank_name ?? ''} placeholder="HDFC Bank" />
         </Field>
 
         <Field label="Account holder" htmlFor="account_name" error={errors.account_name}>
           <Input
             id="account_name"
             name="account_name"
-            defaultValue={kept.account_name ?? business?.account_name ?? ''}
-            placeholder="Umbrella Design Studio"
+            defaultValue={business?.account_name ?? ''}
+            placeholder="Umbrella Design Studio LLP"
           />
         </Field>
 
@@ -49,7 +48,7 @@ export function StepPayment({
           <Input
             id="account_number"
             name="account_number"
-            defaultValue={kept.account_number ?? business?.account_number ?? ''}
+            defaultValue={business?.account_number ?? ''}
             className="font-mono"
             inputMode="numeric"
           />
@@ -59,7 +58,7 @@ export function StepPayment({
           <Input
             id="ifsc"
             name="ifsc"
-            defaultValue={kept.ifsc ?? business?.ifsc ?? ''}
+            defaultValue={business?.ifsc ?? ''}
             placeholder="HDFC0001234"
             maxLength={11}
             className="font-mono uppercase"
@@ -77,7 +76,7 @@ export function StepPayment({
           <Input
             id="upi_id"
             name="upi_id"
-            defaultValue={kept.upi_id ?? business?.upi_id ?? ''}
+            defaultValue={business?.upi_id ?? ''}
             placeholder="umbrella@hdfcbank"
             spellCheck={false}
           />
@@ -95,7 +94,7 @@ export function StepPayment({
             id="default_terms"
             name="default_terms"
             rows={3}
-            defaultValue={kept.default_terms ?? business?.default_terms ?? DEFAULT_TERMS}
+            defaultValue={business?.default_terms ?? DEFAULT_TERMS}
           />
         </Field>
 
@@ -104,13 +103,12 @@ export function StepPayment({
             id="default_notes"
             name="default_notes"
             rows={3}
-            defaultValue={kept.default_notes ?? business?.default_notes ?? DEFAULT_NOTES}
+            defaultValue={business?.default_notes ?? DEFAULT_NOTES}
           />
         </Field>
       </div>
 
       <FormError message={state.error} />
-      {state.saved && <FormSuccess message="Saved." />}
 
       {standalone ? (
         <div className="flex justify-end">

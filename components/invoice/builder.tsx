@@ -1,12 +1,11 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState, useTransition } from 'react'
+import { useEffect, useMemo, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { Check, Eye, Loader2, PenLine } from 'lucide-react'
 import { FormProvider, useForm, useWatch } from 'react-hook-form'
 import { toast } from 'sonner'
 
-import { AiPanel } from '@/components/invoice/ai-panel'
 import { InvoiceDocument } from '@/components/invoice/invoice-document'
 import { LineItems } from '@/components/invoice/line-items'
 import { SendControls } from '@/components/invoice/send-controls'
@@ -24,7 +23,7 @@ import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { saveInvoiceDraft } from '@/lib/actions/invoice'
 import { computeInvoice } from '@/lib/gst'
-import { GST_STATES, stateName } from '@/lib/india'
+import { GST_STATES } from '@/lib/india'
 import {
   defaultInvoiceValues,
   toGstInput,
@@ -32,7 +31,6 @@ import {
   type InvoiceFormValues,
 } from '@/lib/invoice-form'
 import { snapshotBusiness, type InvoiceView } from '@/lib/invoice-view'
-import type { NormalisedInvoiceDraft } from '@/lib/ai/normalise'
 import { cn } from '@/lib/utils'
 import type { BusinessRow, InvoiceStatus } from '@/lib/database.types'
 
@@ -44,15 +42,12 @@ export function InvoiceBuilder({
   initialValues,
   invoiceNumber = null,
   status = 'draft',
-  aiEnabled = false,
 }: {
   business: BusinessRow
   invoiceId?: string
   initialValues?: InvoiceFormValues
   invoiceNumber?: string | null
   status?: InvoiceStatus
-  /** False when OPENAI_API_KEY is unset, so the prompt box is hidden entirely. */
-  aiEnabled?: boolean
 }) {
   const router = useRouter()
   const [invoiceId, setInvoiceId] = useState(initialInvoiceId)
@@ -101,42 +96,33 @@ export function InvoiceBuilder({
     [business, values, computed, invoiceNumber, status],
   )
 
-  const save = useCallback(
-    (silent: boolean) => {
-      startSaving(async () => {
-        const result = await saveInvoiceDraft({ ...toSavePayload(form.getValues()), id: invoiceId })
+  function save(silent: boolean) {
+    startSaving(async () => {
+      const result = await saveInvoiceDraft({ ...toSavePayload(form.getValues()), id: invoiceId })
 
-        if (result.error) {
-          // Autosave failures are announced too. Silently dropping them is how
-          // someone loses twenty minutes of typing and only finds out later.
-          toast.error(result.error)
-          return
-        }
+      if (result.error) {
+        // Autosave failures are announced too. Silently dropping them is how
+        // someone loses twenty minutes of typing and only finds out later.
+        toast.error(result.error)
+        return
+      }
 
-        if (result.invoiceId && result.invoiceId !== invoiceId) {
-          setInvoiceId(result.invoiceId)
-          // Replace rather than push so Back doesn't return to a blank /new that
-          // would start a second draft.
-          router.replace(`/invoices/${result.invoiceId}/edit`)
-        }
+      if (result.invoiceId && result.invoiceId !== invoiceId) {
+        setInvoiceId(result.invoiceId)
+        // Replace rather than push so Back doesn't return to a blank /new that
+        // would start a second draft.
+        router.replace(`/invoices/${result.invoiceId}/edit`)
+      }
 
-        setSavedAt(result.savedAt ?? new Date().toISOString())
-        if (!silent) toast.success('Draft saved')
-      })
-    },
-    [form, invoiceId, router],
-  )
-
-  // Once issued, an invoice is a document rather than a draft: the number is
-  // allocated, the client may already have the PDF, and the server refuses
-  // writes. Locking the form here means the user is never invited to make an
-  // edit that cannot land.
-  const isIssued = status !== 'draft'
+      setSavedAt(result.savedAt ?? new Date().toISOString())
+      if (!silent) toast.success('Draft saved')
+    })
+  }
 
   const isDirty = form.formState.isDirty
   const hasClient = Boolean(values.client?.name?.trim())
   const hasLine = computed.lines.some((line) => line.description.trim() && line.taxablePaise > 0)
-  const canSave = hasClient && hasLine && !isIssued
+  const canSave = hasClient && hasLine
 
   // Debounced autosave. Only runs once the invoice is worth saving — otherwise
   // opening the page would immediately create an empty draft.
@@ -145,57 +131,10 @@ export function InvoiceBuilder({
 
     const timer = setTimeout(() => save(true), AUTOSAVE_DELAY_MS)
     return () => clearTimeout(timer)
-  }, [values, isDirty, canSave, save])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [values, isDirty, canSave])
 
   const showTax = business.is_gst_registered && !values.is_export
-
-  /**
-   * Apply an AI-parsed draft to the form.
-   *
-   * Only fields the model actually returned are written — a null means "the user
-   * didn't say", not "clear it". That's what lets someone dictate an amount,
-   * then dictate a client name, without the second instruction wiping the first.
-   *
-   * `shouldDirty` is essential: autosave watches dirty state, so without it a
-   * fully AI-filled invoice would sit there unsaved.
-   */
-  function applyDraft(draft: NormalisedInvoiceDraft) {
-    const dirty = { shouldDirty: true } as const
-
-    if (draft.client_name) form.setValue('client.name', draft.client_name, dirty)
-    if (draft.client_gstin) form.setValue('client.gstin', draft.client_gstin, dirty)
-    if (draft.client_city) form.setValue('client.city', draft.client_city, dirty)
-    if (draft.client_email) form.setValue('client.email', draft.client_email, dirty)
-
-    if (draft.place_of_supply_state_code) {
-      form.setValue('place_of_supply_state_code', draft.place_of_supply_state_code, dirty)
-    }
-
-    if (draft.notes) form.setValue('notes', draft.notes, dirty)
-
-    if (draft.due_in_days !== null) {
-      const issued = new Date(form.getValues('issue_date') || new Date().toISOString().slice(0, 10))
-      issued.setDate(issued.getDate() + draft.due_in_days)
-      form.setValue('due_date', issued.toISOString().slice(0, 10), dirty)
-    }
-
-    if (draft.items.length > 0) {
-      form.setValue(
-        'items',
-        draft.items.map((item) => ({
-          description: item.description,
-          hsn_sac: item.hsn_sac,
-          quantity: String(item.quantity),
-          unit: item.unit,
-          rate: String(item.rate),
-          discount_percent: '0',
-          gst_rate: String(item.gst_rate),
-          cess_rate: '0',
-        })),
-        dirty,
-      )
-    }
-  }
 
   return (
     <FormProvider {...form}>
@@ -226,25 +165,21 @@ export function InvoiceBuilder({
               </TabButton>
             </div>
 
-            {!isIssued && (
-              <Button
-                variant={invoiceId ? 'outline' : 'default'}
-                size="sm"
-                onClick={() => save(false)}
-                disabled={!canSave || isSaving}
-              >
-                {isSaving && <Loader2 className="size-4 animate-spin" />}
-                Save draft
-              </Button>
-            )}
+            <Button
+              variant={invoiceId ? 'outline' : 'default'}
+              size="sm"
+              onClick={() => save(false)}
+              disabled={!canSave || isSaving}
+            >
+              {isSaving && <Loader2 className="size-4 animate-spin" />}
+              Save draft
+            </Button>
 
             <SendControls
               invoiceId={invoiceId}
               status={status}
               clientEmail={values.client?.email ?? ''}
-              // An issued invoice fails `canSave` by design, but re-fetching its
-              // share link is exactly what someone comes back here to do.
-              disabled={isSaving || (!isIssued && !canSave)}
+              disabled={!canSave || isSaving}
             />
           </div>
         </div>
@@ -258,26 +193,6 @@ export function InvoiceBuilder({
             save(false)
           }}
         >
-          {isIssued && (
-            <p className="rounded-lg border border-border bg-muted/50 px-4 py-3 text-sm text-muted-foreground">
-              <span className="font-medium text-foreground">
-                This invoice has been issued as {invoiceNumber}.
-              </span>{' '}
-              It can no longer be edited — your client may already have the PDF. Raise a new invoice
-              or a credit note instead.
-            </p>
-          )}
-
-          <fieldset disabled={isIssued} className="space-y-8 disabled:opacity-70">
-          {aiEnabled && !isIssued && (
-            <AiPanel
-              onDraft={applyDraft}
-              business={business}
-              currency={values.currency || 'INR'}
-              disabled={isSaving}
-            />
-          )}
-
           <Section title="Bill to" description="Who is this invoice for?">
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Client name" htmlFor="client.name" required className="sm:col-span-2">
@@ -347,13 +262,7 @@ export function InvoiceBuilder({
                   }
                 >
                   <SelectTrigger id="place_of_supply_state_code" className="w-full">
-                    {/* Base UI renders the raw value, which would show a bare
-                        "29" where the user needs to read "Karnataka". */}
-                    <SelectValue placeholder="Select a state">
-                      {(value) =>
-                        value ? `${value} — ${stateName(String(value))}` : 'Select a state'
-                      }
-                    </SelectValue>
+                    <SelectValue placeholder="Select a state" />
                   </SelectTrigger>
                   <SelectContent>
                     {GST_STATES.map((s) => (
@@ -401,7 +310,6 @@ export function InvoiceBuilder({
               </Field>
             </div>
           </Section>
-          </fieldset>
         </form>
 
         <div className={cn('lg:sticky lg:top-24 lg:self-start', mobileTab === 'edit' && 'hidden lg:block')}>

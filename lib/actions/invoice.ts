@@ -37,42 +37,11 @@ export async function saveInvoiceDraft(
     return { error: 'Add your business details before saving an invoice.' }
   }
 
-  // No formData to echo: the builder posts a typed object and keeps its own
-  // react-hook-form state, so nothing is lost on a failed validation.
   const parsed = invoiceSchema.safeParse(input)
   if (!parsed.success) return toFieldErrors(parsed.error)
 
   const data = parsed.data
   const supabase = await createClient()
-
-  /**
-   * Refuse outright once an invoice has been issued.
-   *
-   * This used to rely on `.eq('status', 'draft')` on the header UPDATE, which
-   * is not a guard on the *operation*: the line items are replaced by a
-   * separate delete+insert that had no such filter. Editing a sent invoice
-   * therefore left the header totals frozen while the line items changed
-   * underneath them — a document that no longer adds up, saved silently.
-   *
-   * Checking once, up front, is the only version that can't half-apply.
-   */
-  if (input.id) {
-    const { data: existing } = await supabase
-      .from('invoices')
-      .select('status')
-      .eq('id', input.id)
-      .maybeSingle()
-
-    if (!existing) {
-      return { error: 'That invoice no longer exists.' }
-    }
-
-    if (existing.status !== 'draft') {
-      return {
-        error: 'This invoice has already been issued, so it can no longer be edited.',
-      }
-    }
-  }
 
   const lines: GstLineInput[] = data.items.map((item) => ({
     description: item.description,
