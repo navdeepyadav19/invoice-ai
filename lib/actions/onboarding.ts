@@ -53,13 +53,20 @@ export async function saveBankStep(_prev: StepState, formData: FormData): Promis
   const business = await getPrimaryBusiness()
   if (!business) return { error: 'Add your business details first.' }
 
+  // formData.get() yields null for an absent field and Zod's .optional()
+  // rejects null — see the `field` helper in lib/actions/business.ts.
+  const value = (name: string) => {
+    const raw = formData.get(name)
+    return raw === null ? undefined : String(raw)
+  }
+
   const parsed = paymentDetailsSchema.safeParse({
-    account_name: formData.get('account_name'),
-    account_number: formData.get('account_number'),
-    ifsc: formData.get('ifsc'),
+    account_name: value('account_name'),
+    account_number: value('account_number'),
+    ifsc: value('ifsc'),
   })
 
-  if (!parsed.success) return toFieldErrors(parsed.error)
+  if (!parsed.success) return toFieldErrors(parsed.error, formData)
 
   const supabase = await createClient()
   const { error } = await supabase

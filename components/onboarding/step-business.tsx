@@ -2,9 +2,9 @@
 
 import { useActionState, useState } from 'react'
 
-import { saveBusinessStep } from '@/lib/actions/onboarding'
+import { saveBusinessSettings } from '@/lib/actions/business'
 import type { StepState } from '@/lib/form-state'
-import { FormError } from '@/components/auth/form-error'
+import { FormError, FormSuccess } from '@/components/auth/form-error'
 import { Field } from '@/components/onboarding/field'
 import { SubmitButton } from '@/components/submit-button'
 import { Input } from '@/components/ui/input'
@@ -16,7 +16,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
-import { GST_STATES } from '@/lib/india'
+import { GST_STATES, stateName } from '@/lib/india'
 import { GSTIN_REGEX, stateCodeFromGstin } from '@/lib/validators'
 import type { BusinessRow } from '@/lib/database.types'
 
@@ -24,7 +24,7 @@ type StepAction = (prev: StepState, formData: FormData) => Promise<StepState>
 
 export function StepBusiness({
   business,
-  action = saveBusinessStep,
+  action = saveBusinessSettings,
   submitLabel = 'Continue',
 }: {
   business: BusinessRow | null
@@ -39,6 +39,7 @@ export function StepBusiness({
   const [stateCode, setStateCode] = useState(business?.state_code ?? '')
 
   const errors = state.fieldErrors ?? {}
+  const kept = state.values ?? {}
 
   /**
    * A GSTIN already contains the state, so once a complete one is typed we set
@@ -69,7 +70,7 @@ export function StepBusiness({
           <Input
             id="legal_name"
             name="legal_name"
-            defaultValue={business?.legal_name ?? ''}
+            defaultValue={kept.legal_name ?? business?.legal_name ?? ''}
             placeholder="Umbrella Design Studio"
             required
           />
@@ -85,7 +86,7 @@ export function StepBusiness({
           <Input
             id="trade_name"
             name="trade_name"
-            defaultValue={business?.trade_name ?? ''}
+            defaultValue={kept.trade_name ?? business?.trade_name ?? ''}
             placeholder="Umbrella"
           />
         </Field>
@@ -133,7 +134,7 @@ export function StepBusiness({
               <Input
                 id="pan"
                 name="pan"
-                defaultValue={business?.pan ?? ''}
+                defaultValue={kept.pan ?? business?.pan ?? ''}
                 placeholder="AAPFU0939F"
                 maxLength={10}
                 className="font-mono uppercase"
@@ -155,7 +156,7 @@ export function StepBusiness({
           <Input
             id="address_line1"
             name="address_line1"
-            defaultValue={business?.address_line1 ?? ''}
+            defaultValue={kept.address_line1 ?? business?.address_line1 ?? ''}
             placeholder="4th Floor, Trade Centre, Bandra Kurla Complex"
             required
           />
@@ -165,12 +166,12 @@ export function StepBusiness({
           <Input
             id="address_line2"
             name="address_line2"
-            defaultValue={business?.address_line2 ?? ''}
+            defaultValue={kept.address_line2 ?? business?.address_line2 ?? ''}
           />
         </Field>
 
         <Field label="City" htmlFor="city" required error={errors.city}>
-          <Input id="city" name="city" defaultValue={business?.city ?? ''} placeholder="Mumbai" required />
+          <Input id="city" name="city" defaultValue={kept.city ?? business?.city ?? ''} placeholder="Mumbai" required />
         </Field>
 
         <Field
@@ -180,9 +181,21 @@ export function StepBusiness({
           error={errors.state_code}
           hint="This decides whether your invoices charge CGST+SGST or IGST."
         >
-          <Select name="state_code" value={stateCode} onValueChange={(value) => setStateCode(value ?? '')} required>
+          <Select
+            name="state_code"
+            value={stateCode}
+            onValueChange={(value) => setStateCode(value ?? '')}
+            required
+          >
             <SelectTrigger id="state_code" className="w-full">
-              <SelectValue placeholder="Select your state" />
+              {/* Base UI's Select.Value renders the raw value by default, so the
+                  trigger would read "27" once a state is picked. The render
+                  function puts the name back. */}
+              <SelectValue placeholder="Select your state">
+                {(value) =>
+                  value ? `${value} — ${stateName(String(value))}` : 'Select your state'
+                }
+              </SelectValue>
             </SelectTrigger>
             <SelectContent>
               {GST_STATES.map((s) => (
@@ -199,7 +212,7 @@ export function StepBusiness({
           <Input
             id="pincode"
             name="pincode"
-            defaultValue={business?.pincode ?? ''}
+            defaultValue={kept.pincode ?? business?.pincode ?? ''}
             placeholder="400051"
             maxLength={6}
             inputMode="numeric"
@@ -211,7 +224,7 @@ export function StepBusiness({
             id="email"
             name="email"
             type="email"
-            defaultValue={business?.email ?? ''}
+            defaultValue={kept.email ?? business?.email ?? ''}
             placeholder="billing@umbrella.in"
           />
         </Field>
@@ -221,13 +234,14 @@ export function StepBusiness({
             id="phone"
             name="phone"
             type="tel"
-            defaultValue={business?.phone ?? ''}
+            defaultValue={kept.phone ?? business?.phone ?? ''}
             placeholder="+91 98200 00000"
           />
         </Field>
       </div>
 
       <FormError message={state.error} />
+      {state.saved && <FormSuccess message="Saved." />}
 
       <div className="flex justify-end">
         <SubmitButton size="lg" pendingLabel="Saving…">
