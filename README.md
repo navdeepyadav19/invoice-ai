@@ -151,15 +151,24 @@ third party being up. Three gotchas are handled in `lib/sandbox/client.ts`:
 the token is **not** a Bearer token, failures arrive as **HTTP 200** with an
 error body, and the PAN endpoint needs a **`state_code` query param**.
 
-### A bug worth knowing about at this stage
+## AI invoice creation
 
-`step-identity.tsx`'s manual fallback form doesn't render `email` or `phone`
-fields — they moved to Settings. `formData.get()` returns `null` for a field
-that isn't in the form, and the business schema's `.optional()` rejects `null`
-(it only accepts `undefined`). The result: submitting the manual form fails
-validation with errors attached to fields the form doesn't show, so the user
-sees "Fix the highlighted fields" with nothing highlighted. **Onboarding is
-fully blocked.** This is the headline bug fixed in stage 3.
+Click "Use AI" and a chat panel opens above the form. Type or dictate what
+you're billing for — the model parses it, shows a **summary you must confirm**
+(client, line items, totals, tax note), and only touches the form once you
+click "Fill this in." Set `OPENAI_API_KEY` to enable it; without the key the
+button doesn't render.
+
+- **Voice** → `MediaRecorder` → `/api/ai/transcribe` → Whisper.
+- **Text** → `/api/ai/parse-invoice` → a chat model with a Zod schema.
+- **Nothing is saved without confirmation.** The parsed fields only reach the
+  form after the user accepts the summary; the normal autosave takes over
+  from there.
+
+Two things the model is deliberately not trusted with, both in
+`lib/ai/normalise.ts`: converting a tax-inclusive amount back to a pre-tax rate
+(arithmetic), and turning a spoken state name into a GST state code (a lookup it
+would hallucinate, and a wrong code silently flips CGST/SGST to IGST).
 
 ## Emailing invoices
 
@@ -174,9 +183,6 @@ Until a domain is verified, Resend only delivers to your own address from
 
 ## Not built yet
 
-- Hardening: the null/undefined form bug described above, the issued-invoice
-  edit guard, and the `/api/public/` proxy gap (stage 3)
-- AI-assisted invoice creation, text and voice (stage 4)
 - Payment links (Stripe / Razorpay) and marking paid from a webhook
 - Recurring invoices, credit notes, e-invoice IRN / e-way bill
 - A saved client and line-item library for autofill
