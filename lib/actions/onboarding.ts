@@ -4,11 +4,21 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 
 import { createClient } from '@/lib/supabase/server'
-import { requireUser } from '@/lib/queries'
-import { persistBusiness, persistNumbering, persistPayment } from '@/lib/actions/business'
-import type { StepState } from '@/lib/form-state'
+import { getPrimaryBusiness, requireUser } from '@/lib/queries'
+import { persistBusiness } from '@/lib/actions/business'
+import { paymentDetailsSchema } from '@/lib/validators'
+import { toFieldErrors, type StepState } from '@/lib/form-state'
 
-export type { StepState }
+/**
+ * Onboarding is two steps.
+ *
+ *   1. Who are you?  — a GSTIN (or PAN) that we resolve against the GST registry
+ *   2. How do you get paid? — account name, number, IFSC
+ *
+ * Anything the registry can supply is never asked for, and anything with a sane
+ * default (numbering, terms, notes, logo) lives in settings instead. The goal is
+ * that a registered business types fifteen characters and is done.
+ */
 
 async function setStep(step: number) {
   const user = await requireUser()
@@ -23,18 +33,13 @@ async function finishOnboarding(): Promise<never> {
 
   await supabase
     .from('profiles')
-    .update({ onboarding_completed_at: new Date().toISOString(), onboarding_step: 3 })
+    .update({ onboarding_completed_at: new Date().toISOString(), onboarding_step: 2 })
     .eq('id', user.id)
 
-  // Straight into the builder rather than a dashboard they have nothing to look
-  // at yet — and their details are already filled in, so it's half done.
   redirect('/invoices/new')
 }
 
-/**
- * Step 1 — the business itself. The only step that cannot be skipped: without a
- * legal name and a state there's no way to compute tax or address the invoice.
- */
+/** Step 1 — identity, whether it came from the GST registry or was typed. */
 export async function saveBusinessStep(_prev: StepState, formData: FormData): Promise<StepState> {
   const result = await persistBusiness(formData)
   if (result.error) return result
@@ -43,34 +48,45 @@ export async function saveBusinessStep(_prev: StepState, formData: FormData): Pr
   return {}
 }
 
-/** Step 2 — how you get paid. Fully skippable. */
-export async function savePaymentStep(_prev: StepState, formData: FormData): Promise<StepState> {
-  const result = await persistPayment(formData)
-  if (result.error) return result
+/** Step 2 — bank details, then done. Skippable; they can be added later. */
+export async function saveBankStep(_prev: StepState, formData: FormData): Promise<StepState> {
+  const business = await getPrimaryBusiness()
+  if (!business) return { error: 'Add your business details first.' }
 
-  await setStep(3)
-  return {}
-}
+  const parsed = paymentDetailsSchema.safeParse({
+    account_name: formData.get('account_name'),
+    account_number: formData.get('account_number'),
+    ifsc: formData.get('ifsc'),
+  })
 
-/** Step 3 — numbering, then done. */
-export async function saveNumberingStep(_prev: StepState, formData: FormData): Promise<StepState> {
-  const result = await persistNumbering(formData)
-  if (result.error) return result
+  if (!parsed.success) return toFieldErrors(parsed.error)
+
+  const supabase = await createClient()
+  const { error } = await supabase
+    .from('businesses')
+    .update({
+      account_name: parsed.data.account_name ?? null,
+      account_number: parsed.data.account_number ?? null,
+      ifsc: parsed.data.ifsc || null,
+    })
+    .eq('id', business.id)
+
+  if (error) return { error: error.message }
 
   return finishOnboarding()
 }
 
-/** "Skip for now" on steps 2 and 3 — schema defaults already cover both. */
+/** "Skip for now" on step 2. */
 export async function skipStep(formData: FormData): Promise<void> {
   const from = Number(formData.get('step') ?? 2)
 
-  if (from >= 3) return finishOnboarding()
+  if (from >= 2) return finishOnboarding()
 
   await setStep(from + 1)
 }
 
 /** Back button. Never goes below step 1. */
 export async function goToStep(formData: FormData): Promise<void> {
-  const target = Math.min(3, Math.max(1, Number(formData.get('step') ?? 1)))
+  const target = Math.min(2, Math.max(1, Number(formData.get('step') ?? 1)))
   await setStep(target)
 }

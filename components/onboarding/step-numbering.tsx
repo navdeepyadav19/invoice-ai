@@ -2,7 +2,7 @@
 
 import { useActionState, useState } from 'react'
 
-import { saveNumberingStep } from '@/lib/actions/onboarding'
+import { saveNumberingSettings } from '@/lib/actions/business'
 import type { StepState } from '@/lib/form-state'
 import { FormError } from '@/components/auth/form-error'
 import { Field } from '@/components/onboarding/field'
@@ -14,7 +14,7 @@ import type { BusinessRow } from '@/lib/database.types'
 
 export function StepNumbering({
   business,
-  action = saveNumberingStep,
+  action = saveNumberingSettings,
   standalone = false,
 }: {
   business: BusinessRow | null
