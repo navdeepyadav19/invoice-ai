@@ -45,7 +45,6 @@ export default async function EditInvoicePage({ params }: PageProps<'/invoices/[
       invoiceNumber={invoice.invoice_number}
       status={invoice.status}
       initialValues={toFormValues(invoice, items ?? [], client ?? null)}
-      aiEnabled={Boolean(process.env.OPENAI_API_KEY)}
     />
   )
 }

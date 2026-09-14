@@ -120,52 +120,9 @@ column. An invoice is not overdue *during* its due date, only after it.
 
 ## Onboarding
 
-Two steps, and the first one is fifteen characters:
-
-1. **Who are you?** "Do you have a GSTIN?" → enter it → we call the Sandbox GST
-   API and prefill legal name, trade name, address, PIN, state and business type.
-   No GSTIN? Enter a PAN and state and we try that; if nothing comes back (which
-   is normal for a business that isn't registered) a short manual form appears.
-2. **How do you get paid?** Account name, number, IFSC. Skippable.
-
-Everything else — logo, signature, UPI, payment terms, default notes, invoice
-numbering — has a sensible default and lives in **Settings → Business** instead.
-None of it is worth standing between someone and their first invoice.
-
-### Why "do you have a GSTIN?" and not "what type of business are you?"
-
-GST registration in India is turnover-based, not entity-type-based: a sole trader
-over ₹40L has a GSTIN, a small Pvt Ltd may not. And the PAN endpoint only returns
-GSTINs for businesses that are *already registered*, so routing sole traders down
-a PAN path returns `NOGSTIN` for exactly the people it was meant to help.
-
-Asking about the GSTIN directly means the one question that actually predicts
-whether we can prefill. Business type then comes free — the registry returns it
-in the `ctb` field, so we never ask.
-
-### Configuring GST lookup
-
-Set `SANDBOX_API_KEY` and `SANDBOX_API_SECRET`. Without them the lookup step is
-skipped and users type their details, so onboarding never hard-depends on a
-third party being up. Three gotchas are handled in `lib/sandbox/client.ts`:
-the token is **not** a Bearer token, failures arrive as **HTTP 200** with an
-error body, and the PAN endpoint needs a **`state_code` query param**.
-
-## AI invoice creation
-
-Type or dictate "Invoice Sharma Traders ₹45,000 for brand design" and the
-builder fills itself in. Set `OPENAI_API_KEY` to enable it; without the key the
-prompt box simply doesn't render.
-
-- **Voice** → `MediaRecorder` → `/api/ai/transcribe` → Whisper.
-- **Text** → `/api/ai/parse-invoice` → `gpt-4o-mini` with a Zod schema.
-- **Nothing is saved.** The parsed fields land in the form and the user reviews
-  them; the normal autosave takes over from there.
-
-Two things the model is deliberately not trusted with, both in
-`lib/ai/normalise.ts`: converting a tax-inclusive amount back to a pre-tax rate
-(arithmetic), and turning a spoken state name into a GST state code (a lookup it
-would hallucinate, and a wrong code silently flips CGST/SGST to IGST).
+Three steps, asked directly — no GST registry lookup yet, everything typed by
+hand: business details (name, GSTIN, address, state), how you get paid (bank
+name, account, IFSC, UPI, default terms/notes), and invoice numbering.
 
 ## Emailing invoices
 
@@ -180,6 +137,10 @@ Until a domain is verified, Resend only delivers to your own address from
 
 ## Not built yet
 
+- GST registry prefill during onboarding (stage 2)
+- Hardening: the null/undefined form bug, the issued-invoice edit guard, the
+  `/api/public/` proxy gap (stage 3)
+- AI-assisted invoice creation, text and voice (stage 4)
 - Payment links (Stripe / Razorpay) and marking paid from a webhook
 - Recurring invoices, credit notes, e-invoice IRN / e-way bill
 - A saved client and line-item library for autofill

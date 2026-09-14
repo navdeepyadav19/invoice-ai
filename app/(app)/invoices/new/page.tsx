@@ -32,5 +32,5 @@ export default async function NewInvoicePage() {
     )
   }
 
-  return <InvoiceBuilder business={business} aiEnabled={Boolean(process.env.OPENAI_API_KEY)} />
+  return <InvoiceBuilder business={business} />
 }

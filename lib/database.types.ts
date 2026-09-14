@@ -56,12 +56,6 @@ export type BusinessRow = {
   default_terms: string | null
   invoice_prefix: string
   next_invoice_number: number
-  business_type: string | null
-  gst_constitution: string | null
-  gst_status: string | null
-  gst_registered_on: string | null
-  gst_data: Json | null
-  gst_fetched_at: string | null
   created_at: string
   updated_at: string
 }

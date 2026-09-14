@@ -98,11 +98,6 @@ export const businessSchema = z
     country: z.string().trim().default('India'),
     email: z.union([z.email('Enter a valid email'), z.literal('')]).optional(),
     phone: optionalTrimmed,
-    // Derived from the GST registry's constitution field when a GSTIN was
-    // looked up, chosen by the user only when it wasn't.
-    business_type: z
-      .enum(['sole_trader', 'partnership', 'limited_company', 'other'])
-      .optional(),
   })
   .superRefine((value, ctx) => {
     if (!value.is_gst_registered) return
