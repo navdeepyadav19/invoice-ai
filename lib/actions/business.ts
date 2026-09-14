@@ -14,6 +14,31 @@ function nullable(value: FormDataEntryValue | null): string | null {
 }
 
 /**
+ * Pull the GST registry metadata that the lookup step posts as hidden fields.
+ * Returns an empty object when absent, so a plain settings edit never blanks
+ * out previously fetched registry data.
+ */
+function readGstMetadata(formData: FormData): Record<string, unknown> {
+  const raw = formData.get('gst_data')
+  if (!raw) return {}
+
+  let parsed: unknown = null
+  try {
+    parsed = JSON.parse(String(raw))
+  } catch {
+    return {}
+  }
+
+  return {
+    gst_data: parsed,
+    gst_constitution: nullable(formData.get('gst_constitution')),
+    gst_status: nullable(formData.get('gst_status')),
+    gst_registered_on: nullable(formData.get('gst_registered_on')),
+    gst_fetched_at: new Date().toISOString(),
+  }
+}
+
+/**
  * The three persistence steps, shared by the onboarding wizard and the settings
  * page. They save and nothing else — no redirects, no step advancement — so the
  * caller decides what happens next. That's what keeps "finish setup" and "update
@@ -37,12 +62,16 @@ export async function persistBusiness(formData: FormData): Promise<StepState> {
     country: formData.get('country') || 'India',
     email: formData.get('email'),
     phone: formData.get('phone'),
+    business_type: formData.get('business_type') || undefined,
   })
 
   if (!parsed.success) return toFieldErrors(parsed.error)
 
   const supabase = await createClient()
   const existing = await getPrimaryBusiness()
+
+  // Present only when this submission came from a successful GST lookup.
+  const gstMeta = readGstMetadata(formData)
 
   const values = {
     owner_id: user.id,
@@ -62,6 +91,8 @@ export async function persistBusiness(formData: FormData): Promise<StepState> {
     country: parsed.data.country,
     email: parsed.data.email || null,
     phone: parsed.data.phone ?? null,
+    business_type: parsed.data.business_type ?? null,
+    ...gstMeta,
   }
 
   const { error } = existing

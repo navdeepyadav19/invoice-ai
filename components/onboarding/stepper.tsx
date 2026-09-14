@@ -5,7 +5,6 @@ import { cn } from '@/lib/utils'
 const STEPS = [
   { number: 1, label: 'Your business' },
   { number: 2, label: 'Getting paid' },
-  { number: 3, label: 'Numbering' },
 ]
 
 export function Stepper({ current }: { current: number }) {
@@ -31,7 +30,7 @@ export function Stepper({ current }: { current: number }) {
               </span>
               <span
                 className={cn(
-                  'hidden text-sm sm:block',
+                  'text-sm',
                   active ? 'font-medium text-foreground' : 'text-muted-foreground',
                 )}
               >
@@ -40,10 +39,7 @@ export function Stepper({ current }: { current: number }) {
             </div>
 
             {index < STEPS.length - 1 && (
-              <span
-                aria-hidden
-                className={cn('h-px flex-1', done ? 'bg-primary' : 'bg-border')}
-              />
+              <span aria-hidden className={cn('h-px flex-1', done ? 'bg-primary' : 'bg-border')} />
             )}
           </li>
         )
