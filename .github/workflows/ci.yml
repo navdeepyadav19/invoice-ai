@@ -1,0 +1,62 @@
+# CI checks: the quality gate every change must pass.
+#
+# This is a reusable workflow (workflow_call). It never runs on its own;
+# pull-request.yml and production.yml both call it, so a PR and a merge to
+# main are held to exactly the same checks.
+#
+# The four jobs run in parallel, so one failing check doesn't hide another.
+
+name: CI
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - run: pnpm lint
+
+  typecheck:
+    name: Typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      # Pages use the global PageProps/LayoutProps/RouteContext types, which
+      # Next generates into .next/types. A fresh checkout has no .next folder,
+      # so tsc would fail without this step.
+      - name: Generate Next.js route types
+        run: pnpm exec next typegen
+      - run: pnpm typecheck
+
+  test:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - run: pnpm test
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      NEXT_TELEMETRY_DISABLED: 1
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      # Supabase and API keys are read at request time, not build time, so the
+      # build needs no secrets. If a future change makes it need one, this
+      # job is where you'll find out.
+      - run: pnpm build

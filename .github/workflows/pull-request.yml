@@ -1,0 +1,74 @@
+# PR pipeline: runs when a pull request targets main.
+#
+#   CI (lint · typecheck · unit tests · build)  ──►  Preview deploy  ──►  URL comment on the PR
+#
+# GitHub runs this against the PR *merged into* main, not the branch alone,
+# so it catches breakage that only appears once the two are combined.
+
+name: PR Pipeline
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# Pushing a new commit to the PR cancels the now-outdated run.
+concurrency:
+  group: pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    name: CI
+    uses: ./.github/workflows/ci.yml
+
+  preview:
+    name: Deploy preview
+    needs: ci
+    # PRs from forks don't receive repository secrets, so skip instead of failing.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: write
+    environment:
+      name: preview
+      url: ${{ steps.deploy.outputs.url }}
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+
+      - name: Deploy to Vercel (preview)
+        id: deploy
+        uses: ./.github/actions/vercel-deploy
+        with:
+          target: preview
+
+      - name: Comment preview URL on the PR
+        if: steps.deploy.outputs.url != ''
+        uses: actions/github-script@v9
+        env:
+          PREVIEW_URL: ${{ steps.deploy.outputs.url }}
+        with:
+          script: |
+            // Update one comment in place instead of adding a new one per push.
+            const marker = '<!-- vercel-preview -->'
+            const sha = context.payload.pull_request.head.sha.slice(0, 7)
+            const body = `${marker}\n**Preview deployment:** ${process.env.PREVIEW_URL}\n\nBuilt from \`${sha}\`.`
+            const { data: comments } = await github.rest.issues.listComments({
+              ...context.repo,
+              issue_number: context.issue.number,
+            })
+            const existing = comments.find((c) => c.body?.includes(marker))
+            if (existing) {
+              await github.rest.issues.updateComment({ ...context.repo, comment_id: existing.id, body })
+            } else {
+              await github.rest.issues.createComment({ ...context.repo, issue_number: context.issue.number, body })
+            }
