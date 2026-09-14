@@ -23,6 +23,11 @@ export function StepBank({ business }: { business: BusinessRow | null }) {
   const [state, formAction] = useActionState<StepState, FormData>(saveBankStep, {})
   const errors = state.fieldErrors ?? {}
 
+  // React resets the form after the action runs, including on a failed
+  // validation. Seeding defaultValue from the echoed submission means that
+  // reset restores what they typed instead of wiping it.
+  const kept = state.values ?? {}
+
   return (
     <form action={formAction} className="space-y-6">
       <div className="grid gap-5 sm:grid-cols-2">
@@ -36,7 +41,7 @@ export function StepBank({ business }: { business: BusinessRow | null }) {
           <Input
             id="account_name"
             name="account_name"
-            defaultValue={business?.account_name ?? business?.legal_name ?? ''}
+            defaultValue={kept.account_name ?? business?.account_name ?? business?.legal_name ?? ''}
             placeholder="Umbrella Design Studio LLP"
           />
         </Field>
@@ -45,7 +50,7 @@ export function StepBank({ business }: { business: BusinessRow | null }) {
           <Input
             id="account_number"
             name="account_number"
-            defaultValue={business?.account_number ?? ''}
+            defaultValue={kept.account_number ?? business?.account_number ?? ''}
             placeholder="50200012345678"
             className="font-mono"
             inputMode="numeric"
@@ -62,7 +67,7 @@ export function StepBank({ business }: { business: BusinessRow | null }) {
           <Input
             id="ifsc"
             name="ifsc"
-            defaultValue={business?.ifsc ?? ''}
+            defaultValue={kept.ifsc ?? business?.ifsc ?? ''}
             placeholder="HDFC0001234"
             maxLength={11}
             className="font-mono uppercase"
