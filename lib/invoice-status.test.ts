@@ -43,6 +43,14 @@ describe('isPastDue', () => {
     expect(isPastDue('2026-08-16', lateNight)).toBe(false)
     expect(isPastDue('2026-08-15', earlyMorning)).toBe(true)
   })
+
+  it('uses the date in India, not the server clock (Vercel and CI run in UTC)', () => {
+    // 00:05 IST on the 16th is still 18:35 on the 15th in UTC.
+    const justAfterMidnightInIndia = new Date('2026-08-15T18:35:00Z')
+
+    expect(isPastDue('2026-08-15', justAfterMidnightInIndia)).toBe(true)
+    expect(daysOverdue('2026-08-15', justAfterMidnightInIndia)).toBe(1)
+  })
 })
 
 describe('daysOverdue', () => {
