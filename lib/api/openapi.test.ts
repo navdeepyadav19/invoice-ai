@@ -59,20 +59,20 @@ describe('OpenAPI document', () => {
     }
   })
 
-  it('never puts a rupee amount on the wire', () => {
+  it('never puts a decimal amount on the wire', () => {
     const invoice = document.components?.schemas?.Invoice as
       | { properties?: Record<string, unknown> }
       | undefined
 
     const moneyish = Object.keys(invoice?.properties ?? {}).filter((key) =>
-      /subtotal|total|discount|cgst|sgst|igst|cess|round_off|rate/.test(key),
+      /subtotal|total|discount|tax|round_off|rate/.test(key),
     )
 
     expect(moneyish.length).toBeGreaterThan(0)
     for (const key of moneyish) {
-      // gst_rate and discount_percent are percentages, not money.
-      if (key === 'gst_rate' || key === 'discount_percent') continue
-      expect(key, `${key} should be an integer paise field`).toMatch(/_paise$/)
+      // tax_rate and discount_percent are percentages, not money.
+      if (key === 'tax_rate' || key === 'discount_percent') continue
+      expect(key, `${key} should be an integer minor-units field`).toMatch(/_paise$/)
     }
   })
 

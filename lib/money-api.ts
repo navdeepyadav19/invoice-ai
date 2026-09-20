@@ -1,25 +1,17 @@
 import { toPaise, toRupees } from '@/lib/money'
 
 /**
- * The one place rupees become paise and back.
+ * The one place major units become minor units and back.
  *
- * Three representations of money exist in this codebase, and mixing them up is
- * how you ship an invoice that is off by a hundred:
+ * Three representations of money exist in this codebase:
  *
- *   lib/gst.ts     integer paise    2500000      the tax engine, exact
- *   Postgres       numeric(14,2)    25000.00     the stored row, exact decimal
- *   REST API       integer paise    2500000      the wire contract, no floats
+ *   lib/tax.ts     integer minor units  2500000      the tax engine, exact
+ *   Postgres       numeric(14,2)        25000.00     the stored row, exact decimal
+ *   REST API       integer minor units  2500000      the wire contract, no floats
  *
- * The database is the odd one out. It stores rupees because the schema was
- * written for the web UI, where a form field holds "25000.00". The API uses
- * paise because JSON numbers are IEEE doubles and 0.1 + 0.2 is not 0.3 — a
- * contract that puts rupees on the wire is a contract that will eventually
- * disagree with itself about a total.
- *
- * So the API and the tax engine already agree, and only the row needs bridging.
+ * The API and the tax engine already agree, and only the row needs bridging.
  * `Number(row.total)` is deliberate: postgres numeric arrives from postgrest as
- * a *string* to avoid precision loss, and silently comparing that string to a
- * number is a bug that typechecks.
+ * a *string* to avoid precision loss.
  */
 
 /** A stored numeric(14,2) column — string from postgrest, number after a cast. */
@@ -38,21 +30,26 @@ export function invoiceTotalsToPaise(row: {
   subtotal: StoredAmount
   discount_total: StoredAmount
   taxable_total: StoredAmount
-  cgst_total: StoredAmount
-  sgst_total: StoredAmount
-  igst_total: StoredAmount
-  cess_total: StoredAmount
+  tax_total?: StoredAmount | null
+  cgst_total?: StoredAmount | null
+  sgst_total?: StoredAmount | null
+  igst_total?: StoredAmount | null
+  cess_total?: StoredAmount | null
   round_off: StoredAmount
   total: StoredAmount
 }) {
+  const legacyTax =
+    row.tax_total != null
+      ? storedToPaise(row.tax_total)
+      : storedToPaise(row.cgst_total ?? 0) +
+        storedToPaise(row.sgst_total ?? 0) +
+        storedToPaise(row.igst_total ?? 0) +
+        storedToPaise(row.cess_total ?? 0)
   return {
     subtotal_paise: storedToPaise(row.subtotal),
     discount_total_paise: storedToPaise(row.discount_total),
     taxable_total_paise: storedToPaise(row.taxable_total),
-    cgst_total_paise: storedToPaise(row.cgst_total),
-    sgst_total_paise: storedToPaise(row.sgst_total),
-    igst_total_paise: storedToPaise(row.igst_total),
-    cess_total_paise: storedToPaise(row.cess_total),
+    tax_total_paise: legacyTax,
     round_off_paise: storedToPaise(row.round_off),
     total_paise: storedToPaise(row.total),
   }
@@ -61,18 +58,23 @@ export function invoiceTotalsToPaise(row: {
 /** Every money column on `invoice_items`, converted for the wire. */
 export function lineItemAmountsToPaise(row: {
   taxable_value: StoredAmount
-  cgst_amount: StoredAmount
-  sgst_amount: StoredAmount
-  igst_amount: StoredAmount
-  cess_amount: StoredAmount
+  tax_amount?: StoredAmount | null
+  cgst_amount?: StoredAmount | null
+  sgst_amount?: StoredAmount | null
+  igst_amount?: StoredAmount | null
+  cess_amount?: StoredAmount | null
   line_total: StoredAmount
 }) {
+  const legacyTax =
+    row.tax_amount != null
+      ? storedToPaise(row.tax_amount)
+      : storedToPaise(row.cgst_amount ?? 0) +
+        storedToPaise(row.sgst_amount ?? 0) +
+        storedToPaise(row.igst_amount ?? 0) +
+        storedToPaise(row.cess_amount ?? 0)
   return {
     taxable_value_paise: storedToPaise(row.taxable_value),
-    cgst_amount_paise: storedToPaise(row.cgst_amount),
-    sgst_amount_paise: storedToPaise(row.sgst_amount),
-    igst_amount_paise: storedToPaise(row.igst_amount),
-    cess_amount_paise: storedToPaise(row.cess_amount),
+    tax_amount_paise: legacyTax,
     line_total_paise: storedToPaise(row.line_total),
   }
 }

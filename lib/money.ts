@@ -18,6 +18,13 @@ export function toRupees(paise: number): number {
 }
 
 /**
+ * Currency-neutral aliases. The engine works in integer minor units for any
+ * currency (paise, cents); these names avoid implying INR everywhere.
+ */
+export const toMinor = toPaise
+export const toMajor = toRupees
+
+/**
  * Multiply an integer paise amount by a decimal factor (a quantity, or a
  * percentage already divided by 100) and round half-up to whole paise.
  *
@@ -30,14 +37,26 @@ export function mulPaise(paise: number, factor: number): number {
   return raw < 0 ? -Math.round(-raw) : Math.round(raw)
 }
 
+export const mulMinor = mulPaise
+
 /** Round a paise amount to the nearest whole rupee (100 paise). */
 export function roundToRupee(paise: number): number {
   return Math.round(paise / 100) * 100
 }
 
-/** Format paise for display: 123456 -> "1,234.56" using Indian digit grouping. */
-export function formatPaise(paise: number, currency = 'INR'): string {
-  return new Intl.NumberFormat('en-IN', {
+/** Format minor units for display using the caller's locale. */
+export function formatMinor(minor: number, currency = 'USD', locale = 'en-US'): string {
+  return new Intl.NumberFormat(locale, {
+    style: 'currency',
+    currency,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(toRupees(minor))
+}
+
+/** Format paise for display: 123456 -> "$1,234.56" (locale-aware). */
+export function formatPaise(paise: number, currency = 'USD', locale?: string): string {
+  return new Intl.NumberFormat(locale ?? 'en-US', {
     style: 'currency',
     currency,
     minimumFractionDigits: 2,
@@ -46,8 +65,8 @@ export function formatPaise(paise: number, currency = 'INR'): string {
 }
 
 /** Same as formatPaise but without the currency symbol, for table columns. */
-export function formatPaisePlain(paise: number): string {
-  return new Intl.NumberFormat('en-IN', {
+export function formatPaisePlain(paise: number, locale = 'en-US'): string {
+  return new Intl.NumberFormat(locale, {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(toRupees(paise))
@@ -95,33 +114,30 @@ function threeDigits(n: number): string {
 }
 
 /**
- * Amount in words using the Indian numbering system — crore and lakh, not
- * million. Required on the face of a tax invoice.
- *
- * Grouping is 2-2-2-3 from the right (crore, lakh, thousand, hundreds), which
- * is why this can't reuse a Western thousands-grouping implementation.
+ * Amount in words using the international numbering system
+ * (thousand / million / billion). Generic for any currency.
  */
-export function amountInWords(paise: number, currency = 'INR'): string {
-  if (paise === 0) return currency === 'INR' ? 'Zero Rupees Only' : 'Zero Only'
+export function amountInWords(paise: number, currency = 'USD'): string {
+  if (paise === 0) return `Zero ${currency} Only`
 
   const negative = paise < 0
   const abs = Math.abs(paise)
-  const rupees = Math.floor(abs / 100)
+  const major = Math.floor(abs / 100)
   const fraction = abs % 100
 
   const segments: string[] = []
-  const crore = Math.floor(rupees / 10_000_000)
-  const lakh = Math.floor((rupees % 10_000_000) / 100_000)
-  const thousand = Math.floor((rupees % 100_000) / 1_000)
-  const hundreds = rupees % 1_000
+  const billion = Math.floor(major / 1_000_000_000)
+  const million = Math.floor((major % 1_000_000_000) / 1_000_000)
+  const thousand = Math.floor((major % 1_000_000) / 1_000)
+  const rest = major % 1_000
 
-  if (crore) segments.push(`${threeDigits(crore)} Crore`)
-  if (lakh) segments.push(`${twoDigits(lakh)} Lakh`)
-  if (thousand) segments.push(`${twoDigits(thousand)} Thousand`)
-  if (hundreds) segments.push(threeDigits(hundreds))
+  if (billion) segments.push(`${threeDigits(billion)} Billion`)
+  if (million) segments.push(`${threeDigits(million)} Million`)
+  if (thousand) segments.push(`${threeDigits(thousand)} Thousand`)
+  if (rest) segments.push(threeDigits(rest))
 
-  const majorUnit = currency === 'INR' ? 'Rupees' : currency
-  const minorUnit = currency === 'INR' ? 'Paise' : 'Cents'
+  const majorUnit = currency
+  const minorUnit = 'Cents'
 
   const words: string[] = []
   if (negative) words.push('Minus')

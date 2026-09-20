@@ -149,7 +149,7 @@ export function rateLimited(detail: string, requestId: string, retryAfterSeconds
  *
  * The status exists for exactly this: the request is well-formed but we refuse
  * to perform it without a precondition — here, an Idempotency-Key on an
- * operation that spends a GST number.
+ * operation that spends an invoice number.
  */
 export function idempotencyKeyRequired(requestId: string): Response {
   return problem({

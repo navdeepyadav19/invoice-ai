@@ -11,7 +11,7 @@ const SECTIONS = [
     href: '/settings/business',
     label: 'Business',
     icon: Building2,
-    description: 'Name, GSTIN, bank details, numbering',
+    description: 'Name, country, bank details, numbering',
   },
   {
     href: '/settings/api-keys',

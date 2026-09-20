@@ -3,8 +3,8 @@ import { fromPostgres, invalidState, notFound, ServiceError, upstreamFailed } fr
 import { decodeCursor, encodeCursor, type Page } from '@/lib/services/pagination'
 import * as businesses from '@/lib/services/business'
 import { invoiceSchema, type InvoiceInput } from '@/lib/validators'
-import { computeInvoice, type GstLineInput } from '@/lib/gst'
-import { toRupees } from '@/lib/money'
+import { computeInvoice, type TaxLineInput } from '@/lib/tax'
+import { paiseToStored } from '@/lib/money-api'
 import { snapshotBusiness } from '@/lib/invoice-view'
 import { viewFromRows } from '@/lib/invoice-load'
 import { deriveStatus } from '@/lib/invoice-status'
@@ -27,7 +27,7 @@ import type { InvoiceEventRow, InvoiceItemRow, InvoiceRow, InvoiceStatus } from 
  * Two things that look like omissions and aren't:
  *
  *  * There is no transition out of `paid` or `cancelled`. Cancelling a paid
- *    invoice needs a credit note under GST, not a status flip.
+ *    invoice needs a credit note, not a status flip.
  *  * `overdue` never appears. It is derived from `due_date` at read time by
  *    lib/invoice-status.ts, so it is never a row you can be in — which is why
  *    markPaid filters on `sent` and still works for an overdue invoice.
@@ -151,9 +151,9 @@ export async function updateDraft(
 /**
  * Delete a draft.
  *
- * Only a draft. An issued invoice holds a number in a series GST requires to be
- * consecutive — deleting it would leave a gap that an audit reads as a hidden
- * sale. `cancel` is the only way to retire an issued invoice, and it keeps the
+ * Only a draft. An issued invoice holds a number in a consecutive series —
+ * deleting it would leave a gap that an audit reads as a hidden sale.
+ * `cancel` is the only way to retire an issued invoice, and it keeps the
  * number on the record.
  */
 export async function deleteDraft(ctx: AuthContext, id: string): Promise<void> {
@@ -176,7 +176,7 @@ export async function deleteDraft(ctx: AuthContext, id: string): Promise<void> {
 // ---------------------------------------------------------------------------
 
 /**
- * Assign a GST invoice number.
+ * Assign an invoice number.
  *
  * All the real work is in the `issue_invoice` RPC, which takes a row lock so two
  * concurrent calls cannot both claim a number. Calling it twice returns the same
@@ -207,7 +207,7 @@ export async function issue(ctx: AuthContext, id: string): Promise<{ invoiceNumb
  * — would make "invoice Acme and email it" two calls that can fail between,
  * leaving a numbered invoice nobody sent.
  *
- * The email is deliberately allowed to fail *after* issuing. Rolling back a GST
+ * The email is deliberately allowed to fail *after* issuing. Rolling back an invoice
  * number because a mail provider had a bad minute would be worse: the number is
  * already spent, and unwinding it breaks the consecutive series.
  */
@@ -388,8 +388,7 @@ async function load(ctx: AuthContext, id: string): Promise<InvoiceWithItems> {
  *
  * Every total is recomputed from the submitted line items by `computeInvoice`.
  * Anything the caller claimed about tax is ignored — an integration cannot
- * produce a document whose GST doesn't follow from its own lines, which is the
- * part that has to survive a filing.
+ * produce a document whose tax doesn't follow from its own lines.
  */
 async function writeDraft(
   ctx: AuthContext,
@@ -421,41 +420,30 @@ async function writeDraft(
     existingClientId = invoice.client_id
   }
 
-  const lines: GstLineInput[] = data.items.map((item) => ({
+  const lines: TaxLineInput[] = data.items.map((item) => ({
     description: item.description,
-    hsnSac: item.hsn_sac || undefined,
     quantity: item.quantity,
     unit: item.unit,
     rate: item.rate,
     discountPercent: item.discount_percent,
-    gstRate: item.gst_rate,
-    cessRate: item.cess_rate,
+    taxRate: item.tax_rate,
   }))
 
-  const computed = computeInvoice(
-    {
-      supplierStateCode: business.state_code,
-      placeOfSupplyStateCode: data.place_of_supply_state_code,
-      supplierIsGstRegistered: business.is_gst_registered,
-      isExport: data.is_export,
-      reverseCharge: data.reverse_charge,
-      lines,
-    },
-    data.currency,
-  )
+  const computed = computeInvoice({ lines }, data.currency)
 
   const clientValues = {
     owner_id: ctx.userId,
     name: data.client.name,
-    gstin: data.client.gstin || null,
+    tax_id: data.client.tax_id || null,
     email: data.client.email || null,
     phone: data.client.phone ?? null,
     address_line1: data.client.address_line1 ?? null,
     address_line2: data.client.address_line2 ?? null,
     city: data.client.city ?? null,
-    state_code: data.client.state_code || null,
-    pincode: data.client.pincode || null,
-    country: data.client.country,
+    region: data.client.region || null,
+    postal_code: data.client.postal_code || null,
+    country_code: data.client.country_code || null,
+    country: data.client.country ?? data.client.country_code ?? '',
   }
 
   // Reuse the row this draft already points at, so editing doesn't leave a
@@ -483,22 +471,23 @@ async function writeDraft(
     issue_date: data.issue_date,
     due_date: data.due_date || null,
     currency: data.currency,
-    place_of_supply_state_code: data.place_of_supply_state_code,
-    is_export: data.is_export,
-    reverse_charge: data.reverse_charge,
+    place_of_supply_state_code: null,
+    is_export: false,
+    reverse_charge: false,
     notes: data.notes ?? null,
     terms: data.terms ?? null,
     business_snapshot: snapshotBusiness(business),
     client_snapshot: { ...clientValues, owner_id: undefined },
-    subtotal: toRupees(computed.subtotalPaise),
-    discount_total: toRupees(computed.discountTotalPaise),
-    taxable_total: toRupees(computed.taxableTotalPaise),
-    cgst_total: toRupees(computed.cgstTotalPaise),
-    sgst_total: toRupees(computed.sgstTotalPaise),
-    igst_total: toRupees(computed.igstTotalPaise),
-    cess_total: toRupees(computed.cessTotalPaise),
-    round_off: toRupees(computed.roundOffPaise),
-    total: toRupees(computed.totalPaise),
+    subtotal: paiseToStored(computed.subtotalMinor),
+    discount_total: paiseToStored(computed.discountTotalMinor),
+    taxable_total: paiseToStored(computed.taxableTotalMinor),
+    tax_total: paiseToStored(computed.taxTotalMinor),
+    cgst_total: 0,
+    sgst_total: 0,
+    igst_total: paiseToStored(computed.taxTotalMinor),
+    cess_total: 0,
+    round_off: 0,
+    total: paiseToStored(computed.totalMinor),
     amount_in_words: computed.amountInWords,
   }
 
@@ -528,19 +517,21 @@ async function writeDraft(
     p_items: computed.lines.map((line, index) => ({
       position: index,
       description: line.description,
-      hsn_sac: line.hsnSac ?? null,
+      hsn_sac: null,
       quantity: line.quantity,
       unit: line.unit,
       rate: line.rate,
       discount_percent: line.discountPercent,
-      taxable_value: toRupees(line.taxablePaise),
-      gst_rate: line.gstRate,
-      cgst_amount: toRupees(line.cgstPaise),
-      sgst_amount: toRupees(line.sgstPaise),
-      igst_amount: toRupees(line.igstPaise),
-      cess_rate: line.cessRate ?? 0,
-      cess_amount: toRupees(line.cessPaise),
-      line_total: toRupees(line.totalPaise),
+      taxable_value: paiseToStored(line.taxableMinor),
+      tax_rate: line.taxRate,
+      tax_amount: paiseToStored(line.taxMinor),
+      gst_rate: line.taxRate,
+      cgst_amount: 0,
+      sgst_amount: 0,
+      igst_amount: paiseToStored(line.taxMinor),
+      cess_rate: 0,
+      cess_amount: 0,
+      line_total: paiseToStored(line.totalMinor),
     })),
   })
 

@@ -1,63 +1,59 @@
 import { describe, expect, it } from 'vitest'
 
-import { computeInvoice } from './gst'
+import { computeInvoice } from './tax'
 import { pdfFilename, renderInvoicePdf } from './pdf'
 import type { InvoiceView } from './invoice-view'
 
 function sampleView(overrides: Partial<InvoiceView> = {}): InvoiceView {
-  const computed = computeInvoice({
-    supplierStateCode: '27',
-    placeOfSupplyStateCode: '27',
-    supplierIsGstRegistered: true,
-    lines: [
-      {
-        description: 'Brand identity system',
-        hsnSac: '998912',
-        quantity: 1,
-        unit: 'NOS',
-        rate: 60000,
-        discountPercent: 0,
-        gstRate: 18,
-      },
-      {
-        description: 'Website design, 8 screens',
-        hsnSac: '998314',
-        quantity: 1,
-        unit: 'NOS',
-        rate: 32000,
-        discountPercent: 0,
-        gstRate: 18,
-      },
-    ],
-  })
+  const computed = computeInvoice(
+    {
+      lines: [
+        {
+          description: 'Brand identity system',
+          quantity: 1,
+          unit: 'NOS',
+          rate: 60000,
+          discountPercent: 0,
+          taxRate: 18,
+        },
+        {
+          description: 'Website design, 8 screens',
+          quantity: 1,
+          unit: 'NOS',
+          rate: 32000,
+          discountPercent: 0,
+          taxRate: 18,
+        },
+      ],
+    },
+    'USD',
+  )
 
   return {
     business: {
       name: 'Umbrella Design Studio',
       trade_name: 'Umbrella',
-      gstin: '27AAPFU0939F1ZV',
+      tax_id: 'US-EIN 12-3456789',
       address_line1: '4th Floor, Trade Centre',
-      city: 'Mumbai',
-      state_code: '27',
-      pincode: '400051',
-      country: 'India',
-      email: 'billing@umbrella.in',
-      is_gst_registered: true,
-      payment: { bank_name: 'HDFC Bank', ifsc: 'HDFC0001234', upi_id: 'umbrella@hdfcbank' },
+      city: 'Austin',
+      region: 'TX',
+      postal_code: '73301',
+      country_code: 'US',
+      country: 'United States',
+      email: 'billing@umbrella.co',
+      payment: { bank_name: 'First Bank', routing_number: '111000025' },
     },
     client: {
-      name: 'Kadam Retail Pvt Ltd',
-      gstin: '27AAPFU0939F1ZV',
-      city: 'Pune',
-      state_code: '27',
-      country: 'India',
+      name: 'Acme Retail LLC',
+      city: 'Dallas',
+      region: 'TX',
+      country_code: 'US',
     },
-    number: 'INV/26-27/0042',
+    number: 'INV-0042',
     status: 'sent',
     issueDate: '2026-08-16',
     dueDate: '2026-08-31',
-    currency: 'INR',
-    placeOfSupplyStateCode: '27',
+    currency: 'USD',
     notes: 'Thank you for your business.',
     terms: 'Payment due within 15 days.',
     computed,
@@ -74,8 +70,6 @@ describe('PDF rendering', () => {
   }, 30_000)
 
   it('embeds Noto Sans rather than falling back to Helvetica', async () => {
-    // Helvetica has no ₹ glyph, so a fallback here would silently blank every
-    // rupee sign on the invoice. Checking the embedded font name catches that.
     const raw = (await renderInvoicePdf(sampleView())).toString('latin1')
 
     expect(raw).toContain('NotoSans')
@@ -87,7 +81,7 @@ describe('PDF rendering', () => {
     // successive renders in a warm process — exactly what Fluid Compute does.
     // renderInvoicePdf calls Font.reset(); this is the regression test for it.
     const first = await renderInvoicePdf(sampleView())
-    const second = await renderInvoicePdf(sampleView({ number: 'INV/26-27/0043' }))
+    const second = await renderInvoicePdf(sampleView({ number: 'INV-0043' }))
 
     expect(second.subarray(0, 5).toString()).toBe('%PDF-')
     expect(second.length).toBeGreaterThan(10_000)
@@ -97,7 +91,7 @@ describe('PDF rendering', () => {
   }, 45_000)
 
   it('names the file after the invoice number', () => {
-    expect(pdfFilename(sampleView())).toBe('INV-26-27-0042.pdf')
+    expect(pdfFilename(sampleView())).toBe('INV-0042.pdf')
     expect(pdfFilename(sampleView({ number: null }))).toBe('draft-2026-08-16.pdf')
   })
 })

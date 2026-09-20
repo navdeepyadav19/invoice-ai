@@ -31,7 +31,7 @@ export default async function BusinessSettingsPage() {
       </div>
 
       <div className="mt-8 space-y-12">
-        <Section title="Business details" description="Your name, GSTIN and registered address.">
+        <Section title="Business details" description="Your name, country, currency and address.">
           <StepBusiness business={business} action={saveBusinessSettings} submitLabel="Save changes" />
         </Section>
 

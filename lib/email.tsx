@@ -43,7 +43,7 @@ export async function sendInvoiceEmail({
   filename: string
 }): Promise<string> {
   const supplier = view.business.trade_name || view.business.name
-  const total = formatPaise(view.computed.totalPaise, view.currency)
+  const total = formatPaise(view.computed.totalMinor, view.currency)
 
   const { data, error } = await resend().emails.send({
     from: fromAddress(),

@@ -46,13 +46,19 @@ export type BusinessRow = {
   owner_id: string
   legal_name: string
   trade_name: string | null
+  country_code: string
+  currency: string
+  tax_id: string | null
+  region: string | null
+  routing_number: string | null
   is_gst_registered: boolean
   gstin: string | null
   pan: string | null
   address_line1: string | null
   address_line2: string | null
   city: string | null
-  state_code: string
+  state_code: string | null
+  postal_code: string | null
   pincode: string | null
   country: string
   email: string | null
@@ -82,6 +88,10 @@ export type ClientRow = {
   id: string
   owner_id: string
   name: string
+  tax_id: string | null
+  country_code: string | null
+  region: string | null
+  postal_code: string | null
   gstin: string | null
   email: string | null
   phone: string | null
@@ -106,7 +116,7 @@ export type InvoiceRow = {
   issue_date: string
   due_date: string | null
   currency: string
-  place_of_supply_state_code: string
+  place_of_supply_state_code: string | null
   is_export: boolean
   reverse_charge: boolean
   notes: string | null
@@ -116,6 +126,7 @@ export type InvoiceRow = {
   subtotal: number
   discount_total: number
   taxable_total: number
+  tax_total: number
   cgst_total: number
   sgst_total: number
   igst_total: number
@@ -143,6 +154,8 @@ export type InvoiceItemRow = {
   rate: number
   discount_percent: number
   taxable_value: number
+  tax_rate: number
+  tax_amount: number
   gst_rate: number
   cgst_amount: number
   sgst_amount: number
@@ -250,12 +263,12 @@ export type Database = {
   public: {
     Tables: {
       profiles: Table<ProfileRow>
-      businesses: Table<BusinessRow, Omit<Partial<BusinessRow>, 'owner_id' | 'legal_name' | 'state_code'> & Pick<BusinessRow, 'owner_id' | 'legal_name' | 'state_code'>>
+      businesses: Table<BusinessRow, Omit<Partial<BusinessRow>, 'owner_id' | 'legal_name' | 'country_code'> & Pick<BusinessRow, 'owner_id' | 'legal_name' | 'country_code'>>
       clients: Table<ClientRow, Omit<Partial<ClientRow>, 'owner_id' | 'name'> & Pick<ClientRow, 'owner_id' | 'name'>>
       invoices: Table<
         InvoiceRow,
-        Omit<Partial<InvoiceRow>, 'owner_id' | 'business_id' | 'place_of_supply_state_code'> &
-          Pick<InvoiceRow, 'owner_id' | 'business_id' | 'place_of_supply_state_code'>
+        Omit<Partial<InvoiceRow>, 'owner_id' | 'business_id'> &
+          Pick<InvoiceRow, 'owner_id' | 'business_id'>
       >
       invoice_items: Table<
         InvoiceItemRow,

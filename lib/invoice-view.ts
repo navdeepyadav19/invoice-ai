@@ -1,4 +1,4 @@
-import type { GstInvoiceResult } from '@/lib/gst'
+import type { TaxInvoiceResult } from '@/lib/tax'
 import type { BusinessRow, InvoiceStatus, Json } from '@/lib/database.types'
 
 /**
@@ -15,13 +15,13 @@ import type { BusinessRow, InvoiceStatus, Json } from '@/lib/database.types'
 export type PartySnapshot = {
   name: string
   trade_name?: string | null
-  gstin?: string | null
-  pan?: string | null
+  tax_id?: string | null
   address_line1?: string | null
   address_line2?: string | null
   city?: string | null
-  state_code?: string | null
-  pincode?: string | null
+  region?: string | null
+  postal_code?: string | null
+  country_code?: string | null
   country?: string | null
   email?: string | null
   phone?: string | null
@@ -31,14 +31,13 @@ export type PaymentSnapshot = {
   bank_name?: string | null
   account_name?: string | null
   account_number?: string | null
-  ifsc?: string | null
-  upi_id?: string | null
+  routing_number?: string | null
 }
 
 export type BusinessSnapshot = PartySnapshot & {
   logo_url?: string | null
   signature_url?: string | null
-  is_gst_registered: boolean
+  currency?: string | null
   payment?: PaymentSnapshot
 }
 
@@ -50,10 +49,9 @@ export type InvoiceView = {
   issueDate: string
   dueDate: string | null
   currency: string
-  placeOfSupplyStateCode: string
   notes: string | null
   terms: string | null
-  computed: GstInvoiceResult
+  computed: TaxInvoiceResult
   publicUrl?: string | null
 }
 
@@ -62,25 +60,24 @@ export function snapshotBusiness(business: BusinessRow): BusinessSnapshot {
   return {
     name: business.legal_name,
     trade_name: business.trade_name,
-    gstin: business.gstin,
-    pan: business.pan,
+    tax_id: business.tax_id,
     address_line1: business.address_line1,
     address_line2: business.address_line2,
     city: business.city,
-    state_code: business.state_code,
-    pincode: business.pincode,
+    region: business.region,
+    postal_code: business.postal_code ?? business.pincode,
+    country_code: business.country_code,
     country: business.country,
     email: business.email,
     phone: business.phone,
     logo_url: business.logo_url,
     signature_url: business.signature_url,
-    is_gst_registered: business.is_gst_registered,
+    currency: business.currency,
     payment: {
       bank_name: business.bank_name,
       account_name: business.account_name,
       account_number: business.account_number,
-      ifsc: business.ifsc,
-      upi_id: business.upi_id,
+      routing_number: business.routing_number,
     },
   }
 }
@@ -89,9 +86,7 @@ export function snapshotBusiness(business: BusinessRow): BusinessSnapshot {
  * Read a snapshot back off a stored invoice.
  *
  * Snapshots are JSONB, so the database can hand back anything. Rather than
- * casting and hoping, this returns a usable object with a visible fallback name
- * — a rendered invoice missing its supplier is a bug you want to see, not one
- * that throws in a PDF worker at 2am.
+ * casting and hoping, this returns a usable object with a visible fallback name.
  */
 export function readSnapshot<T extends PartySnapshot>(value: Json | null, fallbackName: string): T {
   if (value && typeof value === 'object' && !Array.isArray(value)) {
@@ -104,16 +99,16 @@ export function formatPartyAddress(party: PartySnapshot): string[] {
   return [
     party.address_line1,
     party.address_line2,
-    [party.city, party.pincode].filter(Boolean).join(' '),
+    [party.city, party.region, party.postal_code].filter(Boolean).join(', '),
     party.country,
   ]
     .map((line) => (line ?? '').trim())
     .filter((line) => line.length > 0)
 }
 
-export function formatInvoiceDate(value: string | null | undefined): string {
+export function formatInvoiceDate(value: string | null | undefined, locale = 'en-US'): string {
   if (!value) return '—'
-  return new Date(value).toLocaleDateString('en-IN', {
+  return new Date(value).toLocaleDateString(locale, {
     day: '2-digit',
     month: 'short',
     year: 'numeric',

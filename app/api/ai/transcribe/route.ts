@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
         openai: {
           // Indian English, and a nudge toward the vocabulary this app hears.
           language: 'en',
-          prompt: 'An instruction to create a GST invoice, with rupee amounts and Indian names.',
+          prompt: 'An instruction to create an invoice, with amounts and client names.',
         },
       },
     })

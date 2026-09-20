@@ -16,7 +16,7 @@ export const GET = withApi<Params>({ scope: 'invoices:read' }, async (ctx, _requ
 /**
  * PATCH /api/v1/invoices/{id} — drafts only.
  *
- * Once issued, the document is frozen: a client has a PDF with a GST number on
+ * Once issued, the document is frozen: a client has a PDF with an invoice number on
  * it, and the record has to keep matching what they received. The service
  * returns 409 invalid_state rather than silently ignoring the write.
  */
@@ -31,7 +31,7 @@ export const PATCH = withApi<Params>({ scope: 'invoices:write' }, async (ctx, re
 /**
  * DELETE /api/v1/invoices/{id} — drafts only.
  *
- * An issued invoice can never be deleted. Its number belongs to a series GST
+ * An issued invoice can never be deleted. Its number belongs to a consecutive series
  * requires to be consecutive, and a gap is what an audit reads as a hidden
  * sale. Use POST /cancel instead, which keeps the number on the record.
  */

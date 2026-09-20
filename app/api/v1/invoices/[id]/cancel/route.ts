@@ -14,7 +14,7 @@ type Params = { id: string }
  * halves of controlling the number series, and a credential trusted with one is
  * trusted with the other.
  *
- * A paid invoice cannot be cancelled. Under GST that needs a credit note, which
+ * A paid invoice cannot be cancelled. That needs a credit note, which
  * is a different document with its own numbering, and is out of scope for v1.
  */
 export const POST = withApi<Params>(

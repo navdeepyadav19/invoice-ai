@@ -1,15 +1,13 @@
 import { describe, expect, it } from 'vitest'
 
-import { normaliseDraft, stateCodeFromName } from './normalise'
+import { normaliseDraft } from './normalise'
 import type { AiInvoiceDraft } from './invoice-schema'
 
 function draft(overrides: Partial<AiInvoiceDraft> = {}): AiInvoiceDraft {
   return {
-    client_name: 'Sharma Traders',
-    client_gstin: null,
+    client_name: 'Acme Traders',
     client_city: null,
     client_email: null,
-    place_of_supply_state_name: null,
     due_in_days: null,
     notes: null,
     amount_is_tax_inclusive: false,
@@ -19,8 +17,7 @@ function draft(overrides: Partial<AiInvoiceDraft> = {}): AiInvoiceDraft {
         quantity: 1,
         unit: 'NOS',
         rate: 10000,
-        gst_rate: 18,
-        hsn_sac: null,
+        tax_rate: 18,
       },
     ],
     ...overrides,
@@ -28,8 +25,8 @@ function draft(overrides: Partial<AiInvoiceDraft> = {}): AiInvoiceDraft {
 }
 
 describe('tax-inclusive amounts', () => {
-  it('backs GST out of an inclusive figure', () => {
-    // "₹11,800 all in" at 18% is a ₹10,000 line.
+  it('backs tax out of an inclusive figure', () => {
+    // "$11,800 all in" at 18% is a $10,000 line.
     const result = normaliseDraft(
       draft({ amount_is_tax_inclusive: true, items: [{ ...draft().items[0], rate: 11800 }] }),
     )
@@ -45,14 +42,14 @@ describe('tax-inclusive amounts', () => {
     const result = normaliseDraft(
       draft({
         amount_is_tax_inclusive: true,
-        items: [{ ...draft().items[0], rate: 5000, gst_rate: 0 }],
+        items: [{ ...draft().items[0], rate: 5000, tax_rate: 0 }],
       }),
     )
 
     expect(result.items[0].rate).toBe(5000)
   })
 
-  it('rounds to paise rather than leaving a float tail', () => {
+  it('rounds to cents rather than leaving a float tail', () => {
     // 1000 / 1.18 = 847.4576271186441…
     const result = normaliseDraft(
       draft({ amount_is_tax_inclusive: true, items: [{ ...draft().items[0], rate: 1000 }] }),
@@ -62,27 +59,24 @@ describe('tax-inclusive amounts', () => {
   })
 })
 
-describe('GST slabs', () => {
-  it('keeps a real slab', () => {
-    expect(normaliseDraft(draft({ items: [{ ...draft().items[0], gst_rate: 12 }] })).items[0].gst_rate).toBe(12)
+describe('tax rates', () => {
+  it('keeps an explicit rate', () => {
+    expect(normaliseDraft(draft({ items: [{ ...draft().items[0], tax_rate: 12 }] })).items[0].tax_rate).toBe(12)
   })
 
-  it('snaps an invented rate to the nearest real slab', () => {
-    // The model occasionally returns 20 or 17; neither is a GST slab.
-    expect(normaliseDraft(draft({ items: [{ ...draft().items[0], gst_rate: 17 }] })).items[0].gst_rate).toBe(18)
-    expect(normaliseDraft(draft({ items: [{ ...draft().items[0], gst_rate: 20 }] })).items[0].gst_rate).toBe(18)
+  it('falls back to the business default when the model returns null', () => {
+    expect(
+      normaliseDraft(draft({ items: [{ ...draft().items[0], tax_rate: null }] }), 20).items[0].tax_rate,
+    ).toBe(20)
   })
 
-  it('rounds a tie upward rather than down', () => {
-    // 4 is equidistant from the 3% jewellery slab and the 5% slab. Rounding up
-    // is deliberate: under-charging GST leaves the merchant owing the shortfall,
-    // while over-charging is on the face of the invoice and gets queried.
-    expect(normaliseDraft(draft({ items: [{ ...draft().items[0], gst_rate: 4 }] })).items[0].gst_rate).toBe(5)
+  it('clamps a nonsensical rate into range', () => {
+    expect(normaliseDraft(draft({ items: [{ ...draft().items[0], tax_rate: 250 }] })).items[0].tax_rate).toBe(100)
   })
 })
 
 describe('units', () => {
-  it('accepts a real UQC', () => {
+  it('accepts a real unit', () => {
     expect(normaliseDraft(draft({ items: [{ ...draft().items[0], unit: 'HRS' }] })).items[0].unit).toBe('HRS')
   })
 
@@ -102,30 +96,6 @@ describe('units', () => {
   })
 })
 
-describe('state resolution', () => {
-  it('resolves an exact state name', () => {
-    expect(stateCodeFromName('Karnataka')).toBe('29')
-    expect(stateCodeFromName('maharashtra')).toBe('27')
-  })
-
-  it('resolves a partial match', () => {
-    expect(stateCodeFromName('Tamil Nadu state')).toBe('33')
-  })
-
-  it('returns null rather than guessing', () => {
-    // A wrong state code silently flips CGST/SGST to IGST, so "no answer" is
-    // the only safe answer for something unrecognised.
-    expect(stateCodeFromName('Atlantis')).toBeNull()
-    expect(stateCodeFromName('')).toBeNull()
-    expect(stateCodeFromName(null)).toBeNull()
-  })
-
-  it('is wired into the draft', () => {
-    const result = normaliseDraft(draft({ place_of_supply_state_name: 'Karnataka' }))
-    expect(result.place_of_supply_state_code).toBe('29')
-  })
-})
-
 describe('defensive handling', () => {
   it('treats a zero or negative quantity as one', () => {
     expect(normaliseDraft(draft({ items: [{ ...draft().items[0], quantity: 0 }] })).items[0].quantity).toBe(1)
@@ -136,12 +106,6 @@ describe('defensive handling', () => {
 
     expect(result.client_name).toBeNull()
     expect(result.client_city).toBeNull()
-  })
-
-  it('uppercases a spoken GSTIN', () => {
-    expect(normaliseDraft(draft({ client_gstin: '27aapfu0939f1zv' })).client_gstin).toBe(
-      '27AAPFU0939F1ZV',
-    )
   })
 
   it('ignores a nonsensical due-in-days', () => {

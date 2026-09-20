@@ -51,7 +51,7 @@ export function parseScopes(values: readonly string[]): Scope[] {
 export const ALL_SCOPES: ReadonlySet<Scope> = new Set(SCOPES)
 
 export const SCOPE_DESCRIPTIONS: Record<Scope, string> = {
-  'business:read': 'Read your business profile, GSTIN and bank details',
+  'business:read': 'Read your business profile, tax ID and bank details',
   'clients:read': 'List and read your clients',
   'clients:write': 'Create, update and archive clients',
   'invoices:read': 'List and read invoices, including PDFs',

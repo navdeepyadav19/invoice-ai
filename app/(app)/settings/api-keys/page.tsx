@@ -49,7 +49,7 @@ export default async function ApiKeysPage() {
 curl ${siteUrl()}/api/v1/invoices \\
   -H "Authorization: Bearer inv_live_..."
 
-# Issue one. Writes that spend a GST number need an Idempotency-Key,
+# Issue one. Writes that spend an invoice number need an Idempotency-Key,
 # so a retry can never assign a second number.
 curl -X POST ${siteUrl()}/api/v1/invoices/<id>/issue \\
   -H "Authorization: Bearer inv_live_..." \\

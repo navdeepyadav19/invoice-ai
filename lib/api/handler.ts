@@ -49,7 +49,7 @@ export interface WithApiOptions {
   scope: Scope
   /**
    * required — reject without an Idempotency-Key (428). For anything that
-   *            spends a GST number, sends an email, or takes a payment action.
+   *            spends an invoice number, sends an email, or takes a payment action.
    * optional — honour a key if sent. For creates, where a duplicate is
    *            annoying but not legally meaningful.
    * none    — reads, and updates that are naturally idempotent (PATCH/DELETE

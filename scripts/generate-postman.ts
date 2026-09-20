@@ -38,49 +38,37 @@ const IDEMPOTENT_OPERATIONS = new Set([
 ])
 
 /**
- * Realistic Indian GST examples, so the collection demos well out of the box.
- *
- * The GSTINs here are checksum-valid, not merely well-shaped. lib/validators.ts
- * verifies the check character, so a plausible-looking fake is rejected with a
- * 422 before the request reaches any business logic — which makes the shipped
- * collection fail on its very first POST.
+ * Realistic examples, so the collection demos well out of the box.
  */
 const EXAMPLE_BODIES: Record<string, unknown> = {
   'POST /clients': {
-    name: 'Acme Industries Pvt Ltd',
-    gstin: '29AABCU9603R1ZJ',
+    name: 'Acme Industries',
+    tax_id: 'US-EIN 12-3456789',
     email: 'accounts@acme.example',
-    address_line1: '4th Floor, Prestige Tower',
-    city: 'Bengaluru',
-    state_code: '29',
-    pincode: '560001',
-    country: 'India',
+    address_line1: '4th Floor, Market Tower',
+    city: 'Austin',
+    region: 'TX',
+    postal_code: '73301',
+    country_code: 'US',
   },
   'POST /invoices': {
     client: {
-      name: 'Acme Industries Pvt Ltd',
-      gstin: '29AABCU9603R1ZJ',
+      name: 'Acme Industries',
       email: 'accounts@acme.example',
-      state_code: '29',
-      country: 'India',
+      country_code: 'US',
     },
     issue_date: '2026-09-17',
     due_date: '2026-10-17',
-    place_of_supply_state_code: '29',
-    is_export: false,
-    reverse_charge: false,
-    currency: 'INR',
+    currency: 'USD',
     notes: 'September consulting retainer.',
     items: [
       {
         description: 'Consulting services — September 2026',
-        hsn_sac: '998311',
         quantity: 1,
         unit: 'NOS',
         rate: 25000,
         discount_percent: 0,
-        gst_rate: 18,
-        cess_rate: 0,
+        tax_rate: 0,
       },
     ],
   },
@@ -255,9 +243,9 @@ function testsFor(key: string): string[] {
 
   if (key === 'POST /invoices/{id}/issue') {
     tests.push(
-      "pm.test('issuing returns a GST number', () => {",
+      "pm.test('issuing returns an invoice number', () => {",
       '  if (pm.response.code === 200) {',
-      "    pm.expect(pm.response.json().data.invoice_number).to.match(/^[A-Z0-9]{1,5}\\/\\d{2}-\\d{2}\\/\\d{4}$/);",
+      "    pm.expect(pm.response.json().data.invoice_number).to.match(/^[A-Z0-9\\-\\/]{1,16}-\\d{4}$/);",
       '  }',
       '});',
       "// Run this request twice with the SAME Idempotency-Key to see the replay:",

@@ -1,21 +1,21 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { BusinessRow } from './database.types'
-import { computeInvoice } from './gst'
+import { computeInvoice } from './tax'
 import {
   defaultInvoiceValues,
   emptyLineItem,
   num,
-  toGstInput,
+  toTaxInput,
   toSavePayload,
   type InvoiceFormValues,
 } from './invoice-form'
-import { toRupees } from './money'
+import { toMajor } from './money'
 
 // Only the fields the form helpers read; the rest of the row is irrelevant here.
 const business = {
-  state_code: '27',
-  is_gst_registered: true,
+  country_code: 'US',
+  currency: 'USD',
   default_notes: 'Thank you for your business',
   default_terms: 'Payment due in 15 days',
 } as BusinessRow
@@ -60,26 +60,20 @@ describe('defaultInvoiceValues', () => {
     const values = defaultInvoiceValues(null)
     expect(values.issue_date).toBe('2026-09-14')
     expect(values.items).toHaveLength(1)
-    expect(values.currency).toBe('INR')
-    expect(values.client.country).toBe('India')
+    expect(values.currency).toBe('USD')
+    expect(values.client.country_code).toBe('US')
   })
 
-  it('defaults place of supply to the supplier state, so a local client is right with no input', () => {
-    const values = defaultInvoiceValues(business)
-    expect(values.place_of_supply_state_code).toBe('27')
-    expect(values.client.state_code).toBe('27')
+  it('inherits the business currency and country', () => {
+    const values = defaultInvoiceValues({ ...business, country_code: 'DE', currency: 'EUR' } as BusinessRow)
+    expect(values.currency).toBe('EUR')
+    expect(values.client.country_code).toBe('DE')
   })
 
   it('carries the business default notes and terms', () => {
     const values = defaultInvoiceValues(business)
     expect(values.notes).toBe('Thank you for your business')
     expect(values.terms).toBe('Payment due in 15 days')
-  })
-
-  it('works before onboarding, with no business yet', () => {
-    const values = defaultInvoiceValues(null)
-    expect(values.place_of_supply_state_code).toBe('')
-    expect(values.notes).toBe('')
   })
 
   it('hands out a fresh line item each time, not a shared object', () => {
@@ -90,38 +84,29 @@ describe('defaultInvoiceValues', () => {
   })
 })
 
-describe('toGstInput — the live preview path', () => {
+describe('toTaxInput — the live preview path', () => {
   it('coerces every numeric string for the tax engine', () => {
-    const input = toGstInput(filledForm(), business)
+    const input = toTaxInput(filledForm())
     expect(input.lines[0]).toMatchObject({
       quantity: 1,
       rate: 1000,
       discountPercent: 0,
-      gstRate: 18,
-      cessRate: 0,
+      taxRate: 0,
     })
   })
 
-  it('omits a blank HSN/SAC rather than sending an empty string', () => {
-    expect(toGstInput(filledForm(), business).lines[0].hsnSac).toBeUndefined()
-  })
-
-  it('treats a missing business as unregistered with no state', () => {
-    const input = toGstInput(filledForm(), null)
-    expect(input.supplierIsGstRegistered).toBe(false)
-    expect(input.supplierStateCode).toBe('')
-  })
-
   it('produces a preview total that matches the tax engine', () => {
-    const result = computeInvoice(toGstInput(filledForm(), business))
-    expect(toRupees(result.cgstTotalPaise)).toBe(90)
-    expect(toRupees(result.sgstTotalPaise)).toBe(90)
-    expect(toRupees(result.totalPaise)).toBe(1180)
+    const form = filledForm({
+      items: [{ ...emptyLineItem(18), description: 'Consulting', rate: '1000' }],
+    })
+    const result = computeInvoice(toTaxInput(form))
+    expect(toMajor(result.taxTotalMinor)).toBe(180)
+    expect(toMajor(result.totalMinor)).toBe(1180)
   })
 
   it('does not crash the preview while a rate is still being typed', () => {
     const form = filledForm({ items: [{ ...emptyLineItem(), rate: '' }] })
-    expect(computeInvoice(toGstInput(form, business)).totalPaise).toBe(0)
+    expect(computeInvoice(toTaxInput(form)).totalMinor).toBe(0)
   })
 })
 
@@ -129,11 +114,7 @@ describe('toSavePayload — the server action path', () => {
   it('sends numbers, not strings', () => {
     const payload = toSavePayload(filledForm())
     expect(payload.items[0].rate).toBe(1000)
-    expect(payload.items[0].gst_rate).toBe(18)
-  })
-
-  it('keeps a blank HSN/SAC as-is for the server to validate', () => {
-    expect(toSavePayload(filledForm()).items[0].hsn_sac).toBe('')
+    expect(payload.items[0].tax_rate).toBe(0)
   })
 
   it('copies the client instead of sharing the form object', () => {

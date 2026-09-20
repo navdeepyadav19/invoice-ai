@@ -6,10 +6,8 @@ import type { BusinessRow } from '@/lib/database.types'
  * The "From" side of an invoice.
  *
  * Read-only over the API in v1. Writing a business profile is an onboarding
- * flow with GSTIN lookup and state-code cross-checks attached; exposing a bare
- * PATCH would let an integration put the business into a state the wizard
- * cannot produce (registered for GST with a GSTIN whose state prefix disagrees
- * with `state_code`, which the DB constraint then rejects on the *next* write).
+ * flow with country/currency defaults attached; exposing a bare PATCH would
+ * let an integration put the business into a state the wizard cannot produce.
  */
 
 /**

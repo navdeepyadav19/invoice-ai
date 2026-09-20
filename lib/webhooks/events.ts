@@ -29,7 +29,7 @@ export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number]
 export const WEBHOOK_EVENT_LABELS: Record<WebhookEvent, string> = {
   'invoice.created': 'A draft was created',
   'invoice.updated': 'A draft was edited',
-  'invoice.issued': 'An invoice got its GST number',
+  'invoice.issued': 'An invoice got its invoice number',
   'invoice.emailed': 'An invoice was emailed to a client',
   'invoice.email_failed': 'An invoice email bounced or failed',
   'invoice.viewed': 'A client opened the invoice link',

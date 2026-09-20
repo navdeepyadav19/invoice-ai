@@ -18,8 +18,8 @@ import type {
  *
  * Two conversions happen at this boundary and nowhere else:
  *
- *   money   numeric(14,2) rupees  →  integer paise (`*_paise`)
- *   status  the stored column     →  deriveStatus(), so `overdue` appears
+ *   money   numeric(14,2) major units  →  integer minor units (`*_paise`)
+ *   status  the stored column          →  deriveStatus(), so `overdue` appears
  */
 
 export function serializeBusiness(row: BusinessRow) {
@@ -27,15 +27,16 @@ export function serializeBusiness(row: BusinessRow) {
     id: row.id,
     legal_name: row.legal_name,
     trade_name: row.trade_name,
-    is_gst_registered: row.is_gst_registered,
-    gstin: row.gstin,
-    pan: row.pan,
+    country_code: row.country_code,
+    currency: row.currency,
+    tax_id: row.tax_id,
     address: {
       line1: row.address_line1,
       line2: row.address_line2,
       city: row.city,
-      state_code: row.state_code,
-      pincode: row.pincode,
+      region: row.region,
+      postal_code: (row.postal_code ?? row.pincode) as string | null,
+      country_code: row.country_code,
       country: row.country,
     },
     email: row.email,
@@ -44,8 +45,7 @@ export function serializeBusiness(row: BusinessRow) {
       bank_name: row.bank_name,
       account_name: row.account_name,
       account_number: row.account_number,
-      ifsc: row.ifsc,
-      upi_id: row.upi_id,
+      routing_number: row.routing_number,
     },
     invoice_prefix: row.invoice_prefix,
     created_at: row.created_at,
@@ -56,15 +56,16 @@ export function serializeClient(row: ClientRow) {
   return {
     id: row.id,
     name: row.name,
-    gstin: row.gstin,
+    tax_id: row.tax_id,
     email: row.email,
     phone: row.phone,
     address: {
       line1: row.address_line1,
       line2: row.address_line2,
       city: row.city,
-      state_code: row.state_code,
-      pincode: row.pincode,
+      region: row.region,
+      postal_code: (row.postal_code ?? row.pincode) as string | null,
+      country_code: row.country_code,
       country: row.country,
     },
     archived: Boolean(row.archived_at),
@@ -79,14 +80,12 @@ export function serializeLineItem(row: InvoiceItemRow) {
     id: row.id,
     position: row.position,
     description: row.description,
-    hsn_sac: row.hsn_sac,
     quantity: Number(row.quantity),
     unit: row.unit,
-    // Rate is money too: ₹25,000/unit is 2500000 paise on the wire.
+    // Rate is money too: $25,000/unit is 2500000 minor units on the wire.
     rate_paise: Math.round(Number(row.rate) * 100),
     discount_percent: Number(row.discount_percent),
-    gst_rate: Number(row.gst_rate),
-    cess_rate: Number(row.cess_rate),
+    tax_rate: Number(row.tax_rate ?? row.gst_rate ?? 0),
     ...lineItemAmountsToPaise(row),
   }
 }
@@ -104,9 +103,6 @@ export function serializeInvoice(row: InvoiceRow, items?: InvoiceItemRow[]) {
     issue_date: row.issue_date,
     due_date: row.due_date,
     currency: row.currency,
-    place_of_supply_state_code: row.place_of_supply_state_code,
-    is_export: row.is_export,
-    reverse_charge: row.reverse_charge,
     notes: row.notes,
     terms: row.terms,
     ...invoiceTotalsToPaise(row),
@@ -125,8 +121,8 @@ export function serializeInvoice(row: InvoiceRow, items?: InvoiceItemRow[]) {
 /**
  * The stored enum value is `sent`; the API calls it `issued`.
  *
- * `sent` was named for the UI button and means "has a GST number" — which is
- * not the same as "the email went out". Translating at the edge means
+ * `sent` was named for the UI button and means "has an invoice number" — which
+ * is not the same as "the email went out". Translating at the edge means
  * integrators subscribing to invoice.issued and invoice.emailed get the two
  * facts separately, without us rewriting historical rows.
  */

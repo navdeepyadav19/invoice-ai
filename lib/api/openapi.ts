@@ -18,14 +18,14 @@ import { clientSchema, invoiceSchema, lineItemSchema } from '@/lib/validators'
  *                                          └►  the Postman collection
  *
  * Note the money fields below are `*_paise` integers. The database stores
- * rupees as numeric(14,2), and lib/money-api.ts converts at the edge — see the
+ * major units as numeric(14,2), and lib/money-api.ts converts at the edge — see the
  * comment there for why the wire contract must not carry decimals.
  */
 
 const paise = z
   .number()
   .int()
-  .meta({ description: 'Amount in paise. 2500000 is ₹25,000.', examples: [2500000] })
+  .meta({ description: 'Amount in minor units. 2500000 is $25,000.', examples: [2500000] })
 
 const problemSchema = z
   .object({
@@ -43,8 +43,9 @@ const addressSchema = z.object({
   line1: z.string().nullable(),
   line2: z.string().nullable(),
   city: z.string().nullable(),
-  state_code: z.string().nullable(),
-  pincode: z.string().nullable(),
+  region: z.string().nullable(),
+  postal_code: z.string().nullable(),
+  country_code: z.string().nullable(),
   country: z.string().nullable(),
 })
 
@@ -52,7 +53,7 @@ const clientOut = z
   .object({
     id: z.string(),
     name: z.string(),
-    gstin: z.string().nullable(),
+    tax_id: z.string().nullable(),
     email: z.string().nullable(),
     phone: z.string().nullable(),
     address: addressSchema,
@@ -68,18 +69,13 @@ const lineItemOut = z
     id: z.string(),
     position: z.number().int(),
     description: z.string(),
-    hsn_sac: z.string().nullable(),
     quantity: z.number(),
     unit: z.string(),
     rate_paise: paise,
     discount_percent: z.number(),
-    gst_rate: z.number().meta({ description: 'GST slab as a percentage: 0, 5, 12, 18, 28.' }),
-    cess_rate: z.number(),
+    tax_rate: z.number().meta({ description: 'Tax percentage, exclusive.' }),
     taxable_value_paise: paise,
-    cgst_amount_paise: paise,
-    sgst_amount_paise: paise,
-    igst_amount_paise: paise,
-    cess_amount_paise: paise,
+    tax_amount_paise: paise,
     line_total_paise: paise,
   })
   .meta({ id: 'LineItem' })
@@ -98,18 +94,12 @@ const invoiceOut = z
     issue_date: z.string(),
     due_date: z.string().nullable(),
     currency: z.string(),
-    place_of_supply_state_code: z.string(),
-    is_export: z.boolean(),
-    reverse_charge: z.boolean(),
     notes: z.string().nullable(),
     terms: z.string().nullable(),
     subtotal_paise: paise,
     discount_total_paise: paise,
     taxable_total_paise: paise,
-    cgst_total_paise: paise,
-    sgst_total_paise: paise,
-    igst_total_paise: paise,
-    cess_total_paise: paise,
+    tax_total_paise: paise,
     round_off_paise: paise,
     total_paise: paise,
     amount_in_words: z.string().nullable(),
@@ -174,7 +164,7 @@ export function buildOpenApiDocument(serverUrl: string) {
       title: 'Invoice-AI API',
       version: '1.0.0',
       description: [
-        'GST-compliant invoicing over HTTP.',
+        'Global invoicing over HTTP.',
         '',
         '## Authentication',
         'Send your API key as `Authorization: Bearer inv_live_…`. Keys are created in',
@@ -182,9 +172,13 @@ export function buildOpenApiDocument(serverUrl: string) {
         'through this API, so a leaked key cannot mint more keys.',
         '',
         '## Money',
-        'All amounts are integer **paise** (`2500000` is ₹25,000). JSON numbers are IEEE',
-        'doubles, so a contract carrying rupees as decimals would eventually disagree with',
+        'All amounts are integer **minor units** (`2500000` is $25,000). JSON numbers are IEEE',
+        'doubles, so a contract carrying decimals would eventually disagree with',
         'itself about a total.',
+        '',
+        '## Tax',
+        'Each line carries a free-form `tax_rate` percentage. Country presets are',
+        'invoicing defaults, not a compliance engine.',
         '',
         '## Idempotency',
         'Write endpoints that spend an invoice number require an `Idempotency-Key` header',
@@ -405,7 +399,7 @@ export function buildOpenApiDocument(serverUrl: string) {
           tags: ['Invoices'],
           summary: 'Delete a draft',
           description:
-            'Drafts only. An issued invoice holds a number in a series GST requires to be consecutive — cancel it instead.',
+            'Drafts only. An issued invoice holds a number in a consecutive series — cancel it instead.',
           requestParams: { path: z.object({ id: z.string() }) },
           responses: {
             '204': { description: 'Deleted.' },
@@ -418,7 +412,7 @@ export function buildOpenApiDocument(serverUrl: string) {
       '/invoices/{id}/issue': {
         post: {
           tags: ['Invoices'],
-          summary: 'Assign a GST invoice number',
+          summary: 'Assign an invoice number',
           description:
             'Permanent and one-way. Requires an `Idempotency-Key`; a retry replays the first response. Even without one, issuing twice returns the same number.',
           requestParams: { path: z.object({ id: z.string() }) },

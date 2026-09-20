@@ -21,9 +21,9 @@ import { cn } from '@/lib/utils'
 import type { NormalisedInvoiceDraft } from '@/lib/ai/normalise'
 
 const EXAMPLES = [
-  'Invoice Sharma Traders ₹45,000 for brand design',
-  '3 days consulting at 12000 a day for Kadam Retail, net 30',
-  'Bill Acme 2 lakh for the website, inclusive of GST',
+  'Invoice Acme $45,000 for brand design',
+  '3 days consulting at 12000 a day for Acme Retail, net 30',
+  'Bill Acme 20000 for the website, inclusive of tax',
 ]
 
 type Phase = 'idle' | 'recording' | 'transcribing' | 'parsing'
@@ -49,11 +49,11 @@ interface Turn {
 export function AiPanel({
   onDraft,
   business,
-  currency = 'INR',
+  currency = 'USD',
   disabled,
 }: {
   onDraft: (draft: NormalisedInvoiceDraft) => void
-  business: { state_code: string; is_gst_registered: boolean }
+  business: { country_code?: string | null }
   currency?: string
   disabled?: boolean
 }) {
@@ -316,7 +316,7 @@ export function AiPanel({
             }
             if (e.key === 'Escape') closePanel()
           }}
-          placeholder={recording ? 'Listening…' : 'Invoice Sharma Traders ₹45,000 for design work'}
+          placeholder={recording ? 'Listening…' : 'Invoice Acme $45,000 for design work'}
           disabled={busy || recording}
           className="bg-background"
         />

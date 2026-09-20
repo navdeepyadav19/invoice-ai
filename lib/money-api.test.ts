@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { invoiceTotalsToPaise, paiseToStored, storedToPaise } from './money-api'
+import { invoiceTotalsToPaise, lineItemAmountsToPaise, paiseToStored, storedToPaise } from './money-api'
 
 /**
  * The bug this file exists to prevent: postgrest returns numeric(14,2) as a
@@ -41,10 +41,7 @@ describe('invoice totals', () => {
       subtotal: '25000.00',
       discount_total: '0.00',
       taxable_total: '25000.00',
-      cgst_total: '2250.00',
-      sgst_total: '2250.00',
-      igst_total: '0.00',
-      cess_total: '0.00',
+      tax_total: '4500.00',
       round_off: '0.00',
       total: '29500.00',
     })
@@ -53,20 +50,17 @@ describe('invoice totals', () => {
       subtotal_paise: 2500000,
       discount_total_paise: 0,
       taxable_total_paise: 2500000,
-      cgst_total_paise: 225000,
-      sgst_total_paise: 225000,
-      igst_total_paise: 0,
-      cess_total_paise: 0,
+      tax_total_paise: 450000,
       round_off_paise: 0,
       total_paise: 2950000,
     })
 
     // Every key on the wire ends in _paise. A field that slipped through in
-    // rupees would be indistinguishable to an integrator until a reconciliation.
+    // decimals would be indistinguishable to an integrator until a reconciliation.
     expect(Object.keys(result).every((key) => key.endsWith('_paise'))).toBe(true)
   })
 
-  it('keeps an 18% intra-state split adding up', () => {
+  it('reads legacy CGST/SGST/IGST columns when tax_total is absent', () => {
     const result = invoiceTotalsToPaise({
       subtotal: '25000.00',
       discount_total: '0.00',
@@ -79,12 +73,41 @@ describe('invoice totals', () => {
       total: '29500.00',
     })
 
-    const tax = result.cgst_total_paise + result.sgst_total_paise + result.igst_total_paise
-    expect(result.taxable_total_paise + tax + result.round_off_paise).toBe(result.total_paise)
+    expect(result.tax_total_paise).toBe(450000)
+  })
+
+  it('keeps an 18% tax adding up', () => {
+    const result = invoiceTotalsToPaise({
+      subtotal: '25000.00',
+      discount_total: '0.00',
+      taxable_total: '25000.00',
+      tax_total: '4500.00',
+      round_off: '0.00',
+      total: '29500.00',
+    })
+
+    expect(result.taxable_total_paise + result.tax_total_paise + result.round_off_paise).toBe(
+      result.total_paise,
+    )
   })
 
   it('handles a negative round-off', () => {
-    // round_off is an adjustment to reach a whole rupee and is signed.
     expect(storedToPaise('-0.40')).toBe(-40)
+  })
+})
+
+describe('line items', () => {
+  it('maps tax_amount to tax_amount_paise', () => {
+    const result = lineItemAmountsToPaise({
+      taxable_value: '1000.00',
+      tax_amount: '180.00',
+      line_total: '1180.00',
+    })
+
+    expect(result).toEqual({
+      taxable_value_paise: 100000,
+      tax_amount_paise: 18000,
+      line_total_paise: 118000,
+    })
   })
 })

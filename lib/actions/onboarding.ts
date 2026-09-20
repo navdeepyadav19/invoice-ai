@@ -12,12 +12,11 @@ import { toFieldErrors, type StepState } from '@/lib/form-state'
 /**
  * Onboarding is two steps.
  *
- *   1. Who are you?  — a GSTIN (or PAN) that we resolve against the GST registry
- *   2. How do you get paid? — account name, number, IFSC
+ *   1. Who are you?  — name, country (IP-detected), currency, address
+ *   2. How do you get paid? — account name, number, routing code
  *
- * Anything the registry can supply is never asked for, and anything with a sane
- * default (numbering, terms, notes, logo) lives in settings instead. The goal is
- * that a registered business types fifteen characters and is done.
+ * Anything with a sane default (numbering, terms, notes, logo) lives in
+ * settings instead. The goal is that a new business types a name and is done.
  */
 
 async function setStep(step: number) {
@@ -63,7 +62,7 @@ export async function saveBankStep(_prev: StepState, formData: FormData): Promis
   const parsed = paymentDetailsSchema.safeParse({
     account_name: value('account_name'),
     account_number: value('account_number'),
-    ifsc: value('ifsc'),
+    routing_number: value('routing_number'),
   })
 
   if (!parsed.success) return toFieldErrors(parsed.error, formData)
@@ -74,7 +73,7 @@ export async function saveBankStep(_prev: StepState, formData: FormData): Promis
     .update({
       account_name: parsed.data.account_name ?? null,
       account_number: parsed.data.account_number ?? null,
-      ifsc: parsed.data.ifsc || null,
+      routing_number: parsed.data.routing_number || null,
     })
     .eq('id', business.id)
 

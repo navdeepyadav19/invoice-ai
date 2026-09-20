@@ -6,7 +6,7 @@ type Params = { id: string }
 /**
  * POST /api/v1/invoices/{id}/issue
  *
- * Assigns a permanent GST invoice number. This is the single most important
+ * Assigns a permanent invoice number. This is the single most important
  * endpoint to get idempotency right on, and it is defended twice:
  *
  *   1. Idempotency-Key (required, 428 without one) replays the stored response
@@ -16,7 +16,7 @@ type Params = { id: string }
  *      entirely cannot burn a second number.
  *
  * Belt and braces, because the cost of getting it wrong is a permanent gap in a
- * series that GST law requires to be consecutive.
+ * series that must stay consecutive.
  */
 export const POST = withApi<Params>(
   { scope: 'invoices:issue', idempotent: 'required' },

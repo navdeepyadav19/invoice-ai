@@ -25,7 +25,7 @@ export type ServiceErrorCode =
   | 'conflict'
   /** Authenticated, but this credential lacks the scope. */
   | 'forbidden'
-  /** Something we depend on failed: Resend, OpenAI, the GSTIN registry. */
+  /** Something we depend on failed: Resend, OpenAI, or another provider. */
   | 'upstream_failed'
 
 export interface ServiceErrorDetail {
@@ -90,7 +90,7 @@ export function fromPostgres(error: { code?: string; message?: string } | null):
     // 23505 unique_violation — e.g. two invoices claiming one number.
     case '23505':
       return new ServiceError('conflict', message)
-    // 23514 check_violation — e.g. an invoice prefix over the GST length limit.
+    // 23514 check_violation — e.g. an invoice prefix over the length limit.
     case '23514':
       return new ServiceError('validation', message)
     default:
