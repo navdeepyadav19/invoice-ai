@@ -49,14 +49,14 @@ export default async function ApiKeysPage() {
 curl ${siteUrl()}/api/v1/invoices \\
   -H "Authorization: Bearer inv_live_..."
 
-# Issue one. Writes that spend an invoice number need an Idempotency-Key,
+# Finalize one. Writes that spend an invoice number need an Idempotency-Key,
 # so a retry can never assign a second number.
-curl -X POST ${siteUrl()}/api/v1/invoices/<id>/issue \\
+curl -X POST ${siteUrl()}/api/v1/invoices/<id>/finalize \\
   -H "Authorization: Bearer inv_live_..." \\
   -H "Idempotency-Key: $(uuidgen)"`}
         </pre>
         <p className="text-xs text-muted-foreground">
-          Amounts are integer paise — <code className="text-[11px]">2500000</code> is ₹25,000.
+          Amounts are integer minor units — <code className="text-[11px]">250000</code> is $2,500.
         </p>
       </section>
     </div>

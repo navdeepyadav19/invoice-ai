@@ -7,7 +7,7 @@ type Params = { id: string }
 /**
  * POST /api/v1/invoices/{id}/send  { to? }
  *
- * Issues the invoice first if it has no number yet, then emails the PDF.
+ * Finalizes the invoice first if it has no number yet, then emails the PDF.
  *
  * Rate-limited far harder than everything else (10/hour, not 120/minute):
  * each call costs money, lands in a third party's inbox, and is the first thing
@@ -26,10 +26,11 @@ export const POST = withApi<Params>(
     const body = (await readJson(request)) as { to?: string }
 
     const result = await invoices.send(ctx, id, { to: body?.to })
+    const { invoice } = await invoices.get(ctx, id)
 
     return json({
       data: {
-        id,
+        id: invoice.public_id,
         invoice_number: result.invoiceNumber,
         emailed: result.emailed,
         public_url: result.publicUrl,

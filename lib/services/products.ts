@@ -126,13 +126,11 @@ export async function update(
 export async function archive(ctx: AuthContext, id: string): Promise<ProductRow> {
   return setActive(ctx, id, false)
 }
-
 export async function restore(ctx: AuthContext, id: string): Promise<ProductRow> {
   return setActive(ctx, id, true)
 }
 
-async function setActive(ctx: AuthContext, id: string, active: boolean): Promise<ProductRow> {
-  requireScope(ctx, 'products:write')
+async function setActive(ctx: AuthContext, id: string, active: boolean): Promise<ProductRow> {  requireScope(ctx, 'products:write')
 
   const existing = await get(ctx, id)
   if (existing.active === active) return existing
@@ -148,6 +146,26 @@ async function setActive(ctx: AuthContext, id: string, active: boolean): Promise
   if (!data) throw notFound('Product not found.')
 
   return data as ProductRow
+}
+
+/**
+ * UUID → `prod_…` for a batch of product rows. Used when serializing prices
+ * and invoice lines Stripe-style.
+ */
+export async function mapPublicIds(ctx: AuthContext, ids: string[]): Promise<Map<string, string>> {
+  requireScope(ctx, 'products:read')
+
+  const unique = [...new Set(ids)]
+  const map = new Map<string, string>()
+  if (unique.length === 0) return map
+
+  const { data, error } = await ctx.supabase.from('products').select('id, public_id').in('id', unique)
+  if (error) throw fromPostgres(error)
+
+  for (const row of (data ?? []) as Array<{ id: string; public_id: string }>) {
+    map.set(row.id, row.public_id)
+  }
+  return map
 }
 
 function clampLimit(limit?: number): number {

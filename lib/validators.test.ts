@@ -99,7 +99,7 @@ describe('line items', () => {
 })
 
 describe('invoices', () => {
-  it('defaults currency to USD and needs no supply geography', () => {
+  it('leaves currency unset so the business default applies, and needs no supply geography', () => {
     const result = invoiceSchema.safeParse({
       client: { name: 'Acme' },
       issue_date: '2026-09-17',
@@ -107,7 +107,19 @@ describe('invoices', () => {
     })
 
     expect(result.success).toBe(true)
-    if (result.success) expect(result.data.currency).toBe('USD')
+    if (result.success) expect(result.data.currency).toBeUndefined()
+  })
+
+  it('passes an explicit currency through', () => {
+    const result = invoiceSchema.safeParse({
+      client: { name: 'Acme' },
+      issue_date: '2026-09-17',
+      currency: 'eur',
+      items: [{ description: 'Design', quantity: 1, rate: 100 }],
+    })
+
+    expect(result.success).toBe(true)
+    if (result.success) expect(result.data.currency).toBe('EUR')
   })
 
   it('accepts a priced line that borrows from the catalog', () => {

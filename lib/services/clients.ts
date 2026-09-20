@@ -2,6 +2,7 @@ import { requireScope, type AuthContext } from '@/lib/auth/context'
 import { fromPostgres, invalidState, notFound, ServiceError } from '@/lib/services/errors'
 import { clientSchema, type ClientInput } from '@/lib/validators'
 import { decodeCursor, encodeCursor, type Page } from '@/lib/services/pagination'
+import { isCustomerId, nextCustomerId } from '@/lib/catalog/ids'
 import type { ClientRow } from '@/lib/database.types'
 
 /**
@@ -62,7 +63,10 @@ export async function list(ctx: AuthContext, options: ListClientsOptions = {}): 
 export async function get(ctx: AuthContext, id: string): Promise<ClientRow> {
   requireScope(ctx, 'clients:read')
 
-  const { data, error } = await ctx.supabase.from('clients').select('*').eq('id', id).maybeSingle()
+  const q = ctx.supabase.from('clients').select('*')
+  const { data, error } = isCustomerId(id)
+    ? await q.eq('public_id', id).maybeSingle()
+    : await q.eq('id', id).maybeSingle()
 
   if (error) throw fromPostgres(error)
   // RLS returns nothing for another owner's row, so this is also the "not
@@ -80,7 +84,7 @@ export async function create(ctx: AuthContext, input: ClientInput): Promise<Clie
 
   const { data, error } = await ctx.supabase
     .from('clients')
-    .insert({ ...emptyToNull(parsed.data), owner_id: ctx.userId })
+    .insert({ ...emptyToNull(parsed.data), owner_id: ctx.userId, public_id: nextCustomerId() })
     .select('*')
     .single()
 
@@ -100,10 +104,12 @@ export async function update(
   const parsed = clientSchema.partial().safeParse(input)
   if (!parsed.success) throw validationError(parsed.error)
 
+  const existing = await get(ctx, id)
+
   const { data, error } = await ctx.supabase
     .from('clients')
     .update(emptyToNull(parsed.data))
-    .eq('id', id)
+    .eq('id', existing.id)
     .select('*')
     .maybeSingle()
 
@@ -128,7 +134,7 @@ export async function archive(ctx: AuthContext, id: string): Promise<ClientRow> 
   const { data, error } = await ctx.supabase
     .from('clients')
     .update({ archived_at: new Date().toISOString() })
-    .eq('id', id)
+    .eq('id', existing.id)
     .select('*')
     .maybeSingle()
 
@@ -141,10 +147,12 @@ export async function archive(ctx: AuthContext, id: string): Promise<ClientRow> 
 export async function unarchive(ctx: AuthContext, id: string): Promise<ClientRow> {
   requireScope(ctx, 'clients:write')
 
+  const existing = await get(ctx, id)
+
   const { data, error } = await ctx.supabase
     .from('clients')
     .update({ archived_at: null })
-    .eq('id', id)
+    .eq('id', existing.id)
     .select('*')
     .maybeSingle()
 
@@ -155,9 +163,28 @@ export async function unarchive(ctx: AuthContext, id: string): Promise<ClientRow
 }
 
 /**
+ * A stored row back into the shape the invoice draft input expects.
+ * Used when re-saving a draft (add/remove item, PATCH) without losing data.
+ */
+export function rowToInput(row: ClientRow): ClientInput {
+  return {
+    name: row.name,
+    tax_id: row.tax_id ?? undefined,
+    email: row.email ?? undefined,
+    phone: row.phone ?? undefined,
+    address_line1: row.address_line1 ?? undefined,
+    address_line2: row.address_line2 ?? undefined,
+    city: row.city ?? undefined,
+    region: row.region ?? undefined,
+    postal_code: (row.postal_code ?? row.pincode ?? undefined) as string | undefined,
+    country_code: (row.country_code ?? undefined) as string | undefined,
+    country: row.country ?? undefined,
+  }
+}
+/**
  * Find an existing client by name, or create one.
  *
- * This is what "invoice Acme ₹25,000" needs: the caller has a name, not an id.
+ * This is what "invoice Acme $25,000" needs: the caller has a name, not an id.
  * Matching is case-insensitive and exact — a fuzzy match that silently billed
  * "Acme Ltd" when you meant "Acme Industries" would be worse than creating a
  * duplicate you can merge later.

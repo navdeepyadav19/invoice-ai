@@ -37,7 +37,15 @@
       "value": ""
     },
     {
-      "key": "client_id",
+      "key": "customer_id",
+      "value": ""
+    },
+    {
+      "key": "product_id",
+      "value": ""
+    },
+    {
+      "key": "price_id",
       "value": ""
     },
     {
@@ -54,7 +62,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "description": "Requires the `business:read` scope. Read your business profile, GSTIN and bank details.",
+            "description": "Requires the `business:read` scope. Read your business profile, tax ID and bank details.",
             "url": {
               "raw": "{{base_url}}/business",
               "host": [
@@ -87,21 +95,21 @@
       ]
     },
     {
-      "name": "Clients",
+      "name": "Customers",
       "item": [
         {
-          "name": "List clients",
+          "name": "List customers",
           "request": {
             "method": "GET",
             "header": [],
             "description": "",
             "url": {
-              "raw": "{{base_url}}/clients",
+              "raw": "{{base_url}}/customers",
               "host": [
                 "{{base_url}}"
               ],
               "path": [
-                "clients"
+                "customers"
               ]
             }
           },
@@ -125,7 +133,7 @@
           ]
         },
         {
-          "name": "Create a client",
+          "name": "Create a customer",
           "request": {
             "method": "POST",
             "header": [
@@ -136,17 +144,17 @@
             ],
             "description": "",
             "url": {
-              "raw": "{{base_url}}/clients",
+              "raw": "{{base_url}}/customers",
               "host": [
                 "{{base_url}}"
               ],
               "path": [
-                "clients"
+                "customers"
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Acme Industries Pvt Ltd\",\n  \"gstin\": \"29AABCU9603R1ZJ\",\n  \"email\": \"accounts@acme.example\",\n  \"address_line1\": \"4th Floor, Prestige Tower\",\n  \"city\": \"Bengaluru\",\n  \"state_code\": \"29\",\n  \"pincode\": \"560001\",\n  \"country\": \"India\"\n}"
+              "raw": "{\n  \"name\": \"Acme Industries\",\n  \"tax_id\": \"US-EIN 12-3456789\",\n  \"email\": \"accounts@acme.example\",\n  \"address\": {\n    \"line1\": \"4th Floor, Market Tower\",\n    \"city\": \"Austin\",\n    \"state\": \"TX\",\n    \"postal_code\": \"73301\",\n    \"country\": \"US\"\n  }\n}"
             }
           },
           "event": [
@@ -163,26 +171,26 @@
                   "  }",
                   "});",
                   "pm.test('echoes a request id', () => pm.expect(pm.response.headers.get('x-request-id')).to.be.a('string'));",
-                  "if (pm.response.code === 201) pm.environment.set('client_id', pm.response.json().data.id);"
+                  "if (pm.response.code === 201) pm.environment.set('customer_id', pm.response.json().data.id);"
                 ]
               }
             }
           ]
         },
         {
-          "name": "Read a client",
+          "name": "Read a customer",
           "request": {
             "method": "GET",
             "header": [],
             "description": "",
             "url": {
-              "raw": "{{base_url}}/clients/{{client_id}}",
+              "raw": "{{base_url}}/customers/{{customer_id}}",
               "host": [
                 "{{base_url}}"
               ],
               "path": [
-                "clients",
-                "{{client_id}}"
+                "customers",
+                "{{customer_id}}"
               ]
             }
           },
@@ -206,19 +214,19 @@
           ]
         },
         {
-          "name": "Update a client",
+          "name": "Update a customer",
           "request": {
             "method": "PATCH",
             "header": [],
             "description": "",
             "url": {
-              "raw": "{{base_url}}/clients/{{client_id}}",
+              "raw": "{{base_url}}/customers/{{customer_id}}",
               "host": [
                 "{{base_url}}"
               ],
               "path": [
-                "clients",
-                "{{client_id}}"
+                "customers",
+                "{{customer_id}}"
               ]
             }
           },
@@ -242,20 +250,140 @@
           ]
         },
         {
-          "name": "Archive a client",
+          "name": "Delete a customer",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "description": "Archives rather than deletes: issued invoices reference customers and must keep naming who they were billed to.",
+            "url": {
+              "raw": "{{base_url}}/customers/{{customer_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "customers",
+                "{{customer_id}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
+                  "pm.test('errors are problem+json', () => {",
+                  "  if (pm.response.code >= 400) {",
+                  "    pm.expect(pm.response.headers.get('content-type')).to.include('application/problem+json');",
+                  "    pm.expect(pm.response.json()).to.have.property('code');",
+                  "  }",
+                  "});",
+                  "pm.test('echoes a request id', () => pm.expect(pm.response.headers.get('x-request-id')).to.be.a('string'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Products",
+      "item": [
+        {
+          "name": "List products",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "",
+            "url": {
+              "raw": "{{base_url}}/products",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "products"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
+                  "pm.test('errors are problem+json', () => {",
+                  "  if (pm.response.code >= 400) {",
+                  "    pm.expect(pm.response.headers.get('content-type')).to.include('application/problem+json');",
+                  "    pm.expect(pm.response.json()).to.have.property('code');",
+                  "  }",
+                  "});",
+                  "pm.test('echoes a request id', () => pm.expect(pm.response.headers.get('x-request-id')).to.be.a('string'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create a product",
           "request": {
             "method": "POST",
-            "header": [],
-            "description": "Archive rather than delete: issued invoices reference clients and must keep naming who they were billed to. Archiving twice succeeds.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "",
             "url": {
-              "raw": "{{base_url}}/clients/{{client_id}}/archive",
+              "raw": "{{base_url}}/products",
               "host": [
                 "{{base_url}}"
               ],
               "path": [
-                "clients",
-                "{{client_id}}",
-                "archive"
+                "products"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Consulting retainer\",\n  \"description\": \"Monthly advisory block.\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
+                  "pm.test('errors are problem+json', () => {",
+                  "  if (pm.response.code >= 400) {",
+                  "    pm.expect(pm.response.headers.get('content-type')).to.include('application/problem+json');",
+                  "    pm.expect(pm.response.json()).to.have.property('code');",
+                  "  }",
+                  "});",
+                  "pm.test('echoes a request id', () => pm.expect(pm.response.headers.get('x-request-id')).to.be.a('string'));",
+                  "if (pm.response.code === 201) pm.environment.set('product_id', pm.response.json().data.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Read a product",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "",
+            "url": {
+              "raw": "{{base_url}}/products/{{product_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "products",
+                "{{product_id}}"
               ]
             }
           },
@@ -279,20 +407,248 @@
           ]
         },
         {
-          "name": "Un-archive a client",
+          "name": "Update a product",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "description": "",
+            "url": {
+              "raw": "{{base_url}}/products/{{product_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "products",
+                "{{product_id}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
+                  "pm.test('errors are problem+json', () => {",
+                  "  if (pm.response.code >= 400) {",
+                  "    pm.expect(pm.response.headers.get('content-type')).to.include('application/problem+json');",
+                  "    pm.expect(pm.response.json()).to.have.property('code');",
+                  "  }",
+                  "});",
+                  "pm.test('echoes a request id', () => pm.expect(pm.response.headers.get('x-request-id')).to.be.a('string'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Archive a product",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "description": "Prices and invoice lines may reference it, so the row stays with `active: false`.",
+            "url": {
+              "raw": "{{base_url}}/products/{{product_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "products",
+                "{{product_id}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
+                  "pm.test('errors are problem+json', () => {",
+                  "  if (pm.response.code >= 400) {",
+                  "    pm.expect(pm.response.headers.get('content-type')).to.include('application/problem+json');",
+                  "    pm.expect(pm.response.json()).to.have.property('code');",
+                  "  }",
+                  "});",
+                  "pm.test('echoes a request id', () => pm.expect(pm.response.headers.get('x-request-id')).to.be.a('string'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Prices",
+      "item": [
+        {
+          "name": "List prices",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "",
+            "url": {
+              "raw": "{{base_url}}/prices",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "prices"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
+                  "pm.test('errors are problem+json', () => {",
+                  "  if (pm.response.code >= 400) {",
+                  "    pm.expect(pm.response.headers.get('content-type')).to.include('application/problem+json');",
+                  "    pm.expect(pm.response.json()).to.have.property('code');",
+                  "  }",
+                  "});",
+                  "pm.test('echoes a request id', () => pm.expect(pm.response.headers.get('x-request-id')).to.be.a('string'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create a price",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "`unit_amount` is minor units. `recurring.interval` makes it a subscription-style price (stored; nothing auto-bills yet).",
+            "url": {
+              "raw": "{{base_url}}/prices",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "prices"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product\": \"{{product_id}}\",\n  \"nickname\": \"Monthly\",\n  \"unit_amount\": 2500000,\n  \"currency\": \"USD\",\n  \"type\": \"recurring\",\n  \"recurring\": {\n    \"interval\": \"month\",\n    \"interval_count\": 1\n  },\n  \"tax_rate\": 0\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
+                  "pm.test('errors are problem+json', () => {",
+                  "  if (pm.response.code >= 400) {",
+                  "    pm.expect(pm.response.headers.get('content-type')).to.include('application/problem+json');",
+                  "    pm.expect(pm.response.json()).to.have.property('code');",
+                  "  }",
+                  "});",
+                  "pm.test('echoes a request id', () => pm.expect(pm.response.headers.get('x-request-id')).to.be.a('string'));",
+                  "if (pm.response.code === 201) pm.environment.set('price_id', pm.response.json().data.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Read a price",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "",
+            "url": {
+              "raw": "{{base_url}}/prices/{{price_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "prices",
+                "{{price_id}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
+                  "pm.test('errors are problem+json', () => {",
+                  "  if (pm.response.code >= 400) {",
+                  "    pm.expect(pm.response.headers.get('content-type')).to.include('application/problem+json');",
+                  "    pm.expect(pm.response.json()).to.have.property('code');",
+                  "  }",
+                  "});",
+                  "pm.test('echoes a request id', () => pm.expect(pm.response.headers.get('x-request-id')).to.be.a('string'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update a price",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "description": "The parent product cannot change — create a new price instead.",
+            "url": {
+              "raw": "{{base_url}}/prices/{{price_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "prices",
+                "{{price_id}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
+                  "pm.test('errors are problem+json', () => {",
+                  "  if (pm.response.code >= 400) {",
+                  "    pm.expect(pm.response.headers.get('content-type')).to.include('application/problem+json');",
+                  "    pm.expect(pm.response.json()).to.have.property('code');",
+                  "  }",
+                  "});",
+                  "pm.test('echoes a request id', () => pm.expect(pm.response.headers.get('x-request-id')).to.be.a('string'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Archive a price",
           "request": {
             "method": "DELETE",
             "header": [],
             "description": "",
             "url": {
-              "raw": "{{base_url}}/clients/{{client_id}}/archive",
+              "raw": "{{base_url}}/prices/{{price_id}}",
               "host": [
                 "{{base_url}}"
               ],
               "path": [
-                "clients",
-                "{{client_id}}",
-                "archive"
+                "prices",
+                "{{price_id}}"
               ]
             }
           },
@@ -369,7 +725,7 @@
                 "value": "{{idempotency_key}}"
               }
             ],
-            "description": "Requires an `Idempotency-Key`. A retried create would otherwise make a second identical draft with no way to tell which one to issue.",
+            "description": "Requires an `Idempotency-Key`. A retried create would otherwise make a second identical draft with no way to tell which one to finalize.",
             "url": {
               "raw": "{{base_url}}/invoices",
               "host": [
@@ -381,7 +737,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"client\": {\n    \"name\": \"Acme Industries Pvt Ltd\",\n    \"gstin\": \"29AABCU9603R1ZJ\",\n    \"email\": \"accounts@acme.example\",\n    \"state_code\": \"29\",\n    \"country\": \"India\"\n  },\n  \"issue_date\": \"2026-09-17\",\n  \"due_date\": \"2026-10-17\",\n  \"place_of_supply_state_code\": \"29\",\n  \"is_export\": false,\n  \"reverse_charge\": false,\n  \"currency\": \"INR\",\n  \"notes\": \"September consulting retainer.\",\n  \"items\": [\n    {\n      \"description\": \"Consulting services — September 2026\",\n      \"hsn_sac\": \"998311\",\n      \"quantity\": 1,\n      \"unit\": \"NOS\",\n      \"rate\": 25000,\n      \"discount_percent\": 0,\n      \"gst_rate\": 18,\n      \"cess_rate\": 0\n    }\n  ]\n}"
+              "raw": "{\n  \"customer\": \"{{customer_id}}\",\n  \"currency\": \"USD\",\n  \"due_date\": \"2026-10-17\",\n  \"description\": \"September consulting retainer.\",\n  \"items\": [\n    {\n      \"price\": \"{{price_id}}\",\n      \"quantity\": 1\n    },\n    {\n      \"description\": \"Onboarding workshop\",\n      \"quantity\": 1,\n      \"unit\": \"NOS\",\n      \"unit_amount\": 50000,\n      \"tax_rate\": 0\n    }\n  ]\n}"
             }
           },
           "event": [
@@ -445,7 +801,7 @@
           "request": {
             "method": "PATCH",
             "header": [],
-            "description": "Drafts only. An issued invoice is frozen — the client already has the PDF.",
+            "description": "Drafts only. A finalized invoice is frozen — the customer may already have the PDF.",
             "url": {
               "raw": "{{base_url}}/invoices/{{invoice_id}}",
               "host": [
@@ -481,7 +837,7 @@
           "request": {
             "method": "DELETE",
             "header": [],
-            "description": "Drafts only. An issued invoice holds a number in a series GST requires to be consecutive — cancel it instead.",
+            "description": "Drafts only. A finalized invoice holds a number in a consecutive series — void it instead.",
             "url": {
               "raw": "{{base_url}}/invoices/{{invoice_id}}",
               "host": [
@@ -513,7 +869,7 @@
           ]
         },
         {
-          "name": "Assign a GST invoice number",
+          "name": "Finalize a draft",
           "request": {
             "method": "POST",
             "header": [
@@ -522,16 +878,16 @@
                 "value": "{{idempotency_key}}"
               }
             ],
-            "description": "Permanent and one-way. Requires an `Idempotency-Key`; a retry replays the first response. Even without one, issuing twice returns the same number.",
+            "description": "Assigns a permanent number and opens the invoice. Requires an `Idempotency-Key`; a retry replays the first response. Even without one, finalizing twice returns the same number.",
             "url": {
-              "raw": "{{base_url}}/invoices/{{invoice_id}}/issue",
+              "raw": "{{base_url}}/invoices/{{invoice_id}}/finalize",
               "host": [
                 "{{base_url}}"
               ],
               "path": [
                 "invoices",
                 "{{invoice_id}}",
-                "issue"
+                "finalize"
               ]
             }
           },
@@ -549,9 +905,9 @@
                   "  }",
                   "});",
                   "pm.test('echoes a request id', () => pm.expect(pm.response.headers.get('x-request-id')).to.be.a('string'));",
-                  "pm.test('issuing returns a GST number', () => {",
+                  "pm.test('finalizing returns an invoice number', () => {",
                   "  if (pm.response.code === 200) {",
-                  "    pm.expect(pm.response.json().data.invoice_number).to.match(/^[A-Z0-9]{1,5}\\/\\d{2}-\\d{2}\\/\\d{4}$/);",
+                  "    pm.expect(pm.response.json().data.number).to.match(/^[A-Z0-9\\-\\/]{1,16}-\\d{4}$/);",
                   "  }",
                   "});",
                   "// Run this request twice with the SAME Idempotency-Key to see the replay:",
@@ -562,7 +918,7 @@
           ]
         },
         {
-          "name": "Email the invoice to the client",
+          "name": "Email the invoice to the customer",
           "request": {
             "method": "POST",
             "header": [
@@ -575,7 +931,7 @@
                 "value": "{{idempotency_key}}"
               }
             ],
-            "description": "Issues it first if it has no number. Rate-limited to 10/hour — each call costs money and lands in a third party’s inbox.",
+            "description": "Finalizes it first if it has no number. Rate-limited to 10/hour — each call costs money and lands in a third party’s inbox.",
             "url": {
               "raw": "{{base_url}}/invoices/{{invoice_id}}/send",
               "host": [
@@ -627,19 +983,19 @@
             ],
             "description": "",
             "url": {
-              "raw": "{{base_url}}/invoices/{{invoice_id}}/mark-paid",
+              "raw": "{{base_url}}/invoices/{{invoice_id}}/pay",
               "host": [
                 "{{base_url}}"
               ],
               "path": [
                 "invoices",
                 "{{invoice_id}}",
-                "mark-paid"
+                "pay"
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"reference\": \"UTR1234567890\"\n}"
+              "raw": "{\n  \"reference\": \"chk_123456\"\n}"
             }
           },
           "event": [
@@ -662,7 +1018,7 @@
           ]
         },
         {
-          "name": "Cancel an issued invoice",
+          "name": "Void an open invoice",
           "request": {
             "method": "POST",
             "header": [
@@ -675,21 +1031,21 @@
                 "value": "{{idempotency_key}}"
               }
             ],
-            "description": "The number stays on the record — an auditor seeing 0041 then 0043 needs to find 0042 cancelled, not missing. A paid invoice needs a credit note instead.",
+            "description": "The number stays on the record — an auditor seeing 0041 then 0043 needs to find 0042 voided, not missing. A paid invoice needs a credit note instead.",
             "url": {
-              "raw": "{{base_url}}/invoices/{{invoice_id}}/cancel",
+              "raw": "{{base_url}}/invoices/{{invoice_id}}/void",
               "host": [
                 "{{base_url}}"
               ],
               "path": [
                 "invoices",
                 "{{invoice_id}}",
-                "cancel"
+                "void"
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"reason\": \"Raised against the wrong client.\"\n}"
+              "raw": "{\n  \"reason\": \"Raised against the wrong customer.\"\n}"
             }
           },
           "event": [
@@ -763,6 +1119,166 @@
                 "invoices",
                 "{{invoice_id}}",
                 "events"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
+                  "pm.test('errors are problem+json', () => {",
+                  "  if (pm.response.code >= 400) {",
+                  "    pm.expect(pm.response.headers.get('content-type')).to.include('application/problem+json');",
+                  "    pm.expect(pm.response.json()).to.have.property('code');",
+                  "  }",
+                  "});",
+                  "pm.test('echoes a request id', () => pm.expect(pm.response.headers.get('x-request-id')).to.be.a('string'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "InvoiceItems",
+      "item": [
+        {
+          "name": "List lines of one invoice",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "",
+            "url": {
+              "raw": "{{base_url}}/invoice-items",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoice-items"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
+                  "pm.test('errors are problem+json', () => {",
+                  "  if (pm.response.code >= 400) {",
+                  "    pm.expect(pm.response.headers.get('content-type')).to.include('application/problem+json');",
+                  "    pm.expect(pm.response.json()).to.have.property('code');",
+                  "  }",
+                  "});",
+                  "pm.test('echoes a request id', () => pm.expect(pm.response.headers.get('x-request-id')).to.be.a('string'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Append a line to a draft",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotency_key}}"
+              }
+            ],
+            "description": "Either `price` or (`description` + `unit_amount`). Totals recompute, so the response is the whole invoice.",
+            "url": {
+              "raw": "{{base_url}}/invoice-items",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoice-items"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"invoice\": \"{{invoice_id}}\",\n  \"description\": \"Extra review round\",\n  \"quantity\": 1,\n  \"unit_amount\": 10000\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
+                  "pm.test('errors are problem+json', () => {",
+                  "  if (pm.response.code >= 400) {",
+                  "    pm.expect(pm.response.headers.get('content-type')).to.include('application/problem+json');",
+                  "    pm.expect(pm.response.json()).to.have.property('code');",
+                  "  }",
+                  "});",
+                  "pm.test('echoes a request id', () => pm.expect(pm.response.headers.get('x-request-id')).to.be.a('string'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Read one line",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "",
+            "url": {
+              "raw": "{{base_url}}/invoice-items/{{invoice_item_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoice-items",
+                "{{invoice_item_id}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
+                  "pm.test('errors are problem+json', () => {",
+                  "  if (pm.response.code >= 400) {",
+                  "    pm.expect(pm.response.headers.get('content-type')).to.include('application/problem+json');",
+                  "    pm.expect(pm.response.json()).to.have.property('code');",
+                  "  }",
+                  "});",
+                  "pm.test('echoes a request id', () => pm.expect(pm.response.headers.get('x-request-id')).to.be.a('string'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Remove a line from a draft",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "description": "Pass `?invoice=` to scope the search. A draft always keeps at least one line.",
+            "url": {
+              "raw": "{{base_url}}/invoice-items/{{invoice_item_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoice-items",
+                "{{invoice_item_id}}"
               ]
             }
           },

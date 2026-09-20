@@ -71,6 +71,8 @@ function toFormValues(
     issue_date: invoice.issue_date,
     due_date: invoice.due_date ?? '',
     currency: invoice.currency,
+    collection_method:
+      invoice.collection_method === 'charge_automatically' ? 'charge_automatically' : 'send_invoice',
     notes: invoice.notes ?? '',
     terms: invoice.terms ?? '',
     items: items.length

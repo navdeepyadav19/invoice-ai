@@ -1,13 +1,14 @@
 import { json, withApi } from '@/lib/api/handler'
+import { serializeInvoice } from '@/lib/api/serialize'
 import * as invoices from '@/lib/services/invoices'
 
 type Params = { id: string }
 
 /**
- * POST /api/v1/invoices/{id}/issue
+ * POST /api/v1/invoices/{id}/finalize
  *
- * Assigns a permanent invoice number. This is the single most important
- * endpoint to get idempotency right on, and it is defended twice:
+ * Assigns a permanent invoice number and opens the invoice. This is the single
+ * most important endpoint to get idempotency right on, and it is defended twice:
  *
  *   1. Idempotency-Key (required, 428 without one) replays the stored response
  *      for a retry, so the handler never runs a second time.
@@ -19,11 +20,13 @@ type Params = { id: string }
  * series that must stay consecutive.
  */
 export const POST = withApi<Params>(
-  { scope: 'invoices:issue', idempotent: 'required' },
+  { scope: 'invoices:finalize', idempotent: 'required' },
   async (ctx, _request, route) => {
     const { id } = await route.params
-    const { invoiceNumber } = await invoices.issue(ctx, id)
+    await invoices.finalize(ctx, id)
+    const { invoice, items } = await invoices.get(ctx, id)
+    const refs = await invoices.refsForInvoice(ctx, invoice, items)
 
-    return json({ data: { id, invoice_number: invoiceNumber, status: 'sent' } })
+    return json({ data: serializeInvoice(invoice, items, refs) })
   },
 )

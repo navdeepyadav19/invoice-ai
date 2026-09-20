@@ -10,10 +10,10 @@ import { publicInvoiceUrl } from '@/lib/urls'
 import type { SendState } from '@/lib/send-state'
 
 /**
- * Issue an invoice, and optionally email it.
+ * Finalize an invoice, and optionally email it.
  *
  * What used to happen inline here — claim a number, save it, write an event,
- * render a PDF, send mail — is now invoices.issue() and invoices.send(). The
+ * render a PDF, send mail — is now invoices.finalize() and invoices.send(). The
  * important change is not that it's shorter: it's that the claim-and-save is a
  * single locked transaction inside issue_invoice(), so two clicks (or two API
  * retries) can no longer burn two numbers.
@@ -37,7 +37,7 @@ export async function sendInvoiceAction(
       }
     }
 
-    const { invoiceNumber } = await invoices.issue(ctx, invoiceId)
+    const { invoiceNumber } = await invoices.finalize(ctx, invoiceId)
     const { invoice } = await invoices.get(ctx, invoiceId)
 
     revalidateInvoice(invoiceId)
@@ -51,12 +51,12 @@ export async function sendInvoiceAction(
   }
 }
 
-/** Mark an issued invoice as paid. */
-export async function markPaidAction(invoiceId: string): Promise<SendState> {
+/** Mark an open invoice as paid. */
+export async function payAction(invoiceId: string): Promise<SendState> {
   await requireUser()
 
   try {
-    await invoices.markPaid(await contextFromSession(), invoiceId, {})
+    await invoices.pay(await contextFromSession(), invoiceId, {})
   } catch (cause) {
     return toActionError(cause)
   }
@@ -66,16 +66,13 @@ export async function markPaidAction(invoiceId: string): Promise<SendState> {
 }
 
 /**
- * Cancel an issued invoice.
- *
- * New. The `cancelled` status existed in the enum from day one and nothing ever
- * wrote it, so an invoice sent by mistake had no way out.
+ * Void an open invoice.
  */
-export async function cancelInvoiceAction(invoiceId: string, reason: string): Promise<SendState> {
+export async function voidInvoiceAction(invoiceId: string, reason: string): Promise<SendState> {
   await requireUser()
 
   try {
-    await invoices.cancel(await contextFromSession(), invoiceId, { reason })
+    await invoices.voidInvoice(await contextFromSession(), invoiceId, { reason })
   } catch (cause) {
     return toActionError(cause)
   }

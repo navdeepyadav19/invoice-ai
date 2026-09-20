@@ -3,13 +3,10 @@ import type { InvoiceStatus } from '@/lib/database.types'
 /**
  * Overdue is derived, never stored.
  *
- * The alternative — a nightly job flipping `sent` rows to `overdue` — means the
+ * The alternative — a nightly job flipping `open` rows to `overdue` — means the
  * dashboard is wrong for up to a day, and it needs a scheduler that can silently
  * stop running. Computing it at display time is always right and has nothing to
  * operate.
- *
- * The `overdue` enum value stays in the schema so an invoice can still be marked
- * overdue by hand later; nothing writes it today.
  *
  * Paid stays paid. An invoice settled after its due date shows as Paid with no
  * memory of the lateness.
@@ -18,10 +15,10 @@ export function deriveStatus(
   invoice: { status: InvoiceStatus; due_date: string | null },
   now: Date = new Date(),
 ): InvoiceStatus {
-  if (invoice.status !== 'sent') return invoice.status
-  if (!invoice.due_date) return 'sent'
+  if (invoice.status !== 'open') return invoice.status
+  if (!invoice.due_date) return 'open'
 
-  return isPastDue(invoice.due_date, now) ? 'overdue' : 'sent'
+  return isPastDue(invoice.due_date, now) ? 'overdue' : 'open'
 }
 
 /**

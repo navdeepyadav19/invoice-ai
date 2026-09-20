@@ -37,6 +37,7 @@ export interface InvoiceFormValues {
   issue_date: string
   due_date: string
   currency: string
+  collection_method: 'charge_automatically' | 'send_invoice'
   notes: string
   terms: string
   items: LineItemFormValue[]
@@ -80,6 +81,7 @@ export function defaultInvoiceValues(business: BusinessRow | null): InvoiceFormV
     issue_date: today,
     due_date: '',
     currency: business?.currency ?? defaults.currency,
+    collection_method: 'send_invoice',
     notes: business?.default_notes ?? '',
     terms: business?.default_terms ?? '',
     items: [emptyLineItem(defaults.defaultTaxRate)],
@@ -107,6 +109,7 @@ export function toSavePayload(values: InvoiceFormValues) {
     issue_date: values.issue_date,
     due_date: values.due_date,
     currency: values.currency,
+    collection_method: values.collection_method ?? 'send_invoice',
     notes: values.notes,
     terms: values.terms,
     items: values.items.map((item) => ({

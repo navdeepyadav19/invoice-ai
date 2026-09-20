@@ -5,9 +5,9 @@ import * as invoices from '@/lib/services/invoices'
 type Params = { id: string }
 
 /**
- * POST /api/v1/invoices/{id}/mark-paid  { paid_on?, reference? }
+ * POST /api/v1/invoices/{id}/pay  { paid_on?, reference? }
  *
- * Only an issued invoice can be marked paid — not a draft, not a cancelled one.
+ * Only an open invoice can be marked paid — not a draft, not a void one.
  * The service checks the row actually changed before writing the `paid` event,
  * so a wrong id gives 404/409 instead of a success that fires a false
  * invoice.paid webhook.
@@ -18,11 +18,12 @@ export const POST = withApi<Params>(
     const { id } = await route.params
     const body = (await readJson(request)) as { paid_on?: string; reference?: string }
 
-    const invoice = await invoices.markPaid(ctx, id, {
+    const invoice = await invoices.pay(ctx, id, {
       paidOn: body?.paid_on,
       reference: body?.reference,
     })
+    const refs = await invoices.refsForInvoice(ctx, invoice, [])
 
-    return json({ data: serializeInvoice(invoice) })
+    return json({ data: serializeInvoice(invoice, undefined, refs) })
   },
 )

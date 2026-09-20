@@ -26,7 +26,7 @@ export default async function BusinessSettingsPage() {
         <h2 className="text-lg font-medium">Business profile</h2>
         <p className="mt-1 text-sm text-muted-foreground">
           These details appear on every invoice you raise from now on. Invoices you&rsquo;ve already
-          sent keep the details they were issued with.
+          finalized keep the details they were finalized with.
         </p>
       </div>
 

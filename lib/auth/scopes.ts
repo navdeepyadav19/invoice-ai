@@ -23,8 +23,8 @@ export const SCOPES = [
   'invoices:read',
   /** Create, update and delete DRAFTS only. */
   'invoices:write',
-  /** Assign an invoice number, and cancel. One-way, legally meaningful. */
-  'invoices:issue',
+  /** Finalize (assign a number), and void. One-way, legally meaningful. */
+  'invoices:finalize',
   /** Email an invoice to a client. Costs money and is visible to third parties. */
   'invoices:send',
   'payments:write',
@@ -60,7 +60,7 @@ export const SCOPE_DESCRIPTIONS: Record<Scope, string> = {
   'products:write': 'Create, update and archive products and prices',
   'invoices:read': 'List and read invoices, including PDFs',
   'invoices:write': 'Create, edit and delete drafts',
-  'invoices:issue': 'Assign an invoice number, and cancel invoices',
+  'invoices:finalize': 'Finalize invoices and void them',
   'invoices:send': 'Email invoices to your clients',
   'payments:write': 'Mark invoices as paid',
   'webhooks:manage': 'Manage webhook endpoints',

@@ -46,7 +46,7 @@ const PRESETS: { id: string; label: string; hint: string; scopes: Scope[] }[] = 
       'clients:write',
       'invoices:read',
       'invoices:write',
-      'invoices:issue',
+      'invoices:finalize',
       'invoices:send',
       'payments:write',
     ],

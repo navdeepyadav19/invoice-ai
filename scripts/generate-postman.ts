@@ -31,50 +31,70 @@ const OUT_DIR = resolve(import.meta.dirname, '../docs/platform/postman')
  */
 const IDEMPOTENT_OPERATIONS = new Set([
   'POST /invoices',
-  'POST /invoices/{id}/issue',
+  'POST /invoices/{id}/finalize',
   'POST /invoices/{id}/send',
-  'POST /invoices/{id}/mark-paid',
-  'POST /invoices/{id}/cancel',
+  'POST /invoices/{id}/pay',
+  'POST /invoices/{id}/void',
+  'POST /invoice-items',
 ])
 
 /**
  * Realistic examples, so the collection demos well out of the box.
  */
 const EXAMPLE_BODIES: Record<string, unknown> = {
-  'POST /clients': {
+  'POST /customers': {
     name: 'Acme Industries',
     tax_id: 'US-EIN 12-3456789',
     email: 'accounts@acme.example',
-    address_line1: '4th Floor, Market Tower',
-    city: 'Austin',
-    region: 'TX',
-    postal_code: '73301',
-    country_code: 'US',
+    address: {
+      line1: '4th Floor, Market Tower',
+      city: 'Austin',
+      state: 'TX',
+      postal_code: '73301',
+      country: 'US',
+    },
+  },
+  'POST /products': {
+    name: 'Consulting retainer',
+    description: 'Monthly advisory block.',
+  },
+  'POST /prices': {
+    product: '{{product_id}}',
+    nickname: 'Monthly',
+    unit_amount: 2500000,
+    currency: 'USD',
+    type: 'recurring',
+    recurring: { interval: 'month', interval_count: 1 },
+    tax_rate: 0,
   },
   'POST /invoices': {
-    client: {
-      name: 'Acme Industries',
-      email: 'accounts@acme.example',
-      country_code: 'US',
-    },
-    issue_date: '2026-09-17',
-    due_date: '2026-10-17',
+    customer: '{{customer_id}}',
     currency: 'USD',
-    notes: 'September consulting retainer.',
+    due_date: '2026-10-17',
+    description: 'September consulting retainer.',
     items: [
       {
-        description: 'Consulting services — September 2026',
+        price: '{{price_id}}',
+        quantity: 1,
+      },
+      {
+        description: 'Onboarding workshop',
         quantity: 1,
         unit: 'NOS',
-        rate: 25000,
-        discount_percent: 0,
+        unit_amount: 50000,
         tax_rate: 0,
       },
     ],
   },
+  'POST /invoice-items': {
+    invoice: '{{invoice_id}}',
+    description: 'Extra review round',
+    quantity: 1,
+    unit_amount: 10000,
+  },
   'POST /invoices/{id}/send': { to: 'accounts@acme.example' },
-  'POST /invoices/{id}/mark-paid': { reference: 'UTR1234567890' },
-  'POST /invoices/{id}/cancel': { reason: 'Raised against the wrong client.' },
+  'POST /invoices/{id}/pay': { reference: 'chk_123456' },
+  'POST /invoices/{id}/void': { reason: 'Raised against the wrong customer.' },
   'POST /webhook-endpoints': {
     url: 'https://example.com/webhooks/invoice-ai',
     events: ['invoice.issued', 'invoice.paid'],
@@ -131,7 +151,9 @@ function main(): void {
     variable: [
       { key: 'base_url', value: 'https://invoice-ai-horizonpay.vercel.app/api/v1' },
       { key: 'invoice_id', value: '' },
-      { key: 'client_id', value: '' },
+      { key: 'customer_id', value: '' },
+      { key: 'product_id', value: '' },
+      { key: 'price_id', value: '' },
       { key: 'webhook_endpoint_id', value: '' },
     ],
     item: [...folders.entries()].map(([name, item]) => ({ name, item })),
@@ -148,7 +170,9 @@ function main(): void {
       // leak a working credential.
       { key: 'api_key', value: '', type: 'secret', enabled: true },
       { key: 'invoice_id', value: '', enabled: true },
-      { key: 'client_id', value: '', enabled: true },
+      { key: 'customer_id', value: '', enabled: true },
+      { key: 'product_id', value: '', enabled: true },
+      { key: 'price_id', value: '', enabled: true },
       { key: 'webhook_endpoint_id', value: '', enabled: true },
     ],
     _postman_variable_scope: 'environment',
@@ -205,7 +229,7 @@ function variableFor(path: string, name: string): string {
   if (name !== 'id') return name
 
   const resource = path.split('/').filter(Boolean)[0] ?? 'resource'
-  // clients → client_id, invoices → invoice_id, webhook-endpoints → webhook_endpoint_id
+  // invoices → invoice_id, webhook-endpoints → webhook_endpoint_id
   return `${resource.replace(/-/g, '_').replace(/s$/, '')}_id`
 }
 
@@ -227,9 +251,19 @@ function testsFor(key: string): string[] {
       "if (pm.response.code === 201) pm.environment.set('invoice_id', pm.response.json().data.id);",
     )
   }
-  if (key === 'POST /clients') {
+  if (key === 'POST /customers') {
     tests.push(
-      "if (pm.response.code === 201) pm.environment.set('client_id', pm.response.json().data.id);",
+      "if (pm.response.code === 201) pm.environment.set('customer_id', pm.response.json().data.id);",
+    )
+  }
+  if (key === 'POST /products') {
+    tests.push(
+      "if (pm.response.code === 201) pm.environment.set('product_id', pm.response.json().data.id);",
+    )
+  }
+  if (key === 'POST /prices') {
+    tests.push(
+      "if (pm.response.code === 201) pm.environment.set('price_id', pm.response.json().data.id);",
     )
   }
   if (key === 'POST /webhook-endpoints') {
@@ -241,11 +275,11 @@ function testsFor(key: string): string[] {
     )
   }
 
-  if (key === 'POST /invoices/{id}/issue') {
+  if (key === 'POST /invoices/{id}/finalize') {
     tests.push(
-      "pm.test('issuing returns an invoice number', () => {",
+      "pm.test('finalizing returns an invoice number', () => {",
       '  if (pm.response.code === 200) {',
-      "    pm.expect(pm.response.json().data.invoice_number).to.match(/^[A-Z0-9\\-\\/]{1,16}-\\d{4}$/);",
+      "    pm.expect(pm.response.json().data.number).to.match(/^[A-Z0-9\\-\\/]{1,16}-\\d{4}$/);",
       '  }',
       '});',
       "// Run this request twice with the SAME Idempotency-Key to see the replay:",

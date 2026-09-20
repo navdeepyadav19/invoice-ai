@@ -20,17 +20,22 @@ describe('OpenAPI document', () => {
     // generated from this spec silently cannot call it.
     expect(Object.keys(document.paths ?? {}).sort()).toEqual([
       '/business',
-      '/clients',
-      '/clients/{id}',
-      '/clients/{id}/archive',
+      '/customers',
+      '/customers/{id}',
+      '/invoice-items',
+      '/invoice-items/{id}',
       '/invoices',
       '/invoices/{id}',
-      '/invoices/{id}/cancel',
       '/invoices/{id}/events',
-      '/invoices/{id}/issue',
-      '/invoices/{id}/mark-paid',
+      '/invoices/{id}/finalize',
+      '/invoices/{id}/pay',
       '/invoices/{id}/pdf',
       '/invoices/{id}/send',
+      '/invoices/{id}/void',
+      '/prices',
+      '/prices/{id}',
+      '/products',
+      '/products/{id}',
       '/webhook-endpoints',
       '/webhook-endpoints/{id}',
     ])
@@ -49,31 +54,39 @@ describe('OpenAPI document', () => {
     // from the contract would tell integrators the key is optional.
     for (const path of [
       '/invoices',
-      '/invoices/{id}/issue',
+      '/invoices/{id}/finalize',
       '/invoices/{id}/send',
-      '/invoices/{id}/mark-paid',
-      '/invoices/{id}/cancel',
+      '/invoices/{id}/pay',
+      '/invoices/{id}/void',
+      '/invoice-items',
     ]) {
       const post = (document.paths?.[path] as Record<string, { responses?: object }>)?.post
       expect(Object.keys(post?.responses ?? {}), path).toContain('428')
     }
   })
 
-  it('never puts a decimal amount on the wire', () => {
+  it('uses Stripe-style money fields as integers, never decimals', () => {
     const invoice = document.components?.schemas?.Invoice as
-      | { properties?: Record<string, unknown> }
+      | { properties?: Record<string, { type?: string; format?: string }> }
       | undefined
 
-    const moneyish = Object.keys(invoice?.properties ?? {}).filter((key) =>
-      /subtotal|total|discount|tax|round_off|rate/.test(key),
-    )
-
-    expect(moneyish.length).toBeGreaterThan(0)
-    for (const key of moneyish) {
-      // tax_rate and discount_percent are percentages, not money.
-      if (key === 'tax_rate' || key === 'discount_percent') continue
-      expect(key, `${key} should be an integer minor-units field`).toMatch(/_paise$/)
+    // Stripe names: subtotal, discount, taxable, tax, total, amount_due.
+    for (const key of ['subtotal', 'discount', 'taxable', 'tax', 'total', 'amount_due']) {
+      const prop = invoice?.properties?.[key]
+      expect(prop, `${key} should be documented`).toBeDefined()
+      expect(prop?.type, `${key} should be an integer`).toBe('integer')
     }
+
+    const price = document.components?.schemas?.Price as
+      | { properties?: Record<string, { type?: string }> }
+      | undefined
+    expect(price?.properties?.unit_amount?.type).toBe('integer')
+
+    const item = document.components?.schemas?.InvoiceItem as
+      | { properties?: Record<string, { type?: string }> }
+      | undefined
+    expect(item?.properties?.unit_amount?.type).toBe('integer')
+    expect(item?.properties?.amount?.type).toBe('integer')
   })
 
   it('describes errors as problem+json', () => {

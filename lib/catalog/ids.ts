@@ -5,7 +5,6 @@
  * random (unlike sequential numbers) so they can't be enumerated, and prefixed
  * so a price ID pasted where a product ID belongs fails loudly.
  */
-
 const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
 
 function randomSuffix(length = 24): string {
@@ -28,4 +27,28 @@ export function isProductId(value: string): boolean {
 
 export function isPriceId(value: string): boolean {
   return /^price_[A-Za-z0-9]{16,32}$/.test(value)
+}
+
+export function nextCustomerId(): string {
+  return `cus_${randomSuffix()}`
+}
+
+export function nextInvoiceId(): string {
+  return `in_${randomSuffix()}`
+}
+
+export function nextInvoiceItemId(): string {
+  return `ii_${randomSuffix()}`
+}
+
+export function isCustomerId(value: string): boolean {
+  return /^cus_[A-Za-z0-9]{24}$/.test(value)
+}
+
+export function isInvoiceId(value: string): boolean {
+  return /^in_[A-Za-z0-9]{24}$/.test(value)
+}
+
+export function isInvoiceItemId(value: string): boolean {
+  return /^ii_[A-Za-z0-9]{24}$/.test(value)
 }

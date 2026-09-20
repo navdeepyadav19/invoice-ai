@@ -50,7 +50,7 @@ function sampleView(overrides: Partial<InvoiceView> = {}): InvoiceView {
       country_code: 'US',
     },
     number: 'INV-0042',
-    status: 'sent',
+    status: 'open',
     issueDate: '2026-08-16',
     dueDate: '2026-08-31',
     currency: 'USD',

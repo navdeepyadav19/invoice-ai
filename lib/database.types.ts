@@ -16,20 +16,20 @@
 
 export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[]
 
-export type InvoiceStatus = 'draft' | 'sent' | 'paid' | 'overdue' | 'cancelled'
-// `sent` means "assigned a GST number". The API renames it to `invoice.issued`
-// at the edge, because being issued and being emailed are different facts —
-// which is what `emailed` / `email_failed` are for.
+export type InvoiceStatus = 'draft' | 'open' | 'paid' | 'overdue' | 'void'
+// `open` means "finalized with an invoice number". The API name follows Stripe;
+// the stored `sent_at` column keeps its historical name.
+// `overdue` is derived from due_date at read time and is never stored.
 export type InvoiceEventType =
   | 'created'
-  | 'sent'
+  | 'finalized'
   | 'viewed'
   | 'downloaded'
   | 'paid'
   | 'updated'
   | 'emailed'
   | 'email_failed'
-  | 'cancelled'
+  | 'voided'
 
 export type ProfileRow = {
   id: string
@@ -86,6 +86,7 @@ export type BusinessRow = {
 
 export type ClientRow = {
   id: string
+  public_id: string
   owner_id: string
   name: string
   tax_id: string | null
@@ -108,11 +109,13 @@ export type ClientRow = {
 
 export type InvoiceRow = {
   id: string
+  public_id: string
   owner_id: string
   business_id: string
   client_id: string | null
   invoice_number: string | null
   status: InvoiceStatus
+  collection_method: string
   issue_date: string
   due_date: string | null
   currency: string
@@ -145,6 +148,7 @@ export type InvoiceRow = {
 
 export type InvoiceItemRow = {
   id: string
+  public_id: string
   invoice_id: string
   position: number
   description: string

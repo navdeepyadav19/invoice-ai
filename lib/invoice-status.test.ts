@@ -5,20 +5,20 @@ import { daysOverdue, deriveStatus, isPastDue } from './invoice-status'
 const AUG_16 = new Date('2026-08-16T11:30:00+05:30')
 
 describe('deriveStatus', () => {
-  it('marks a sent invoice overdue once its due date has passed', () => {
-    expect(deriveStatus({ status: 'sent', due_date: '2026-08-01' }, AUG_16)).toBe('overdue')
+  it('marks an open invoice overdue once its due date has passed', () => {
+    expect(deriveStatus({ status: 'open', due_date: '2026-08-01' }, AUG_16)).toBe('overdue')
   })
 
   it('is not overdue on the due date itself', () => {
-    expect(deriveStatus({ status: 'sent', due_date: '2026-08-16' }, AUG_16)).toBe('sent')
+    expect(deriveStatus({ status: 'open', due_date: '2026-08-16' }, AUG_16)).toBe('open')
   })
 
   it('is not overdue before the due date', () => {
-    expect(deriveStatus({ status: 'sent', due_date: '2026-08-31' }, AUG_16)).toBe('sent')
+    expect(deriveStatus({ status: 'open', due_date: '2026-08-31' }, AUG_16)).toBe('open')
   })
 
-  it('leaves a sent invoice with no due date alone', () => {
-    expect(deriveStatus({ status: 'sent', due_date: null }, AUG_16)).toBe('sent')
+  it('leaves an open invoice with no due date alone', () => {
+    expect(deriveStatus({ status: 'open', due_date: null }, AUG_16)).toBe('open')
   })
 
   it('keeps a paid invoice paid, however late it was settled', () => {
@@ -29,8 +29,8 @@ describe('deriveStatus', () => {
     expect(deriveStatus({ status: 'draft', due_date: '2020-01-01' }, AUG_16)).toBe('draft')
   })
 
-  it('never resurrects a cancelled invoice', () => {
-    expect(deriveStatus({ status: 'cancelled', due_date: '2020-01-01' }, AUG_16)).toBe('cancelled')
+  it('never resurrects a void invoice', () => {
+    expect(deriveStatus({ status: 'void', due_date: '2020-01-01' }, AUG_16)).toBe('void')
   })
 })
 

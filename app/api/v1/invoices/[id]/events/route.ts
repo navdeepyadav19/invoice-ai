@@ -13,8 +13,8 @@ type Params = { id: string }
  * through the API — which is how an integrator can tell that a client actually
  * opened the invoice.
  *
- * Event names are translated at the edge: the stored enum says `sent`, the API
- * says `invoice.issued`.
+ * Event names follow Stripe: `finalized` is stored and the API says
+ * `invoice.finalized`; `voided` becomes `invoice.voided`.
  */
 export const GET = withApi<Params>({ scope: 'invoices:read' }, async (ctx, _request, route) => {
   const { id } = await route.params

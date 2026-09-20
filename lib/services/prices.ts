@@ -143,10 +143,12 @@ export async function update(
     ])
   }
 
+  const existing = await get(ctx, id)
+
   const parsed = priceSchema
     .partial()
     .superRefine((value, issues) => {
-      if (value.type === 'recurring' && !value.recurring_interval) {
+      if (value.type === 'recurring' && !value.recurring_interval && !existing.recurring_interval) {
         issues.addIssue({
           code: 'custom',
           path: ['recurring_interval'],
@@ -157,7 +159,9 @@ export async function update(
     .safeParse(input)
   if (!parsed.success) throw validationError(parsed.error)
 
-  const existing = await get(ctx, id)
+  // Switching back to one-off must clear the interval, or the database
+  // CHECK (recurring needs interval, one-off forbids it) rejects the row.
+  const clearInterval = parsed.data.type === 'one_time'
 
   const { data, error } = await ctx.supabase
     .from('prices')
@@ -166,12 +170,16 @@ export async function update(
       ...(parsed.data.unit_amount !== undefined ? { unit_amount: parsed.data.unit_amount } : {}),
       ...(parsed.data.currency !== undefined ? { currency: parsed.data.currency } : {}),
       ...(parsed.data.type !== undefined ? { type: parsed.data.type } : {}),
-      ...(parsed.data.recurring_interval !== undefined
-        ? { recurring_interval: parsed.data.recurring_interval ?? null }
-        : {}),
-      ...(parsed.data.interval_count !== undefined
-        ? { interval_count: parsed.data.interval_count }
-        : {}),
+      ...(clearInterval
+        ? { recurring_interval: null, interval_count: 1 }
+        : {
+            ...(parsed.data.recurring_interval !== undefined
+              ? { recurring_interval: parsed.data.recurring_interval ?? null }
+              : {}),
+            ...(parsed.data.interval_count !== undefined
+              ? { interval_count: parsed.data.interval_count }
+              : {}),
+          }),
       ...(parsed.data.tax_rate !== undefined ? { tax_rate: parsed.data.tax_rate } : {}),
       ...(parsed.data.active !== undefined ? { active: parsed.data.active } : {}),
     })

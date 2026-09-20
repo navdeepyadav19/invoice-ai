@@ -1,39 +1,47 @@
 import { json, noContent, readJson, withApi } from '@/lib/api/handler'
+import { parseWire } from '@/lib/api/validate'
 import { serializeInvoice } from '@/lib/api/serialize'
 import * as invoices from '@/lib/services/invoices'
-import type { InvoiceInput } from '@/lib/validators'
+import type { AuthContext } from '@/lib/auth/context'
+import { invoiceWireSchema } from '@/lib/validators'
 
 type Params = { id: string }
 
-/** GET /api/v1/invoices/{id} — includes line items. */
+async function serialized(ctx: AuthContext, id: string) {
+  const { invoice, items } = await invoices.get(ctx, id)
+  const refs = await invoices.refsForInvoice(ctx, invoice, items)
+  return serializeInvoice(invoice, items, refs)
+}
+
+/** GET /api/v1/invoices/{id} — `in_…` or UUID, includes lines. */
 export const GET = withApi<Params>({ scope: 'invoices:read' }, async (ctx, _request, route) => {
   const { id } = await route.params
-  const { invoice, items } = await invoices.get(ctx, id)
-
-  return json({ data: serializeInvoice(invoice, items) })
+  return json({ data: await serialized(ctx, id) })
 })
 
 /**
  * PATCH /api/v1/invoices/{id} — drafts only.
  *
- * Once issued, the document is frozen: a client has a PDF with an invoice number on
- * it, and the record has to keep matching what they received. The service
- * returns 409 invalid_state rather than silently ignoring the write.
+ * Partial: any subset of the create fields. Once finalized, the document is
+ * frozen — the customer may already have the PDF — and the service returns
+ * 409 invalid_state rather than silently ignoring the write.
  */
 export const PATCH = withApi<Params>({ scope: 'invoices:write' }, async (ctx, request, route) => {
   const { id } = await route.params
-  const body = (await readJson(request)) as InvoiceInput
-  const { invoice, items } = await invoices.updateDraft(ctx, id, body)
+  const wire = parseWire(invoiceWireSchema, (await readJson(request)) as unknown)
+  const base = await invoices.readDraftInput(ctx, id)
+  const { invoice, items } = await invoices.updateDraft(ctx, id, await invoices.wireToDraftInput(ctx, wire, base))
+  const refs = await invoices.refsForInvoice(ctx, invoice, items)
 
-  return json({ data: serializeInvoice(invoice, items) })
+  return json({ data: serializeInvoice(invoice, items, refs) })
 })
 
 /**
  * DELETE /api/v1/invoices/{id} — drafts only.
  *
- * An issued invoice can never be deleted. Its number belongs to a consecutive series
- * requires to be consecutive, and a gap is what an audit reads as a hidden
- * sale. Use POST /cancel instead, which keeps the number on the record.
+ * A finalized invoice can never be deleted. Its number belongs to a
+ * consecutive series, and a gap is what an audit reads as a hidden sale.
+ * Use POST /void instead, which keeps the number on the record.
  */
 export const DELETE = withApi<Params>({ scope: 'invoices:write' }, async (ctx, _request, route) => {
   const { id } = await route.params
