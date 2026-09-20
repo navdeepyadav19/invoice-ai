@@ -163,6 +163,39 @@ export type InvoiceItemRow = {
   cess_rate: number
   cess_amount: number
   line_total: number
+  product_id: string | null
+  price_id: string | null
+}
+
+export type ProductRow = {
+  id: string
+  public_id: string
+  owner_id: string
+  name: string
+  description: string | null
+  images: Json
+  active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export type PriceRecurringInterval = 'day' | 'week' | 'month' | 'year'
+
+export type PriceRow = {
+  id: string
+  public_id: string
+  owner_id: string
+  product_id: string
+  nickname: string | null
+  unit_amount: number
+  currency: string
+  type: 'one_time' | 'recurring'
+  recurring_interval: PriceRecurringInterval | null
+  interval_count: number
+  tax_rate: number
+  active: boolean
+  created_at: string
+  updated_at: string
 }
 
 export type MergeTokenRow = {
@@ -265,6 +298,16 @@ export type Database = {
       profiles: Table<ProfileRow>
       businesses: Table<BusinessRow, Omit<Partial<BusinessRow>, 'owner_id' | 'legal_name' | 'country_code'> & Pick<BusinessRow, 'owner_id' | 'legal_name' | 'country_code'>>
       clients: Table<ClientRow, Omit<Partial<ClientRow>, 'owner_id' | 'name'> & Pick<ClientRow, 'owner_id' | 'name'>>
+      products: Table<
+        ProductRow,
+        Omit<Partial<ProductRow>, 'owner_id' | 'public_id' | 'name'> &
+          Pick<ProductRow, 'owner_id' | 'public_id' | 'name'>
+      >
+      prices: Table<
+        PriceRow,
+        Omit<Partial<PriceRow>, 'owner_id' | 'public_id' | 'product_id'> &
+          Pick<PriceRow, 'owner_id' | 'public_id' | 'product_id'>
+      >
       invoices: Table<
         InvoiceRow,
         Omit<Partial<InvoiceRow>, 'owner_id' | 'business_id'> &

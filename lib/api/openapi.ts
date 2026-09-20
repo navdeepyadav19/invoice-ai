@@ -77,6 +77,8 @@ const lineItemOut = z
     taxable_value_paise: paise,
     tax_amount_paise: paise,
     line_total_paise: paise,
+    product_id: z.string().nullable(),
+    price_id: z.string().nullable(),
   })
   .meta({ id: 'LineItem' })
 

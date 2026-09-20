@@ -86,6 +86,8 @@ export function serializeLineItem(row: InvoiceItemRow) {
     rate_paise: Math.round(Number(row.rate) * 100),
     discount_percent: Number(row.discount_percent),
     tax_rate: Number(row.tax_rate ?? row.gst_rate ?? 0),
+    product_id: row.product_id,
+    price_id: row.price_id,
     ...lineItemAmountsToPaise(row),
   }
 }

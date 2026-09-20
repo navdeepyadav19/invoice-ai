@@ -6,6 +6,8 @@ import {
   invoiceSchema,
   lineItemSchema,
   numberingSchema,
+  priceSchema,
+  productSchema,
 } from './validators'
 
 describe('business profile', () => {
@@ -106,6 +108,70 @@ describe('invoices', () => {
 
     expect(result.success).toBe(true)
     if (result.success) expect(result.data.currency).toBe('USD')
+  })
+
+  it('accepts a priced line that borrows from the catalog', () => {
+    const result = invoiceSchema.safeParse({
+      client: { name: 'Acme' },
+      issue_date: '2026-09-17',
+      items: [{ quantity: 2, price: 'price_AbC12345678901234567890' }],
+    })
+
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects an ad-hoc line with no description and no price', () => {
+    const result = invoiceSchema.safeParse({
+      client: { name: 'Acme' },
+      issue_date: '2026-09-17',
+      items: [{ quantity: 1, rate: 100 }],
+    })
+
+    expect(result.success).toBe(false)
+  })
+})
+
+describe('catalog', () => {
+  it('accepts a minimal product', () => {
+    expect(productSchema.safeParse({ name: 'Retainer' }).success).toBe(true)
+  })
+
+  it('accepts a one-off price', () => {
+    expect(
+      priceSchema.safeParse({ product: 'prod_xxx', unit_amount: 5000, currency: 'usd' }).success,
+    ).toBe(true)
+  })
+
+  it('accepts a recurring price with an interval', () => {
+    const result = priceSchema.safeParse({
+      product: 'prod_xxx',
+      unit_amount: 500,
+      currency: 'USD',
+      type: 'recurring',
+      recurring_interval: 'month',
+    })
+
+    expect(result.success).toBe(true)
+  })
+
+  it('requires an interval on recurring prices and forbids it on one-off ones', () => {
+    expect(
+      priceSchema.safeParse({
+        product: 'prod_xxx',
+        unit_amount: 500,
+        currency: 'USD',
+        type: 'recurring',
+      }).success,
+    ).toBe(false)
+
+    expect(
+      priceSchema.safeParse({
+        product: 'prod_xxx',
+        unit_amount: 500,
+        currency: 'USD',
+        recurring_interval: 'month',
+      }).success,
+    ).toBe(false)
   })
 })
 

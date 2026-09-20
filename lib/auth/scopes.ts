@@ -1,14 +1,14 @@
 /**
  * What a credential is allowed to do.
  *
- * Scopes exist because "this key is valid" and "this key may issue a GST
+ * Scopes exist because "this key is valid" and "this key may issue an
  * invoice" are different questions. A Zapier integration that only needs to read
  * invoices should not hold a credential that can email your clients.
  *
  * Two rules that shape the list below:
  *
  *  1. **Issuing is separate from writing.** Editing a draft is reversible;
- *     assigning a GST number is not. `invoices:write` cannot issue.
+ *     assigning an invoice number is not. `invoices:write` cannot issue.
  *  2. **Credential management is never a scope.** Creating and revoking API keys
  *     happens only in the web UI, so a leaked key cannot mint more keys or hide
  *     its own tracks.
@@ -18,10 +18,12 @@ export const SCOPES = [
   'business:read',
   'clients:read',
   'clients:write',
+  'products:read',
+  'products:write',
   'invoices:read',
   /** Create, update and delete DRAFTS only. */
   'invoices:write',
-  /** Assign a GST number, and cancel. One-way, legally meaningful. */
+  /** Assign an invoice number, and cancel. One-way, legally meaningful. */
   'invoices:issue',
   /** Email an invoice to a client. Costs money and is visible to third parties. */
   'invoices:send',
@@ -54,9 +56,11 @@ export const SCOPE_DESCRIPTIONS: Record<Scope, string> = {
   'business:read': 'Read your business profile, tax ID and bank details',
   'clients:read': 'List and read your clients',
   'clients:write': 'Create, update and archive clients',
+  'products:read': 'List and read products and prices',
+  'products:write': 'Create, update and archive products and prices',
   'invoices:read': 'List and read invoices, including PDFs',
   'invoices:write': 'Create, edit and delete drafts',
-  'invoices:issue': 'Assign a GST invoice number, and cancel invoices',
+  'invoices:issue': 'Assign an invoice number, and cancel invoices',
   'invoices:send': 'Email invoices to your clients',
   'payments:write': 'Mark invoices as paid',
   'webhooks:manage': 'Manage webhook endpoints',

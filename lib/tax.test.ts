@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { buildTaxSummary, computeInvoice } from './tax'
+import { computeInvoice } from './tax'
 
 function line(overrides = {}) {
   return {

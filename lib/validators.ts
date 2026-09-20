@@ -87,14 +87,38 @@ export const clientSchema = z.object({
 
 export type ClientInput = z.infer<typeof clientSchema>
 
-export const lineItemSchema = z.object({
-  description: z.string().trim().min(1, 'Describe what you are billing for'),
-  quantity: z.coerce.number().gt(0, 'Quantity must be more than zero'),
-  unit: z.enum(UNITS).default('NOS'),
-  rate: z.coerce.number().min(0, 'Rate cannot be negative'),
-  discount_percent: z.coerce.number().min(0).max(100).default(0),
-  tax_rate: z.coerce.number().min(0).max(100).default(0),
-})
+export const lineItemSchema = z
+  .object({
+    description: z.string().trim().default(''),
+    quantity: z.coerce.number().gt(0, 'Quantity must be more than zero').default(1),
+    unit: z.enum(UNITS).default('NOS'),
+    /** Omitted on priced lines — borrowed from the price. Required ad-hoc. */
+    rate: z.coerce.number().min(0, 'Rate cannot be negative').optional(),
+    discount_percent: z.coerce.number().min(0).max(100).default(0),
+    /** Omitted on priced lines — borrowed from the price. Defaults to 0 ad-hoc. */
+    tax_rate: z.coerce.number().min(0).max(100).optional(),
+    /**
+     * A catalog price (`price_…` or UUID). When present, a missing
+     * description/rate/tax_rate is borrowed from the price's product name,
+     * unit amount and tax rate. The price currency must match the invoice
+     * currency.
+     */
+    price: z.string().trim().optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.price) return
+    // An ad-hoc line has nothing to borrow from, so it must stand alone.
+    if (!value.description.trim()) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['description'],
+        message: 'Describe what you are billing for',
+      })
+    }
+    if (value.rate === undefined) {
+      ctx.addIssue({ code: 'custom', path: ['rate'], message: 'Enter a rate' })
+    }
+  })
 
 export const invoiceSchema = z.object({
   client: clientSchema,
@@ -107,3 +131,59 @@ export const invoiceSchema = z.object({
 })
 
 export type InvoiceInput = z.infer<typeof invoiceSchema>
+
+/**
+ * Products & Prices — the Stripe-style catalog.
+ *
+ * A Product names something you sell. A Price is one way to charge for it:
+ * an amount in a currency, one-off or recurring (interval + count).
+ * Recurring is a data model only in this phase — nothing auto-bills yet.
+ */
+
+export const productSchema = z.object({
+  name: z.string().trim().min(1, 'Name your product').max(200),
+  description: optionalTrimmed,
+  images: z.array(z.string().trim().url('Enter a valid image URL')).max(8).default([]),
+  active: z.boolean().default(true),
+})
+
+export type ProductInput = z.infer<typeof productSchema>
+
+export const RECURRING_INTERVALS = ['day', 'week', 'month', 'year'] as const
+
+export const priceSchema = z
+  .object({
+    /** The parent product: UUID or `prod_…` public ID. */
+    product: z.string().trim().min(1, 'Pick a product'),
+    nickname: optionalTrimmed,
+    unit_amount: z.coerce.number().min(0, 'Amount cannot be negative'),
+    currency: z
+      .string()
+      .trim()
+      .toUpperCase()
+      .length(3, 'Pick a currency')
+      .regex(/^[A-Z]{3}$/, 'Pick a currency'),
+    type: z.enum(['one_time', 'recurring']).default('one_time'),
+    recurring_interval: z.enum(RECURRING_INTERVALS).optional(),
+    interval_count: z.coerce.number().int().min(1).max(52).default(1),
+    tax_rate: z.coerce.number().min(0).max(100).default(0),
+    active: z.boolean().default(true),
+  })
+  .superRefine((value, ctx) => {
+    if (value.type === 'recurring' && !value.recurring_interval) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['recurring_interval'],
+        message: 'Pick how often this price recurs',
+      })
+    }
+    if (value.type === 'one_time' && value.recurring_interval) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['recurring_interval'],
+        message: 'One-off prices do not recur',
+      })
+    }
+  })
+
+export type PriceInput = z.infer<typeof priceSchema>

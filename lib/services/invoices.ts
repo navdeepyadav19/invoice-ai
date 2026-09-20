@@ -5,6 +5,8 @@ import * as businesses from '@/lib/services/business'
 import { invoiceSchema, type InvoiceInput } from '@/lib/validators'
 import { computeInvoice, type TaxLineInput } from '@/lib/tax'
 import { paiseToStored } from '@/lib/money-api'
+import { getManyWithProducts } from '@/lib/services/prices'
+import { resolvePricedLines, type CatalogPrice, type ResolvedLine } from '@/lib/catalog/resolve'
 import { snapshotBusiness } from '@/lib/invoice-view'
 import { viewFromRows } from '@/lib/invoice-load'
 import { deriveStatus } from '@/lib/invoice-status'
@@ -420,13 +422,17 @@ async function writeDraft(
     existingClientId = invoice.client_id
   }
 
-  const lines: TaxLineInput[] = data.items.map((item) => ({
-    description: item.description,
-    quantity: item.quantity,
-    unit: item.unit,
-    rate: item.rate,
-    discountPercent: item.discount_percent,
-    taxRate: item.tax_rate,
+  // Priced lines borrow description/rate/tax from the catalog; ad-hoc lines
+  // stand alone. Either way every total below is recomputed from the result.
+  const resolved = await resolveLines(ctx, data.items, data.currency)
+
+  const lines: TaxLineInput[] = resolved.map((line) => ({
+    description: line.description,
+    quantity: line.quantity,
+    unit: line.unit,
+    rate: line.rate,
+    discountPercent: line.discountPercent,
+    taxRate: line.taxRate,
   }))
 
   const computed = computeInvoice({ lines }, data.currency)
@@ -532,6 +538,8 @@ async function writeDraft(
       cess_rate: 0,
       cess_amount: 0,
       line_total: paiseToStored(line.totalMinor),
+      product_id: resolved[index]?.productId ?? null,
+      price_id: resolved[index]?.priceId ?? null,
     })),
   })
 
@@ -540,6 +548,38 @@ async function writeDraft(
   await writeEvent(ctx, invoiceId!, id ? 'updated' : 'created', actorMeta(ctx))
 
   return load(ctx, invoiceId!)
+}
+
+/**
+ * Turn validated line inputs into concrete lines, borrowing from the catalog
+ * wherever a `price` is named.
+ */
+async function resolveLines(
+  ctx: AuthContext,
+  items: InvoiceInput['items'],
+  currency: string,
+): Promise<ResolvedLine[]> {
+  const refs = [...new Set(items.map((item) => item.price).filter((ref): ref is string => Boolean(ref)))]
+
+  const byRef = new Map<string, CatalogPrice>()
+  if (refs.length > 0) {
+    const prices = await getManyWithProducts(ctx, refs)
+    for (const price of prices) {
+      const entry: CatalogPrice = {
+        id: price.id,
+        public_id: price.public_id,
+        product_id: price.product_id,
+        product_name: price.product_name,
+        unit_amount: Number(price.unit_amount),
+        currency: price.currency,
+        tax_rate: Number(price.tax_rate),
+      }
+      byRef.set(price.id, entry)
+      byRef.set(price.public_id, entry)
+    }
+  }
+
+  return resolvePricedLines(items, currency, byRef)
 }
 
 /**
