@@ -18,6 +18,15 @@ const PUBLIC_PREFIXES = [
   '/auth',
   '/i/',
   '/api/public/',
+  // Not "public" — every /api/v1 route authenticates. But it authenticates from
+  // an Authorization header, which this proxy knows nothing about, so leaving it
+  // out means a perfectly valid API key gets a 307 to /login and the integrator
+  // sees an HTML page where they expected JSON. Being exempt here costs nothing:
+  // withApi returns 401 problem+json for anything unauthenticated, and RLS is
+  // the real boundary either way.
+  '/api/v1/',
+  // OAuth discovery documents, served unauthenticated by definition.
+  '/.well-known/',
 ]
 
 function isPublicPath(pathname: string): boolean {

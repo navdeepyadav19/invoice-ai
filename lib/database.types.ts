@@ -17,7 +17,19 @@
 export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[]
 
 export type InvoiceStatus = 'draft' | 'sent' | 'paid' | 'overdue' | 'cancelled'
-export type InvoiceEventType = 'created' | 'sent' | 'viewed' | 'downloaded' | 'paid'
+// `sent` means "assigned a GST number". The API renames it to `invoice.issued`
+// at the edge, because being issued and being emailed are different facts —
+// which is what `emailed` / `email_failed` are for.
+export type InvoiceEventType =
+  | 'created'
+  | 'sent'
+  | 'viewed'
+  | 'downloaded'
+  | 'paid'
+  | 'updated'
+  | 'emailed'
+  | 'email_failed'
+  | 'cancelled'
 
 export type ProfileRow = {
   id: string
@@ -79,6 +91,7 @@ export type ClientRow = {
   state_code: string | null
   pincode: string | null
   country: string
+  archived_at: string | null
   created_at: string
   updated_at: string
 }
@@ -113,6 +126,8 @@ export type InvoiceRow = {
   public_token: string
   sent_at: string | null
   paid_at: string | null
+  cancelled_at: string | null
+  cancel_reason: string | null
   created_at: string
   updated_at: string
 }
@@ -152,6 +167,78 @@ export type InvoiceEventRow = {
   created_at: string
 }
 
+export type ApiKeyRow = {
+  id: string
+  owner_id: string
+  name: string
+  /** Public half, e.g. inv_live_ab12cd34. The secret is never stored. */
+  prefix: string
+  /** HMAC-SHA256(API_KEY_PEPPER, secret). See lib/auth/api-key.ts. */
+  secret_hash: string
+  scopes: string[]
+  created_at: string
+  last_used_at: string | null
+  expires_at: string | null
+  revoked_at: string | null
+}
+
+export type IdempotencyKeyRow = {
+  owner_id: string
+  key: string
+  method: string
+  path: string
+  request_hash: string
+  state: 'in_progress' | 'completed'
+  response_status: number | null
+  response_body: Json | null
+  created_at: string
+  expires_at: string
+}
+
+export type WebhookEndpointRow = {
+  id: string
+  owner_id: string
+  url: string
+  /** Shared with the subscriber. Unlike an API key this must stay recoverable — we sign with it. */
+  secret: string
+  /** Empty array means "all events". */
+  events: string[]
+  active: boolean
+  failure_count: number
+  disabled_at: string | null
+  created_at: string
+}
+
+export type WebhookDeliveryRow = {
+  id: string
+  endpoint_id: string
+  owner_id: string
+  event_type: string
+  payload: Json
+  attempt: number
+  status: 'pending' | 'succeeded' | 'failed' | 'dead'
+  next_attempt_at: string
+  response_code: number | null
+  last_error: string | null
+  created_at: string
+}
+
+export type ApiRequestRow = {
+  id: string
+  request_id: string
+  owner_id: string
+  via: 'session' | 'api_key' | 'oauth'
+  api_key_id: string | null
+  client_id: string | null
+  method: string
+  route: string
+  status: number
+  duration_ms: number
+  idempotency_key: string | null
+  ip_hash: string | null
+  created_at: string
+}
+
 type Table<Row, Insert = Partial<Row>, Update = Partial<Row>> = {
   Row: Row
   Insert: Insert
@@ -183,6 +270,37 @@ export type Database = {
         MergeTokenRow,
         Omit<Partial<MergeTokenRow>, 'owner_id'> & Pick<MergeTokenRow, 'owner_id'>
       >
+      api_keys: Table<
+        ApiKeyRow,
+        Omit<Partial<ApiKeyRow>, 'owner_id' | 'name' | 'prefix' | 'secret_hash' | 'scopes'> &
+          Pick<ApiKeyRow, 'owner_id' | 'name' | 'prefix' | 'secret_hash' | 'scopes'>
+      >
+      idempotency_keys: Table<
+        IdempotencyKeyRow,
+        Omit<Partial<IdempotencyKeyRow>, 'owner_id' | 'key' | 'method' | 'path' | 'request_hash'> &
+          Pick<IdempotencyKeyRow, 'owner_id' | 'key' | 'method' | 'path' | 'request_hash'>
+      >
+      webhook_endpoints: Table<
+        WebhookEndpointRow,
+        Omit<Partial<WebhookEndpointRow>, 'owner_id' | 'url' | 'secret'> &
+          Pick<WebhookEndpointRow, 'owner_id' | 'url' | 'secret'>
+      >
+      webhook_deliveries: Table<
+        WebhookDeliveryRow,
+        Omit<Partial<WebhookDeliveryRow>, 'endpoint_id' | 'owner_id' | 'event_type' | 'payload'> &
+          Pick<WebhookDeliveryRow, 'endpoint_id' | 'owner_id' | 'event_type' | 'payload'>
+      >
+      api_requests: Table<
+        ApiRequestRow,
+        Omit<
+          Partial<ApiRequestRow>,
+          'request_id' | 'owner_id' | 'via' | 'method' | 'route' | 'status' | 'duration_ms'
+        > &
+          Pick<
+            ApiRequestRow,
+            'request_id' | 'owner_id' | 'via' | 'method' | 'route' | 'status' | 'duration_ms'
+          >
+      >
     }
     // Must be an EMPTY mapped type, not Record<string, never>. postgrest-js
     // resolves .from() against `Tables & Views`, so a Record<string, never>
@@ -202,9 +320,66 @@ export type Database = {
         Args: { p_business_id: string }
         Returns: string
       }
+      issue_invoice: {
+        Args: { p_invoice_id: string; p_meta?: Json }
+        Returns: string
+      }
+      replace_invoice_items: {
+        Args: { p_invoice_id: string; p_items: Json }
+        Returns: number
+      }
       redeem_merge_token: {
         Args: { p_token: string }
         Returns: number
+      }
+      api_key_by_prefix: {
+        Args: { p_prefix: string }
+        Returns: {
+          id: string
+          owner_id: string
+          secret_hash: string
+          scopes: string[]
+          expires_at: string | null
+          revoked_at: string | null
+        }[]
+      }
+      touch_api_key: {
+        Args: { p_id: string }
+        Returns: undefined
+      }
+      claim_idempotency_key: {
+        Args: { p_key: string; p_method: string; p_path: string; p_request_hash: string }
+        Returns: {
+          outcome: 'claimed' | 'replay' | 'in_progress' | 'mismatch'
+          response_status: number | null
+          response_body: Json | null
+        }[]
+      }
+      complete_idempotency_key: {
+        Args: { p_key: string; p_status: number; p_body: Json }
+        Returns: undefined
+      }
+      release_idempotency_key: {
+        Args: { p_key: string }
+        Returns: undefined
+      }
+      cleanup_api_runtime: {
+        Args: { p_days?: number }
+        Returns: number
+      }
+      claim_due_webhook_deliveries: {
+        Args: { p_limit?: number }
+        Returns: WebhookDeliveryRow[]
+      }
+      finish_webhook_delivery: {
+        Args: {
+          p_id: string
+          p_status: string
+          p_response_code: number | null
+          p_error: string | null
+          p_next_attempt_at: string | null
+        }
+        Returns: undefined
       }
     }
     Enums: {

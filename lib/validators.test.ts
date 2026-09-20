@@ -139,4 +139,21 @@ describe('invoice numbering settings', () => {
     expect(numberingSchema.safeParse({ invoice_prefix: 'IN V', next_invoice_number: 1 }).success).toBe(false)
     expect(numberingSchema.safeParse({ invoice_prefix: 'IN#V', next_invoice_number: 1 }).success).toBe(false)
   })
+
+  /**
+   * GST Rule 46 caps an invoice number at 16 characters. claim_invoice_number
+   * renders PREFIX + '/YY-YY/0001' — an 11-character tail — so anything over a
+   * 5-character prefix produces a non-compliant number that still looks correct
+   * everywhere in the UI. The limit used to be 10.
+   */
+  it('holds the prefix to what GST Rule 46 leaves room for', () => {
+    expect(numberingSchema.safeParse({ invoice_prefix: 'ACME1', next_invoice_number: 1 }).success).toBe(true)
+    expect(numberingSchema.safeParse({ invoice_prefix: 'ACMEIN', next_invoice_number: 1 }).success).toBe(false)
+  })
+
+  it('keeps the longest allowed number within the 16-character limit', () => {
+    const prefix = numberingSchema.parse({ invoice_prefix: 'ACME1', next_invoice_number: 1 }).invoice_prefix
+    // The widest number the function can emit for this prefix.
+    expect(`${prefix}/26-27/9999`.length).toBeLessThanOrEqual(16)
+  })
 })

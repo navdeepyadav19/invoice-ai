@@ -149,7 +149,10 @@ export const numberingSchema = z.object({
     .trim()
     .toUpperCase()
     .min(1, 'Enter a prefix')
-    .max(10, 'Keep the prefix under 10 characters')
+    // GST Rule 46 caps an invoice number at 16 characters. claim_invoice_number
+    // appends /YY-YY/0001, which is 11, leaving 5. The old limit of 10 allowed a
+    // 21-character number that looks fine in the UI and fails an audit.
+    .max(5, 'Keep the prefix to 5 characters — GST allows 16 in total')
     .regex(/^[A-Z0-9\-/]+$/, 'Letters, numbers, hyphens and slashes only'),
   next_invoice_number: z.coerce
     .number()

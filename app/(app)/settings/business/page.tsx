@@ -21,16 +21,16 @@ export default async function BusinessSettingsPage() {
   const business = await getPrimaryBusiness()
 
   return (
-    <div className="mx-auto w-full max-w-3xl px-6 py-10">
+    <div className="max-w-3xl">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Business settings</h1>
+        <h2 className="text-lg font-medium">Business profile</h2>
         <p className="mt-1 text-sm text-muted-foreground">
           These details appear on every invoice you raise from now on. Invoices you&rsquo;ve already
           sent keep the details they were issued with.
         </p>
       </div>
 
-      <div className="mt-10 space-y-12">
+      <div className="mt-8 space-y-12">
         <Section title="Business details" description="Your name, GSTIN and registered address.">
           <StepBusiness business={business} action={saveBusinessSettings} submitLabel="Save changes" />
         </Section>
@@ -62,7 +62,7 @@ function Section({
   return (
     <section className="space-y-5 border-t border-border pt-8 first:border-0 first:pt-0">
       <div>
-        <h2 className="text-lg font-medium tracking-tight">{title}</h2>
+        <h3 className="text-base font-medium tracking-tight">{title}</h3>
         <p className="mt-0.5 text-sm text-muted-foreground">{description}</p>
       </div>
       {children}

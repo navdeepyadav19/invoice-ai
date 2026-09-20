@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { FilePlus2, LayoutDashboard, LogOut, Settings, UserRound } from 'lucide-react'
+import { FilePlus2, KeyRound, LayoutDashboard, LogOut, Settings, UserRound } from 'lucide-react'
 
 import { signOutAction } from '@/lib/actions/auth'
 import { Wordmark } from '@/components/brand'
@@ -57,6 +57,10 @@ export function AppHeader({ email, isGuest }: { email: string | null; isGuest: b
                 <DropdownMenuItem render={<Link href="/settings/business" />}>
                   <Settings className="size-4" />
                   Business settings
+                </DropdownMenuItem>
+                <DropdownMenuItem render={<Link href="/settings/api-keys" />}>
+                  <KeyRound className="size-4" />
+                  API keys
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 {/* The menu item IS the submit button, wrapped in the form.

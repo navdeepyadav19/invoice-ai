@@ -2,5 +2,12 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "git": {
     "deploymentEnabled": false
-  }
+  },
+  "crons": [
+    {
+      "path": "/api/cron/webhooks",
+      "comment": "Drains the webhook outbox. DAILY because Vercel's Hobby plan allows only one cron run per day — a tighter schedule is rejected at deploy time. On Pro, change this to '*/5 * * * *'; until then a failed webhook can wait up to 24h for its retry, which makes webhooks close to unusable for anything time-sensitive.",
+      "schedule": "0 3 * * *"
+    }
+  ]
 }
