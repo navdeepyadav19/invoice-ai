@@ -77,7 +77,7 @@ export async function saveBankStep(_prev: StepState, formData: FormData): Promis
     })
     .eq('id', business.id)
 
-  if (error) return { error: error.message }
+  if (error) return saveFailed(error)
 
   return finishOnboarding()
 }
@@ -95,4 +95,14 @@ export async function skipStep(formData: FormData): Promise<void> {
 export async function goToStep(formData: FormData): Promise<void> {
   const target = Math.min(2, Math.max(1, Number(formData.get('step') ?? 1)))
   await setStep(target)
+}
+
+/**
+ * Database errors ("Could not find the 'country_code' column…") mean nothing to
+ * the person filling the form, and leak schema details. Log the real one for us,
+ * show them something they can act on.
+ */
+function saveFailed(error: { message: string }): { error: string } {
+  console.error('[save failed]', error.message)
+  return { error: "We couldn't save your details. Please try again in a moment." }
 }

@@ -82,9 +82,12 @@ export async function persistBusiness(formData: FormData): Promise<StepState> {
     ? await supabase.from('businesses').update(values).eq('id', existing.id)
     : await supabase.from('businesses').insert(values)
 
-  if (error) return { error: error.message }
+  if (error) return saveFailed(error)
 
   revalidatePath('/settings/business')
+  // A guest fills this same form inline on /invoices/new; without this they
+  // see "Saved." but stay on the form instead of reaching the builder.
+  revalidatePath('/invoices/new')
   return { saved: true }
 }
 
@@ -116,7 +119,7 @@ export async function persistPayment(formData: FormData): Promise<StepState> {
     })
     .eq('id', business.id)
 
-  if (error) return { error: error.message }
+  if (error) return saveFailed(error)
 
   revalidatePath('/settings/business')
   return { saved: true }
@@ -142,7 +145,7 @@ export async function persistNumbering(formData: FormData): Promise<StepState> {
     })
     .eq('id', business.id)
 
-  if (error) return { error: error.message }
+  if (error) return saveFailed(error)
 
   revalidatePath('/settings/business')
   return { saved: true }
@@ -159,4 +162,14 @@ export async function savePaymentSettings(_prev: StepState, formData: FormData) 
 
 export async function saveNumberingSettings(_prev: StepState, formData: FormData) {
   return persistNumbering(formData)
+}
+
+/**
+ * Database errors ("Could not find the 'country_code' column…") mean nothing to
+ * the person filling the form, and leak schema details. Log the real one for us,
+ * show them something they can act on.
+ */
+function saveFailed(error: { message: string }): { error: string } {
+  console.error('[save failed]', error.message)
+  return { error: "We couldn't save your details. Please try again in a moment." }
 }
