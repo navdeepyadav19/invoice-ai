@@ -30,17 +30,22 @@ export interface SaveInvoiceState {
  * whatever the client claimed; that guarantee moved into the service intact.
  */
 export async function saveInvoiceDraft(
-  input: InvoiceInput & { id?: string },
+  input: InvoiceInput & {
+    id?: string
+    /** See invoices.DraftClientOptions: 'cus_…' links, null detaches, omitted keeps the draft's own row. */
+    customer?: string | null
+  },
 ): Promise<SaveInvoiceState> {
   await requireUser()
 
   try {
     const ctx = await contextFromSession()
-    const { id, ...values } = input
+    const { id, customer, ...values } = input
+    const options = customer === undefined ? {} : { customer }
 
     const result = id
-      ? await invoices.updateDraft(ctx, id, values as InvoiceInput)
-      : await invoices.createDraft(ctx, values as InvoiceInput)
+      ? await invoices.updateDraft(ctx, id, values as InvoiceInput, options)
+      : await invoices.createDraft(ctx, values as InvoiceInput, options)
 
     revalidatePath('/dashboard')
 

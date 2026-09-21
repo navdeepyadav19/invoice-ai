@@ -1,20 +1,22 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState, useTransition } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { Check, Eye, Loader2, PenLine } from 'lucide-react'
+import { Check, Eye, Loader2, PenLine, UserRound } from 'lucide-react'
 import { FormProvider, useForm, useWatch } from 'react-hook-form'
 import { toast } from 'sonner'
 
 import { AiPanel } from '@/components/invoice/ai-panel'
 import { InvoiceDocument } from '@/components/invoice/invoice-document'
 import { LineItems } from '@/components/invoice/line-items'
+import { SearchPicker } from '@/components/invoice/search-picker'
 import { SendControls } from '@/components/invoice/send-controls'
 import { Field } from '@/components/onboarding/field'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { saveInvoiceDraft } from '@/lib/actions/invoice'
+import { searchCustomers } from '@/lib/actions/catalog-search'
 import { computeInvoice } from '@/lib/tax'
 import { COUNTRIES, CURRENCIES, defaultsForCountry } from '@/lib/locale/countries'
 import {
@@ -25,10 +27,26 @@ import {
 } from '@/lib/invoice-form'
 import { snapshotBusiness, type InvoiceView } from '@/lib/invoice-view'
 import type { NormalisedInvoiceDraft } from '@/lib/ai/normalise'
+import {
+  clientDiffers,
+  customerLinkForSave,
+  customerToFormClient,
+  isCurrencyMismatch,
+  type ClientFormValue,
+  type CustomerOption,
+} from '@/lib/catalog/picker'
 import { cn } from '@/lib/utils'
 import type { BusinessRow, InvoiceStatus } from '@/lib/database.types'
 
 const AUTOSAVE_DELAY_MS = 1500
+
+/** The saved customer the Bill-to block is currently linked to. */
+export interface LinkedCustomer {
+  /** `cus_…` */
+  id: string
+  /** What the pick wrote into the form; any difference means the user edited. */
+  snapshot: ClientFormValue
+}
 
 export function InvoiceBuilder({
   business,
@@ -37,6 +55,8 @@ export function InvoiceBuilder({
   invoiceNumber = null,
   status = 'draft',
   aiEnabled = false,
+  pickers = { customers: false, prices: false },
+  initialCustomer = null,
 }: {
   business: BusinessRow
   invoiceId?: string
@@ -45,12 +65,25 @@ export function InvoiceBuilder({
   status?: InvoiceStatus
   /** False when OPENAI_API_KEY is unset, so the prompt box is hidden entirely. */
   aiEnabled?: boolean
+  /** Which search pickers to offer. Hidden for guests and when there's nothing saved. */
+  pickers?: { customers: boolean; prices: boolean }
+  /** Set when a stored draft bills a saved customer (see isSavedCustomerLink). */
+  initialCustomer?: LinkedCustomer | null
 }) {
   const router = useRouter()
   const [invoiceId, setInvoiceId] = useState(initialInvoiceId)
   const [savedAt, setSavedAt] = useState<string | null>(null)
   const [isSaving, startSaving] = useTransition()
   const [mobileTab, setMobileTab] = useState<'edit' | 'preview'>('edit')
+
+  // Saved-customer linking. `linked` is what the form shows right now;
+  // `persistedCustomer` is what the stored draft points at. Their difference
+  // decides the `customer` field of the next save (customerLinkForSave).
+  const [linked, setLinked] = useState<LinkedCustomer | null>(initialCustomer)
+  const [persistedCustomer, setPersistedCustomer] = useState<string | null>(
+    initialCustomer?.id ?? null,
+  )
+  const customerSearchRef = useRef<HTMLInputElement>(null)
 
   const form = useForm<InvoiceFormValues>({
     defaultValues: initialValues ?? defaultInvoiceValues(business),
@@ -96,10 +129,30 @@ export function InvoiceBuilder({
     [business, values, computed, invoiceNumber, status],
   )
 
+  // Editing any Bill-to field after picking a saved customer detaches the
+  // invoice from it (sticky — retyping the old value doesn't re-link). The
+  // saved customer is never rewritten from here; the next save gives this
+  // draft its own row. Adjusting state during render is React's pattern for
+  // state derived from other state.
+  // getValues, not the watched copy: it is updated synchronously by
+  // setValue, so the render right after a pick can't see stale fields and
+  // detach immediately.
+  if (linked && clientDiffers(form.getValues('client'), linked.snapshot)) {
+    setLinked(null)
+  }
+
+  const invoiceCurrency = values.currency || business.currency || 'USD'
+
   const save = useCallback(
     (silent: boolean) => {
+      const customer = customerLinkForSave(linked?.id ?? null, persistedCustomer)
+
       startSaving(async () => {
-        const result = await saveInvoiceDraft({ ...toSavePayload(form.getValues()), id: invoiceId })
+        const result = await saveInvoiceDraft({
+          ...toSavePayload(form.getValues()),
+          id: invoiceId,
+          ...(customer !== undefined ? { customer } : {}),
+        })
 
         if (result.error) {
           // Autosave failures are announced too. Silently dropping them is how
@@ -115,12 +168,32 @@ export function InvoiceBuilder({
           router.replace(`/invoices/${result.invoiceId}/edit`)
         }
 
+        // null (detached) means the draft now owns a fresh row, so later
+        // saves go back to updating that row in place.
+        if (customer !== undefined) setPersistedCustomer(customer)
+
         setSavedAt(result.savedAt ?? new Date().toISOString())
         if (!silent) toast.success('Draft saved')
       })
     },
-    [form, invoiceId, router],
+    [form, invoiceId, router, linked, persistedCustomer],
   )
+
+  function pickCustomer(customer: CustomerOption) {
+    const snapshot = customerToFormClient(customer, business.country_code)
+    for (const [key, value] of Object.entries(snapshot) as Array<[keyof ClientFormValue, string]>) {
+      form.setValue(`client.${key}`, value, { shouldDirty: true })
+    }
+    setLinked({ id: customer.id, snapshot })
+  }
+
+  function changeCustomer() {
+    // Keep what's typed; the user picks another or edits by hand. Either way
+    // the saved customer is no longer the one being billed.
+    setLinked(null)
+    customerSearchRef.current?.focus()
+  }
+
 
   // Once issued, an invoice is a document rather than a draft: the number is
   // allocated, the client may already have the PDF, and the server refuses
@@ -131,7 +204,12 @@ export function InvoiceBuilder({
   const isDirty = form.formState.isDirty
   const hasClient = Boolean(values.client?.name?.trim())
   const hasLine = computed.lines.some((line) => line.description.trim() && line.taxableMinor > 0)
-  const canSave = hasClient && hasLine && !isIssued
+  // A catalog line in another currency is rejected by the server (no FX), so
+  // don't autosave into an error — the line itself says what's wrong.
+  const hasCurrencyConflict = values.items.some(
+    (item) => item.price && isCurrencyMismatch(item.price_currency, invoiceCurrency),
+  )
+  const canSave = hasClient && hasLine && !isIssued && !hasCurrencyConflict
 
   // Debounced autosave. Only runs once the invoice is worth saving — otherwise
   // opening the page would immediately create an empty draft.
@@ -265,6 +343,48 @@ export function InvoiceBuilder({
           )}
 
           <Section title="Bill to" description="Who is this invoice for?">
+            {!isIssued && (pickers.customers || linked) && (
+              <div className="space-y-2">
+                {pickers.customers && (
+                  <SearchPicker<CustomerOption>
+                    label="Search saved customers"
+                    placeholder="Search saved customers…"
+                    emptyText="No saved customers yet."
+                    search={searchCustomers}
+                    onPick={pickCustomer}
+                    inputRef={customerSearchRef}
+                    getKey={(c) => c.id}
+                    getLabel={(c) => c.name}
+                    renderItem={(c) => (
+                      <span className="flex min-w-0 flex-col">
+                        <span className="truncate font-medium">{c.name}</span>
+                        <span className="truncate text-xs text-muted-foreground">
+                          {[c.email, c.city, c.country_code].filter(Boolean).join(' · ') || c.id}
+                        </span>
+                      </span>
+                    )}
+                  />
+                )}
+                {linked && (
+                  <p className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted/50 px-2 py-0.5">
+                      <UserRound className="size-3" aria-hidden />
+                      Saved customer ·{' '}
+                      <span className="font-mono text-foreground">{linked.id}</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={changeCustomer}
+                      className="font-medium text-foreground underline-offset-4 hover:underline"
+                    >
+                      Change
+                    </button>
+                    <span>Editing the fields below bills a one-off copy instead.</span>
+                  </p>
+                )}
+              </div>
+            )}
+
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Client name" htmlFor="client.name" required className="sm:col-span-2">
                 <Input
@@ -349,7 +469,11 @@ export function InvoiceBuilder({
           </Section>
 
           <Section title="Line items" description="What are you billing for?">
-            <LineItems defaultTaxRate={countryDefaults.defaultTaxRate} />
+            <LineItems
+              defaultTaxRate={countryDefaults.defaultTaxRate}
+              currency={invoiceCurrency}
+              catalogEnabled={pickers.prices && !isIssued}
+            />
           </Section>
 
           <Section title="Notes and terms" description="Printed at the foot of the invoice.">
