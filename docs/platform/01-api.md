@@ -215,7 +215,7 @@ The database is the second line of defence: the `issue_invoice` RPC from [00-fou
 
 ```json
 {
-  "type": "https://invoice-ai.app/problems/invalid-state",
+  "type": "https://invoice.horizonpay.co/problems/invalid-state",
   "title": "Invoice is not a draft",
   "status": 409,
   "detail": "Invoice 7f3c… is already issued as INV/26-27/0042 and cannot be edited.",

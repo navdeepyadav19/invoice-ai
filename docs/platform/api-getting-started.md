@@ -90,7 +90,7 @@ Events are `invoice.issued` and `invoice.emailed` separately.
 
 ```json
 {
-  "type": "https://invoice-ai.app/problems/invalid-state",
+  "type": "https://invoice.horizonpay.co/problems/invalid-state",
   "title": "Invalid state for this operation",
   "status": 409,
   "detail": "Invoice is cancelled and cannot be marked paid.",
