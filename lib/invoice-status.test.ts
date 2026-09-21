@@ -36,8 +36,8 @@ describe('deriveStatus', () => {
 
 describe('isPastDue', () => {
   it('compares whole dates, so the time of day never changes the answer', () => {
-    const earlyMorning = new Date('2026-08-16T00:05:00+05:30')
-    const lateNight = new Date('2026-08-16T23:55:00+05:30')
+    const earlyMorning = new Date('2026-08-16T00:05:00Z')
+    const lateNight = new Date('2026-08-16T23:55:00Z')
 
     expect(isPastDue('2026-08-16', earlyMorning)).toBe(false)
     expect(isPastDue('2026-08-16', lateNight)).toBe(false)
