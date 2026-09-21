@@ -7,7 +7,12 @@ import {
   lineItemSchema,
   numberingSchema,
   priceSchema,
+  priceUpdateSchema,
+  priceWirePartialToInput,
+  priceWireSchema,
+  priceWireUpdateSchema,
   productSchema,
+  productUpdateSchema,
 } from './validators'
 
 describe('business profile', () => {
@@ -184,6 +189,60 @@ describe('catalog', () => {
         recurring_interval: 'month',
       }).success,
     ).toBe(false)
+  })
+})
+
+describe('catalog updates (PATCH)', () => {
+  it('a nickname-only price update carries nothing else — type and recurring survive', () => {
+    const parsed = priceUpdateSchema.parse({ nickname: 'Monthly (EU)' })
+    expect(parsed).toEqual({ nickname: 'Monthly (EU)' })
+    expect(parsed).not.toHaveProperty('type')
+    expect(parsed).not.toHaveProperty('interval_count')
+    expect(parsed).not.toHaveProperty('active')
+    expect(parsed).not.toHaveProperty('tax_rate')
+  })
+
+  it('a nickname-only wire PATCH maps to a nickname-only service update', () => {
+    const wire = priceWireUpdateSchema.parse({ nickname: 'Monthly (EU)' })
+    const input = priceWirePartialToInput(wire)
+
+    expect(input).toEqual({ nickname: 'Monthly (EU)' })
+    // The service only writes keys that are present, so a recurring price stays
+    // recurring with its interval — the bug was `type: 'one_time'` appearing here.
+    expect(input.type).toBeUndefined()
+    expect(input.recurring_interval).toBeUndefined()
+    expect(input.interval_count).toBeUndefined()
+    expect(input.active).toBeUndefined()
+  })
+
+  it('an empty or null nickname clears it on update', () => {
+    expect(priceUpdateSchema.parse({ nickname: '' })).toEqual({ nickname: null })
+    expect(priceWirePartialToInput(priceWireUpdateSchema.parse({ nickname: null }))).toEqual({
+      nickname: null,
+    })
+  })
+
+  it('a product rename leaves images and active alone', () => {
+    const parsed = productUpdateSchema.parse({ name: 'Retainer' })
+    expect(parsed).toEqual({ name: 'Retainer' })
+    expect(parsed).not.toHaveProperty('images')
+    expect(parsed).not.toHaveProperty('active')
+  })
+
+  it('create schemas still apply their defaults', () => {
+    const price = priceSchema.parse({ product: 'prod_xxx', unit_amount: 10, currency: 'usd' })
+    expect(price).toMatchObject({ type: 'one_time', interval_count: 1, tax_rate: 0, active: true })
+    expect(productSchema.parse({ name: 'Retainer' })).toMatchObject({ images: [], active: true })
+    expect(priceWireSchema.parse({ product: 'prod_xxx', unit_amount: 1000, currency: 'usd' })).toMatchObject({
+      type: 'one_time',
+      active: true,
+      tax_rate: 0,
+    })
+  })
+
+  it('update schemas still validate what is sent', () => {
+    expect(priceUpdateSchema.safeParse({ tax_rate: 150 }).success).toBe(false)
+    expect(productUpdateSchema.safeParse({ name: '' }).success).toBe(false)
   })
 })
 

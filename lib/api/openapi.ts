@@ -6,7 +6,9 @@ import {
   customerWireSchema,
   invoiceWireSchema,
   priceWireSchema,
+  priceWireUpdateSchema,
   productSchema,
+  productUpdateSchema,
 } from '@/lib/validators'
 
 /**
@@ -410,7 +412,7 @@ export function buildOpenApiDocument(serverUrl: string) {
           tags: ['Products'],
           summary: 'Update a product',
           requestParams: { path: z.object({ id: z.string() }) },
-          requestBody: { content: { 'application/json': { schema: productSchema.partial() } } },
+          requestBody: { content: { 'application/json': { schema: productUpdateSchema } } },
           responses: {
             '200': {
               description: 'Updated.',
@@ -494,7 +496,7 @@ export function buildOpenApiDocument(serverUrl: string) {
           summary: 'Update a price',
           description: 'The parent product cannot change — create a new price instead.',
           requestParams: { path: z.object({ id: z.string() }) },
-          requestBody: { content: { 'application/json': { schema: priceWireSchema.partial() } } },
+          requestBody: { content: { 'application/json': { schema: priceWireUpdateSchema } } },
           responses: {
             '200': {
               description: 'Updated.',

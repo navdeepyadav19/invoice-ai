@@ -1,7 +1,12 @@
 import { requireScope, type AuthContext } from '@/lib/auth/context'
 import { fromPostgres, notFound, ServiceError } from '@/lib/services/errors'
 import { decodeCursor, encodeCursor, type Page } from '@/lib/services/pagination'
-import { priceSchema, type PriceInput } from '@/lib/validators'
+import {
+  priceSchema,
+  priceUpdateSchema,
+  type PriceInput,
+  type PriceUpdateInput,
+} from '@/lib/validators'
 import { nextPriceId, isPriceId, isProductId } from '@/lib/catalog/ids'
 import { get as getProduct } from '@/lib/services/products'
 import type { PriceRow } from '@/lib/database.types'
@@ -55,6 +60,36 @@ export async function list(ctx: AuthContext, options: ListPricesOptions = {}): P
   if (error) throw fromPostgres(error)
 
   return toPage((data ?? []) as PriceRow[], limit)
+}
+
+/**
+ * Every price of a batch of products (by product UUID), newest first.
+ *
+ * For list screens that show a price summary per product without one query
+ * per row. Unpaginated: a product has a handful of prices, and callers pass
+ * one page of products at a time.
+ */
+export async function listForProducts(
+  ctx: AuthContext,
+  productIds: string[],
+  options: { active?: boolean } = {},
+): Promise<PriceRow[]> {
+  requireScope(ctx, 'products:read')
+
+  const unique = [...new Set(productIds)]
+  if (unique.length === 0) return []
+
+  let q = ctx.supabase
+    .from('prices')
+    .select('*')
+    .in('product_id', unique)
+    .order('created_at', { ascending: false })
+
+  if (options.active !== undefined) q = q.eq('active', options.active)
+
+  const { data, error } = await q
+  if (error) throw fromPostgres(error)
+  return (data ?? []) as PriceRow[]
 }
 
 /** Find by UUID or `price_…` public ID. */
@@ -133,7 +168,7 @@ export async function create(ctx: AuthContext, input: PriceInput): Promise<Price
 export async function update(
   ctx: AuthContext,
   id: string,
-  input: Partial<PriceInput>,
+  input: PriceUpdateInput,
 ): Promise<PriceRow> {
   requireScope(ctx, 'products:write')
 
@@ -145,14 +180,26 @@ export async function update(
 
   const existing = await get(ctx, id)
 
-  const parsed = priceSchema
-    .partial()
+  // Not priceSchema.partial(): zod refuses .partial() on a refined object, and
+  // even without the refinement it would re-apply create defaults — a
+  // nickname-only PATCH would come out as type 'one_time' and wipe the
+  // recurring interval. Omitted fields must mean "unchanged", and the
+  // one-off/recurring check must look at the stored row for what was omitted.
+  const parsed = priceUpdateSchema
     .superRefine((value, issues) => {
-      if (value.type === 'recurring' && !value.recurring_interval && !existing.recurring_interval) {
+      const type = value.type ?? existing.type
+      if (type === 'recurring' && !value.recurring_interval && !existing.recurring_interval) {
         issues.addIssue({
           code: 'custom',
           path: ['recurring_interval'],
           message: 'Pick how often this price recurs',
+        })
+      }
+      if (type === 'one_time' && value.recurring_interval) {
+        issues.addIssue({
+          code: 'custom',
+          path: ['recurring_interval'],
+          message: 'One-off prices do not recur',
         })
       }
     })
