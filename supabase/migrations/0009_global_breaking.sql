@@ -11,13 +11,24 @@ alter table public.businesses
   add column if not exists currency text,
   add column if not exists region text,
   add column if not exists tax_id text,
-  add column if not exists routing_number text;
+  add column if not exists routing_number text,
+  add column if not exists postal_code text;
 
+-- Existing rows predate the global rewrite and are Indian accounts (GSTIN,
+-- state codes, INR invoices). Backfilling them as US/USD would make every new
+-- draft default to dollars, so infer India from the GST-era fields.
 update public.businesses
 set
-  country_code = coalesce(country_code, 'US'),
-  currency = coalesce(currency, 'USD'),
+  country_code = coalesce(country_code, case
+    when gstin is not null or nullif(state_code, '') is not null or country ilike 'india' then 'IN'
+    else 'US'
+  end),
+  currency = coalesce(currency, case
+    when gstin is not null or nullif(state_code, '') is not null or country ilike 'india' then 'INR'
+    else 'USD'
+  end),
   region = coalesce(region, nullif(state_code, '')),
+  postal_code = coalesce(postal_code, pincode),
   tax_id = coalesce(tax_id, gstin)
 where country_code is null or currency is null;
 
@@ -59,7 +70,10 @@ alter table public.clients
 
 update public.clients
 set
-  country_code = coalesce(country_code, 'US'),
+  country_code = coalesce(country_code, case
+    when gstin is not null or nullif(state_code, '') is not null or country ilike 'india' then 'IN'
+    else 'US'
+  end),
   region = coalesce(region, nullif(state_code, '')),
   postal_code = coalesce(postal_code, pincode),
   tax_id = coalesce(tax_id, gstin)
@@ -68,8 +82,9 @@ where country_code is null;
 alter table public.clients
   alter column country_code set default 'US';
 
-alter table public.clients
-  alter column country_code set not null;
+-- Deliberately nullable: the client form and the invoice editor send an
+-- explicit null when no country is picked, and a column default does not
+-- cover an explicit null. clients_country_code_shape below allows null too.
 
 alter table public.clients
   drop constraint if exists clients_gstin_shape;
