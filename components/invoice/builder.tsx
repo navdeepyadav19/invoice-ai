@@ -365,7 +365,7 @@ export function InvoiceBuilder({
           </fieldset>
         </form>
 
-        <div className={cn('lg:sticky lg:top-24 lg:self-start', mobileTab === 'edit' && 'hidden lg:block')}>
+        <div className={cn('lg:sticky lg:top-6 lg:self-start', mobileTab === 'edit' && 'hidden lg:block')}>
           <InvoiceDocument view={view} className="origin-top lg:scale-[0.94]" />
         </div>
       </div>
