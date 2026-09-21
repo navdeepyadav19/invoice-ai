@@ -1,10 +1,12 @@
+import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { Suspense } from 'react'
 
-import { AppHeader } from '@/components/app/app-header'
+import { AppShell } from '@/components/app/app-shell'
 import { GuestBanner } from '@/components/app/guest-banner'
 import { VerifiedToast, VerifyEmailBanner } from '@/components/app/verify-email-banner'
 import { isEmailUnverified } from '@/lib/email-verification'
+import { SIDEBAR_COLLAPSED_COOKIE } from '@/lib/nav'
 import { getProfile, needsOnboarding, requireUser } from '@/lib/queries'
 
 /**
@@ -25,15 +27,25 @@ export default async function AppLayout({ children }: LayoutProps<'/'>) {
   // Unverified is a nudge, never a gate: signup lets people straight in.
   const unverified = isEmailUnverified(user, profile)
 
+  // Read on the server so the sidebar renders at the right width on first paint.
+  const cookieStore = await cookies()
+  const sidebarCollapsed = cookieStore.get(SIDEBAR_COLLAPSED_COOKIE)?.value === '1'
+
   return (
-    <div className="flex min-h-svh flex-col">
-      <AppHeader email={user.email ?? null} isGuest={isGuest} emailUnverified={unverified} />
-      {isGuest && <GuestBanner />}
-      {unverified && user.email && <VerifyEmailBanner email={user.email} />}
+    <AppShell
+      user={{ email: user.email ?? null, isGuest, emailUnverified: unverified }}
+      defaultCollapsed={sidebarCollapsed}
+      banners={
+        <>
+          {isGuest && <GuestBanner />}
+          {unverified && user.email && <VerifyEmailBanner email={user.email} />}
+        </>
+      }
+    >
       <Suspense fallback={null}>
         <VerifiedToast />
       </Suspense>
-      <main className="flex-1">{children}</main>
-    </div>
+      {children}
+    </AppShell>
   )
 }

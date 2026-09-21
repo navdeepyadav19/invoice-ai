@@ -1,28 +1,27 @@
 import Link from 'next/link'
 
+import { PageContainer, PageHeader } from '@/components/app/page-header'
 import { SettingsNav } from '@/components/settings/settings-nav'
 
 /**
- * Settings grew a second page, and then a fourth.
+ * Shared frame for every settings page.
  *
- * Until now "Settings" meant exactly one screen, so the header linked straight
- * at /settings/business. Adding API keys under that URL made a page that
- * existed, built and deployed — and that nobody could navigate to. A shell with
- * its own nav is what stops the next page having the same problem.
+ * On md+ the app sidebar's "Settings" group is the navigation between these
+ * pages, so the in-page section tabs (SettingsNav) only render on small
+ * screens, where the sidebar is tucked away in a drawer.
  */
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="mx-auto w-full max-w-5xl px-6 py-10">
-      <div className="mb-8">
-        <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Your business details, and the credentials other systems use to talk to Invoice-AI.
-        </p>
-      </div>
+    <PageContainer size="default" className="max-w-5xl">
+      <PageHeader
+        className="mb-8"
+        title="Settings"
+        description="Your business details, and the credentials other systems use to talk to Invoice-AI."
+      />
 
-      <div className="flex flex-col gap-8 lg:flex-row">
+      <div className="flex flex-col gap-6">
         <SettingsNav />
-        <div className="min-w-0 flex-1">{children}</div>
+        <div className="min-w-0">{children}</div>
       </div>
 
       <p className="mt-16 border-t pt-6 text-xs text-muted-foreground">
@@ -32,6 +31,6 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
         </Link>
         .
       </p>
-    </div>
+    </PageContainer>
   )
 }
