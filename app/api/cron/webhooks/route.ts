@@ -14,6 +14,13 @@ export const maxDuration = 60
  * due, POST it, and either mark it succeeded or schedule the next retry from
  * the backoff ladder in lib/webhooks/deliver.ts.
  *
+ * The schedule is DAILY because Vercel's Hobby plan allows only one cron run
+ * per day — a tighter schedule is rejected at deploy time. On Pro, change it to
+ * run every 5 minutes; until then a failed webhook can wait up to 24h for its retry,
+ * which makes webhooks close to unusable for anything time-sensitive. (This
+ * note lives here because vercel.json's schema rejects extra keys like
+ * "comment" and fails the build.)
+ *
  * ── Why this is the one place a service-role client is allowed ──────────────
  *
  * Everywhere else in this codebase, tenant data is reached through a user token
