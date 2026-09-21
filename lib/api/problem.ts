@@ -8,7 +8,7 @@ import { isServiceError, type ServiceErrorCode } from '@/lib/services/errors'
  * different parser and gets it wrong for the endpoint they tested least.
  *
  *   {
- *     "type":     "https://invoice-ai.app/problems/invalid-state",
+ *     "type":     "https://invoice.horizonpay.co/problems/invalid-state",
  *     "title":    "Invoice is not a draft",
  *     "status":   409,
  *     "detail":   "Invoice 7f3c… is already issued as INV/26-27/0042.",
@@ -21,7 +21,7 @@ import { isServiceError, type ServiceErrorCode } from '@/lib/services/errors'
  * Integrators should branch on `code`, never on `detail` or on `title`.
  */
 
-const PROBLEM_BASE = 'https://invoice-ai.app/problems'
+const PROBLEM_BASE = 'https://invoice.horizonpay.co/problems'
 
 export interface ProblemBody {
   type: string

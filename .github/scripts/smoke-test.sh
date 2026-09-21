@@ -2,7 +2,7 @@
 # Post-deploy smoke test: request a few routes on the live site and fail the
 # pipeline if any of them returns an unexpected HTTP status.
 #
-#   bash .github/scripts/smoke-test.sh https://invoice-ai-horizonpay.vercel.app
+#   bash .github/scripts/smoke-test.sh https://invoice.horizonpay.co
 set -uo pipefail
 
 BASE_URL="${1:?usage: smoke-test.sh <base-url>}"

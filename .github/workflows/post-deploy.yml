@@ -14,7 +14,7 @@ permissions:
   contents: read
 
 env:
-  PRODUCTION_URL: ${{ vars.PRODUCTION_URL || 'https://invoice-ai-horizonpay.vercel.app' }}
+  PRODUCTION_URL: ${{ vars.PRODUCTION_URL || 'https://invoice.horizonpay.co' }}
 
 jobs:
   smoke-test:

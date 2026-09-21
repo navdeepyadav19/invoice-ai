@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "Invoice-AI API v1",
-    "description": "Generated from /api/v1/openapi.json — do not edit by hand.\nRegenerate with `pnpm postman:gen`.\n\nSet `api_key` in the environment to a key from Settings → API keys.\nA fresh Idempotency-Key is injected automatically for write requests.",
+    "description": "Generated from /api/v1/openapi.json — do not edit by hand.\nRegenerate with `pnpm postman:gen`.\n\n## How to run\n1. Import both files: this collection and `invoice-ai.postman_environment.json`.\n2. Select the \"Invoice-AI — production\" environment and set `api_key` to a key\n   from Settings → API keys (it needs every scope the run touches).\n3. Run the whole collection, in order, with the Collection Runner — or:\n   `newman run invoice-ai.postman_collection.json -e invoice-ai.postman_environment.json --env-var api_key=…`\n\nThe folders are a lifecycle, not an index: each request depends on ids captured\nby the ones before it (stored as collection variables), so running a single\nrequest on its own needs those ids filled in first.\n\nThe run sends one real invoice email, to Resend's test sink delivered@resend.dev.\nA fresh Idempotency-Key is injected automatically for every request.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -22,7 +22,11 @@
         "exec": [
           "// A distinct Idempotency-Key per *request*, not per retry loop.",
           "// Reusing one key across different bodies is a 422 by design.",
-          "pm.variables.set('idempotency_key', require('uuid').v4());"
+          "pm.variables.set('idempotency_key', pm.variables.replaceIn('{{$guid}}'));",
+          "",
+          "// Relative, so the collection does not rot: a due date in the past",
+          "// would make every invoice this run creates read as overdue.",
+          "pm.variables.set('due_date', new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10));"
         ]
       }
     }
@@ -31,10 +35,6 @@
     {
       "key": "base_url",
       "value": "https://invoice.horizonpay.co/api/v1"
-    },
-    {
-      "key": "invoice_id",
-      "value": ""
     },
     {
       "key": "customer_id",
@@ -51,11 +51,20 @@
     {
       "key": "webhook_endpoint_id",
       "value": ""
+    },
+    {
+      "key": "invoice_id",
+      "value": ""
+    },
+    {
+      "key": "invoice_item_id",
+      "value": ""
     }
   ],
   "item": [
     {
-      "name": "Business",
+      "name": "1. Setup",
+      "description": "Create and edit the catalogue the invoices bill from.",
       "item": [
         {
           "name": "Read the business profile",
@@ -79,46 +88,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
-                  "pm.test('errors are problem+json', () => {",
-                  "  if (pm.response.code >= 400) {",
-                  "    pm.expect(pm.response.headers.get('content-type')).to.include('application/problem+json');",
-                  "    pm.expect(pm.response.json()).to.have.property('code');",
-                  "  }",
-                  "});",
-                  "pm.test('echoes a request id', () => pm.expect(pm.response.headers.get('x-request-id')).to.be.a('string'));"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "Customers",
-      "item": [
-        {
-          "name": "List customers",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "description": "",
-            "url": {
-              "raw": "{{base_url}}/customers",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "customers"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
                   "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
                   "pm.test('errors are problem+json', () => {",
                   "  if (pm.response.code >= 400) {",
@@ -154,7 +124,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Acme Industries\",\n  \"tax_id\": \"US-EIN 12-3456789\",\n  \"email\": \"accounts@acme.example\",\n  \"address\": {\n    \"line1\": \"4th Floor, Market Tower\",\n    \"city\": \"Austin\",\n    \"state\": \"TX\",\n    \"postal_code\": \"73301\",\n    \"country\": \"US\"\n  }\n}"
+              "raw": "{\n  \"name\": \"Acme Industries\",\n  \"tax_id\": \"US-EIN 12-3456789\",\n  \"email\": \"delivered@resend.dev\",\n  \"address\": {\n    \"line1\": \"4th Floor, Market Tower\",\n    \"city\": \"Austin\",\n    \"state\": \"TX\",\n    \"postal_code\": \"73301\",\n    \"country\": \"US\"\n  }\n}"
             }
           },
           "event": [
@@ -163,6 +133,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "pm.test('status is 201', () => pm.response.to.have.status(201));",
                   "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
                   "pm.test('errors are problem+json', () => {",
                   "  if (pm.response.code >= 400) {",
@@ -171,7 +142,43 @@
                   "  }",
                   "});",
                   "pm.test('echoes a request id', () => pm.expect(pm.response.headers.get('x-request-id')).to.be.a('string'));",
-                  "if (pm.response.code === 201) pm.environment.set('customer_id', pm.response.json().data.id);"
+                  "if (pm.response.code === 201) pm.collectionVariables.set('customer_id', pm.response.json().data.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List customers",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "",
+            "url": {
+              "raw": "{{base_url}}/customers",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "customers"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
+                  "pm.test('errors are problem+json', () => {",
+                  "  if (pm.response.code >= 400) {",
+                  "    pm.expect(pm.response.headers.get('content-type')).to.include('application/problem+json');",
+                  "    pm.expect(pm.response.json()).to.have.property('code');",
+                  "  }",
+                  "});",
+                  "pm.test('echoes a request id', () => pm.expect(pm.response.headers.get('x-request-id')).to.be.a('string'));"
                 ]
               }
             }
@@ -200,6 +207,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
                   "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
                   "pm.test('errors are problem+json', () => {",
                   "  if (pm.response.code >= 400) {",
@@ -217,7 +225,12 @@
           "name": "Update a customer",
           "request": {
             "method": "PATCH",
-            "header": [],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "description": "",
             "url": {
               "raw": "{{base_url}}/customers/{{customer_id}}",
@@ -228,6 +241,10 @@
                 "customers",
                 "{{customer_id}}"
               ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"+1 512 555 0100\"\n}"
             }
           },
           "event": [
@@ -236,82 +253,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
-                  "pm.test('errors are problem+json', () => {",
-                  "  if (pm.response.code >= 400) {",
-                  "    pm.expect(pm.response.headers.get('content-type')).to.include('application/problem+json');",
-                  "    pm.expect(pm.response.json()).to.have.property('code');",
-                  "  }",
-                  "});",
-                  "pm.test('echoes a request id', () => pm.expect(pm.response.headers.get('x-request-id')).to.be.a('string'));"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Delete a customer",
-          "request": {
-            "method": "DELETE",
-            "header": [],
-            "description": "Archives rather than deletes: issued invoices reference customers and must keep naming who they were billed to.",
-            "url": {
-              "raw": "{{base_url}}/customers/{{customer_id}}",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "customers",
-                "{{customer_id}}"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
-                  "pm.test('errors are problem+json', () => {",
-                  "  if (pm.response.code >= 400) {",
-                  "    pm.expect(pm.response.headers.get('content-type')).to.include('application/problem+json');",
-                  "    pm.expect(pm.response.json()).to.have.property('code');",
-                  "  }",
-                  "});",
-                  "pm.test('echoes a request id', () => pm.expect(pm.response.headers.get('x-request-id')).to.be.a('string'));"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "Products",
-      "item": [
-        {
-          "name": "List products",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "description": "",
-            "url": {
-              "raw": "{{base_url}}/products",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "products"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
                   "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
                   "pm.test('errors are problem+json', () => {",
                   "  if (pm.response.code >= 400) {",
@@ -356,6 +298,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "pm.test('status is 201', () => pm.response.to.have.status(201));",
                   "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
                   "pm.test('errors are problem+json', () => {",
                   "  if (pm.response.code >= 400) {",
@@ -364,7 +307,43 @@
                   "  }",
                   "});",
                   "pm.test('echoes a request id', () => pm.expect(pm.response.headers.get('x-request-id')).to.be.a('string'));",
-                  "if (pm.response.code === 201) pm.environment.set('product_id', pm.response.json().data.id);"
+                  "if (pm.response.code === 201) pm.collectionVariables.set('product_id', pm.response.json().data.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List products",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "",
+            "url": {
+              "raw": "{{base_url}}/products",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "products"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
+                  "pm.test('errors are problem+json', () => {",
+                  "  if (pm.response.code >= 400) {",
+                  "    pm.expect(pm.response.headers.get('content-type')).to.include('application/problem+json');",
+                  "    pm.expect(pm.response.json()).to.have.property('code');",
+                  "  }",
+                  "});",
+                  "pm.test('echoes a request id', () => pm.expect(pm.response.headers.get('x-request-id')).to.be.a('string'));"
                 ]
               }
             }
@@ -393,6 +372,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
                   "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
                   "pm.test('errors are problem+json', () => {",
                   "  if (pm.response.code >= 400) {",
@@ -410,7 +390,12 @@
           "name": "Update a product",
           "request": {
             "method": "PATCH",
-            "header": [],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "description": "",
             "url": {
               "raw": "{{base_url}}/products/{{product_id}}",
@@ -421,6 +406,10 @@
                 "products",
                 "{{product_id}}"
               ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"description\": \"Monthly advisory block, up to 10 hours.\"\n}"
             }
           },
           "event": [
@@ -429,82 +418,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
-                  "pm.test('errors are problem+json', () => {",
-                  "  if (pm.response.code >= 400) {",
-                  "    pm.expect(pm.response.headers.get('content-type')).to.include('application/problem+json');",
-                  "    pm.expect(pm.response.json()).to.have.property('code');",
-                  "  }",
-                  "});",
-                  "pm.test('echoes a request id', () => pm.expect(pm.response.headers.get('x-request-id')).to.be.a('string'));"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Archive a product",
-          "request": {
-            "method": "DELETE",
-            "header": [],
-            "description": "Prices and invoice lines may reference it, so the row stays with `active: false`.",
-            "url": {
-              "raw": "{{base_url}}/products/{{product_id}}",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "products",
-                "{{product_id}}"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
-                  "pm.test('errors are problem+json', () => {",
-                  "  if (pm.response.code >= 400) {",
-                  "    pm.expect(pm.response.headers.get('content-type')).to.include('application/problem+json');",
-                  "    pm.expect(pm.response.json()).to.have.property('code');",
-                  "  }",
-                  "});",
-                  "pm.test('echoes a request id', () => pm.expect(pm.response.headers.get('x-request-id')).to.be.a('string'));"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "Prices",
-      "item": [
-        {
-          "name": "List prices",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "description": "",
-            "url": {
-              "raw": "{{base_url}}/prices",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "prices"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
                   "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
                   "pm.test('errors are problem+json', () => {",
                   "  if (pm.response.code >= 400) {",
@@ -549,6 +463,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "pm.test('status is 201', () => pm.response.to.have.status(201));",
                   "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
                   "pm.test('errors are problem+json', () => {",
                   "  if (pm.response.code >= 400) {",
@@ -557,7 +472,43 @@
                   "  }",
                   "});",
                   "pm.test('echoes a request id', () => pm.expect(pm.response.headers.get('x-request-id')).to.be.a('string'));",
-                  "if (pm.response.code === 201) pm.environment.set('price_id', pm.response.json().data.id);"
+                  "if (pm.response.code === 201) pm.collectionVariables.set('price_id', pm.response.json().data.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List prices",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "",
+            "url": {
+              "raw": "{{base_url}}/prices",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "prices"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
+                  "pm.test('errors are problem+json', () => {",
+                  "  if (pm.response.code >= 400) {",
+                  "    pm.expect(pm.response.headers.get('content-type')).to.include('application/problem+json');",
+                  "    pm.expect(pm.response.json()).to.have.property('code');",
+                  "  }",
+                  "});",
+                  "pm.test('echoes a request id', () => pm.expect(pm.response.headers.get('x-request-id')).to.be.a('string'));"
                 ]
               }
             }
@@ -586,6 +537,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
                   "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
                   "pm.test('errors are problem+json', () => {",
                   "  if (pm.response.code >= 400) {",
@@ -603,7 +555,12 @@
           "name": "Update a price",
           "request": {
             "method": "PATCH",
-            "header": [],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "description": "The parent product cannot change — create a new price instead.",
             "url": {
               "raw": "{{base_url}}/prices/{{price_id}}",
@@ -614,6 +571,10 @@
                 "prices",
                 "{{price_id}}"
               ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nickname\": \"Monthly (annual contract)\",\n  \"type\": \"recurring\",\n  \"recurring\": {\n    \"interval\": \"month\",\n    \"interval_count\": 1\n  }\n}"
             }
           },
           "event": [
@@ -622,6 +583,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
                   "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
                   "pm.test('errors are problem+json', () => {",
                   "  if (pm.response.code >= 400) {",
@@ -636,19 +598,67 @@
           ]
         },
         {
-          "name": "Archive a price",
+          "name": "Register a webhook endpoint",
           "request": {
-            "method": "DELETE",
-            "header": [],
-            "description": "",
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "The response carries the signing secret, once. The URL must be https and must not resolve to a private or link-local address.",
             "url": {
-              "raw": "{{base_url}}/prices/{{price_id}}",
+              "raw": "{{base_url}}/webhook-endpoints",
               "host": [
                 "{{base_url}}"
               ],
               "path": [
-                "prices",
-                "{{price_id}}"
+                "webhook-endpoints"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"url\": \"https://example.com/webhooks/invoice-ai\",\n  \"events\": [\n    \"invoice.finalized\",\n    \"invoice.paid\"\n  ]\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
+                  "pm.test('errors are problem+json', () => {",
+                  "  if (pm.response.code >= 400) {",
+                  "    pm.expect(pm.response.headers.get('content-type')).to.include('application/problem+json');",
+                  "    pm.expect(pm.response.json()).to.have.property('code');",
+                  "  }",
+                  "});",
+                  "pm.test('echoes a request id', () => pm.expect(pm.response.headers.get('x-request-id')).to.be.a('string'));",
+                  "if (pm.response.code === 201) pm.collectionVariables.set('webhook_endpoint_id', pm.response.json().data.id);",
+                  "pm.test('the secret is returned exactly once, here', () => {",
+                  "  if (pm.response.code === 201) pm.expect(pm.response.json().data).to.have.property('secret');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List webhook endpoints",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "Secrets are never returned here — only once, at creation.",
+            "url": {
+              "raw": "{{base_url}}/webhook-endpoints",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "webhook-endpoints"
               ]
             }
           },
@@ -658,6 +668,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
                   "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
                   "pm.test('errors are problem+json', () => {",
                   "  if (pm.response.code >= 400) {",
@@ -674,43 +685,9 @@
       ]
     },
     {
-      "name": "Invoices",
+      "name": "2. Draft invoice",
+      "description": "A draft is freely editable: no number has been spent on it yet.",
       "item": [
-        {
-          "name": "List invoices",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "description": "`status=overdue` works even though no row is stored as overdue — it is computed from `due_date` at read time.",
-            "url": {
-              "raw": "{{base_url}}/invoices",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "invoices"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
-                  "pm.test('errors are problem+json', () => {",
-                  "  if (pm.response.code >= 400) {",
-                  "    pm.expect(pm.response.headers.get('content-type')).to.include('application/problem+json');",
-                  "    pm.expect(pm.response.json()).to.have.property('code');",
-                  "  }",
-                  "});",
-                  "pm.test('echoes a request id', () => pm.expect(pm.response.headers.get('x-request-id')).to.be.a('string'));"
-                ]
-              }
-            }
-          ]
-        },
         {
           "name": "Create a draft",
           "request": {
@@ -737,7 +714,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"customer\": \"{{customer_id}}\",\n  \"currency\": \"USD\",\n  \"due_date\": \"2026-10-17\",\n  \"description\": \"September consulting retainer.\",\n  \"items\": [\n    {\n      \"price\": \"{{price_id}}\",\n      \"quantity\": 1\n    },\n    {\n      \"description\": \"Onboarding workshop\",\n      \"quantity\": 1,\n      \"unit\": \"NOS\",\n      \"unit_amount\": 50000,\n      \"tax_rate\": 0\n    }\n  ]\n}"
+              "raw": "{\n  \"customer\": \"{{customer_id}}\",\n  \"currency\": \"USD\",\n  \"due_date\": \"{{due_date}}\",\n  \"description\": \"Consulting retainer.\",\n  \"items\": [\n    {\n      \"price\": \"{{price_id}}\",\n      \"quantity\": 1\n    },\n    {\n      \"description\": \"Onboarding workshop\",\n      \"quantity\": 1,\n      \"unit\": \"NOS\",\n      \"unit_amount\": 50000,\n      \"tax_rate\": 0\n    }\n  ]\n}"
             }
           },
           "event": [
@@ -746,6 +723,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "pm.test('status is 201', () => pm.response.to.have.status(201));",
                   "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
                   "pm.test('errors are problem+json', () => {",
                   "  if (pm.response.code >= 400) {",
@@ -754,7 +732,43 @@
                   "  }",
                   "});",
                   "pm.test('echoes a request id', () => pm.expect(pm.response.headers.get('x-request-id')).to.be.a('string'));",
-                  "if (pm.response.code === 201) pm.environment.set('invoice_id', pm.response.json().data.id);"
+                  "if (pm.response.code === 201) pm.collectionVariables.set('invoice_id', pm.response.json().data.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List invoices",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "`status=overdue` works even though no row is stored as overdue — it is computed from `due_date` at read time.",
+            "url": {
+              "raw": "{{base_url}}/invoices",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoices"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
+                  "pm.test('errors are problem+json', () => {",
+                  "  if (pm.response.code >= 400) {",
+                  "    pm.expect(pm.response.headers.get('content-type')).to.include('application/problem+json');",
+                  "    pm.expect(pm.response.json()).to.have.property('code');",
+                  "  }",
+                  "});",
+                  "pm.test('echoes a request id', () => pm.expect(pm.response.headers.get('x-request-id')).to.be.a('string'));"
                 ]
               }
             }
@@ -783,6 +797,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
                   "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
                   "pm.test('errors are problem+json', () => {",
                   "  if (pm.response.code >= 400) {",
@@ -800,7 +815,12 @@
           "name": "Update a draft",
           "request": {
             "method": "PATCH",
-            "header": [],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "description": "Drafts only. A finalized invoice is frozen — the customer may already have the PDF.",
             "url": {
               "raw": "{{base_url}}/invoices/{{invoice_id}}",
@@ -811,6 +831,10 @@
                 "invoices",
                 "{{invoice_id}}"
               ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer\": \"{{customer_id}}\",\n  \"due_date\": \"{{due_date}}\",\n  \"description\": \"Consulting retainer — net 30.\",\n  \"footer\": \"Thank you for your business.\"\n}"
             }
           },
           "event": [
@@ -819,6 +843,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
                   "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
                   "pm.test('errors are problem+json', () => {",
                   "  if (pm.response.code >= 400) {",
@@ -833,19 +858,78 @@
           ]
         },
         {
-          "name": "Delete a draft",
+          "name": "Append a line to a draft",
           "request": {
-            "method": "DELETE",
-            "header": [],
-            "description": "Drafts only. A finalized invoice holds a number in a consecutive series — void it instead.",
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotency_key}}"
+              }
+            ],
+            "description": "Either `price` or (`description` + `unit_amount`). Totals recompute, so the response is the whole invoice.",
             "url": {
-              "raw": "{{base_url}}/invoices/{{invoice_id}}",
+              "raw": "{{base_url}}/invoice-items",
               "host": [
                 "{{base_url}}"
               ],
               "path": [
-                "invoices",
-                "{{invoice_id}}"
+                "invoice-items"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"invoice\": \"{{invoice_id}}\",\n  \"description\": \"Extra review round\",\n  \"quantity\": 1,\n  \"unit_amount\": 10000\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
+                  "pm.test('errors are problem+json', () => {",
+                  "  if (pm.response.code >= 400) {",
+                  "    pm.expect(pm.response.headers.get('content-type')).to.include('application/problem+json');",
+                  "    pm.expect(pm.response.json()).to.have.property('code');",
+                  "  }",
+                  "});",
+                  "pm.test('echoes a request id', () => pm.expect(pm.response.headers.get('x-request-id')).to.be.a('string'));",
+                  "if (pm.response.code === 201) {",
+                  "  const lines = pm.response.json().data.lines.data;",
+                  "  const added = lines.find((line) => line.description === 'Extra review round') || lines[lines.length - 1];",
+                  "  pm.collectionVariables.set('invoice_item_id', added.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List lines of one invoice",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "",
+            "url": {
+              "raw": "{{base_url}}/invoice-items?invoice={{invoice_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoice-items"
+              ],
+              "query": [
+                {
+                  "key": "invoice",
+                  "value": "{{invoice_id}}"
+                }
               ]
             }
           },
@@ -855,6 +939,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
                   "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
                   "pm.test('errors are problem+json', () => {",
                   "  if (pm.response.code >= 400) {",
@@ -868,6 +953,92 @@
             }
           ]
         },
+        {
+          "name": "Read one line",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "",
+            "url": {
+              "raw": "{{base_url}}/invoice-items/{{invoice_item_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoice-items",
+                "{{invoice_item_id}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
+                  "pm.test('errors are problem+json', () => {",
+                  "  if (pm.response.code >= 400) {",
+                  "    pm.expect(pm.response.headers.get('content-type')).to.include('application/problem+json');",
+                  "    pm.expect(pm.response.json()).to.have.property('code');",
+                  "  }",
+                  "});",
+                  "pm.test('echoes a request id', () => pm.expect(pm.response.headers.get('x-request-id')).to.be.a('string'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Remove a line from a draft",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "description": "Pass `?invoice=` to scope the search. A draft always keeps at least one line.",
+            "url": {
+              "raw": "{{base_url}}/invoice-items/{{invoice_item_id}}?invoice={{invoice_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoice-items",
+                "{{invoice_item_id}}"
+              ],
+              "query": [
+                {
+                  "key": "invoice",
+                  "value": "{{invoice_id}}"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
+                  "pm.test('errors are problem+json', () => {",
+                  "  if (pm.response.code >= 400) {",
+                  "    pm.expect(pm.response.headers.get('content-type')).to.include('application/problem+json');",
+                  "    pm.expect(pm.response.json()).to.have.property('code');",
+                  "  }",
+                  "});",
+                  "pm.test('echoes a request id', () => pm.expect(pm.response.headers.get('x-request-id')).to.be.a('string'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "3. Invoice lifecycle",
+      "description": "Finalize (spends a number), email it to delivered@resend.dev, then mark it paid.",
+      "item": [
         {
           "name": "Finalize a draft",
           "request": {
@@ -897,6 +1068,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
                   "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
                   "pm.test('errors are problem+json', () => {",
                   "  if (pm.response.code >= 400) {",
@@ -945,7 +1117,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"to\": \"accounts@acme.example\"\n}"
+              "raw": "{\n  \"to\": \"delivered@resend.dev\"\n}"
             }
           },
           "event": [
@@ -954,6 +1126,86 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
+                  "pm.test('errors are problem+json', () => {",
+                  "  if (pm.response.code >= 400) {",
+                  "    pm.expect(pm.response.headers.get('content-type')).to.include('application/problem+json');",
+                  "    pm.expect(pm.response.json()).to.have.property('code');",
+                  "  }",
+                  "});",
+                  "pm.test('echoes a request id', () => pm.expect(pm.response.headers.get('x-request-id')).to.be.a('string'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Download the invoice PDF",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "",
+            "url": {
+              "raw": "{{base_url}}/invoices/{{invoice_id}}/pdf",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoices",
+                "{{invoice_id}}",
+                "pdf"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
+                  "pm.test('errors are problem+json', () => {",
+                  "  if (pm.response.code >= 400) {",
+                  "    pm.expect(pm.response.headers.get('content-type')).to.include('application/problem+json');",
+                  "    pm.expect(pm.response.json()).to.have.property('code');",
+                  "  }",
+                  "});",
+                  "pm.test('echoes a request id', () => pm.expect(pm.response.headers.get('x-request-id')).to.be.a('string'));",
+                  "pm.test('is a PDF', () => {",
+                  "  if (pm.response.code === 200) pm.expect(pm.response.headers.get('content-type')).to.include('application/pdf');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Invoice history",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "`viewed` and `downloaded` come from the public share link and are written by the database, so they appear here without passing through the API.",
+            "url": {
+              "raw": "{{base_url}}/invoices/{{invoice_id}}/events",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoices",
+                "{{invoice_id}}",
+                "events"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
                   "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
                   "pm.test('errors are problem+json', () => {",
                   "  if (pm.response.code >= 400) {",
@@ -1004,6 +1256,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
                   "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
                   "pm.test('errors are problem+json', () => {",
                   "  if (pm.response.code >= 400) {",
@@ -1012,6 +1265,199 @@
                   "  }",
                   "});",
                   "pm.test('echoes a request id', () => pm.expect(pm.response.headers.get('x-request-id')).to.be.a('string'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "4. Delete & void paths",
+      "description": "A paid invoice cannot be voided and a finalized one cannot be deleted, so each path gets its own fresh invoice.",
+      "item": [
+        {
+          "name": "Create a throwaway draft",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotency_key}}"
+              }
+            ],
+            "description": "Requires an `Idempotency-Key`. A retried create would otherwise make a second identical draft with no way to tell which one to finalize.",
+            "url": {
+              "raw": "{{base_url}}/invoices",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoices"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer\": \"{{customer_id}}\",\n  \"currency\": \"USD\",\n  \"description\": \"Throwaway draft — deleted by the next request.\",\n  \"items\": [\n    {\n      \"description\": \"Placeholder\",\n      \"quantity\": 1,\n      \"unit_amount\": 1000,\n      \"tax_rate\": 0\n    }\n  ]\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
+                  "pm.test('errors are problem+json', () => {",
+                  "  if (pm.response.code >= 400) {",
+                  "    pm.expect(pm.response.headers.get('content-type')).to.include('application/problem+json');",
+                  "    pm.expect(pm.response.json()).to.have.property('code');",
+                  "  }",
+                  "});",
+                  "pm.test('echoes a request id', () => pm.expect(pm.response.headers.get('x-request-id')).to.be.a('string'));",
+                  "if (pm.response.code === 201) pm.collectionVariables.set('invoice_id', pm.response.json().data.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete the throwaway draft",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "description": "Drafts only. A finalized invoice holds a number in a consecutive series — void it instead.",
+            "url": {
+              "raw": "{{base_url}}/invoices/{{invoice_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoices",
+                "{{invoice_id}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 204', () => pm.response.to.have.status(204));",
+                  "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
+                  "pm.test('errors are problem+json', () => {",
+                  "  if (pm.response.code >= 400) {",
+                  "    pm.expect(pm.response.headers.get('content-type')).to.include('application/problem+json');",
+                  "    pm.expect(pm.response.json()).to.have.property('code');",
+                  "  }",
+                  "});",
+                  "pm.test('echoes a request id', () => pm.expect(pm.response.headers.get('x-request-id')).to.be.a('string'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create a draft to void",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotency_key}}"
+              }
+            ],
+            "description": "Requires an `Idempotency-Key`. A retried create would otherwise make a second identical draft with no way to tell which one to finalize.",
+            "url": {
+              "raw": "{{base_url}}/invoices",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoices"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer\": \"{{customer_id}}\",\n  \"currency\": \"USD\",\n  \"due_date\": \"{{due_date}}\",\n  \"description\": \"Raised by mistake — voided below.\",\n  \"items\": [\n    {\n      \"price\": \"{{price_id}}\",\n      \"quantity\": 1\n    }\n  ]\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
+                  "pm.test('errors are problem+json', () => {",
+                  "  if (pm.response.code >= 400) {",
+                  "    pm.expect(pm.response.headers.get('content-type')).to.include('application/problem+json');",
+                  "    pm.expect(pm.response.json()).to.have.property('code');",
+                  "  }",
+                  "});",
+                  "pm.test('echoes a request id', () => pm.expect(pm.response.headers.get('x-request-id')).to.be.a('string'));",
+                  "if (pm.response.code === 201) pm.collectionVariables.set('invoice_id', pm.response.json().data.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Finalize the draft to void",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotency_key}}"
+              }
+            ],
+            "description": "Assigns a permanent number and opens the invoice. Requires an `Idempotency-Key`; a retry replays the first response. Even without one, finalizing twice returns the same number.",
+            "url": {
+              "raw": "{{base_url}}/invoices/{{invoice_id}}/finalize",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "invoices",
+                "{{invoice_id}}",
+                "finalize"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
+                  "pm.test('errors are problem+json', () => {",
+                  "  if (pm.response.code >= 400) {",
+                  "    pm.expect(pm.response.headers.get('content-type')).to.include('application/problem+json');",
+                  "    pm.expect(pm.response.json()).to.have.property('code');",
+                  "  }",
+                  "});",
+                  "pm.test('echoes a request id', () => pm.expect(pm.response.headers.get('x-request-id')).to.be.a('string'));",
+                  "pm.test('finalizing returns an invoice number', () => {",
+                  "  if (pm.response.code === 200) {",
+                  "    pm.expect(pm.response.json().data.number).to.match(/^[A-Z0-9\\-\\/]{1,16}-\\d{4}$/);",
+                  "  }",
+                  "});",
+                  "// Run this request twice with the SAME Idempotency-Key to see the replay:",
+                  "// the second response carries Idempotent-Replayed: true and the same number."
                 ]
               }
             }
@@ -1054,80 +1500,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
-                  "pm.test('errors are problem+json', () => {",
-                  "  if (pm.response.code >= 400) {",
-                  "    pm.expect(pm.response.headers.get('content-type')).to.include('application/problem+json');",
-                  "    pm.expect(pm.response.json()).to.have.property('code');",
-                  "  }",
-                  "});",
-                  "pm.test('echoes a request id', () => pm.expect(pm.response.headers.get('x-request-id')).to.be.a('string'));"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Download the invoice PDF",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "description": "",
-            "url": {
-              "raw": "{{base_url}}/invoices/{{invoice_id}}/pdf",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "invoices",
-                "{{invoice_id}}",
-                "pdf"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
-                  "pm.test('errors are problem+json', () => {",
-                  "  if (pm.response.code >= 400) {",
-                  "    pm.expect(pm.response.headers.get('content-type')).to.include('application/problem+json');",
-                  "    pm.expect(pm.response.json()).to.have.property('code');",
-                  "  }",
-                  "});",
-                  "pm.test('echoes a request id', () => pm.expect(pm.response.headers.get('x-request-id')).to.be.a('string'));"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Invoice history",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "description": "`viewed` and `downloaded` come from the public share link and are written by the database, so they appear here without passing through the API.",
-            "url": {
-              "raw": "{{base_url}}/invoices/{{invoice_id}}/events",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "invoices",
-                "{{invoice_id}}",
-                "events"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
                   "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
                   "pm.test('errors are problem+json', () => {",
                   "  if (pm.response.code >= 400) {",
@@ -1144,251 +1517,9 @@
       ]
     },
     {
-      "name": "InvoiceItems",
+      "name": "5. Cleanup",
+      "description": "Customers, products and prices archive rather than delete — issued invoices still reference them.",
       "item": [
-        {
-          "name": "List lines of one invoice",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "description": "",
-            "url": {
-              "raw": "{{base_url}}/invoice-items",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "invoice-items"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
-                  "pm.test('errors are problem+json', () => {",
-                  "  if (pm.response.code >= 400) {",
-                  "    pm.expect(pm.response.headers.get('content-type')).to.include('application/problem+json');",
-                  "    pm.expect(pm.response.json()).to.have.property('code');",
-                  "  }",
-                  "});",
-                  "pm.test('echoes a request id', () => pm.expect(pm.response.headers.get('x-request-id')).to.be.a('string'));"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Append a line to a draft",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "key": "Idempotency-Key",
-                "value": "{{idempotency_key}}"
-              }
-            ],
-            "description": "Either `price` or (`description` + `unit_amount`). Totals recompute, so the response is the whole invoice.",
-            "url": {
-              "raw": "{{base_url}}/invoice-items",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "invoice-items"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"invoice\": \"{{invoice_id}}\",\n  \"description\": \"Extra review round\",\n  \"quantity\": 1,\n  \"unit_amount\": 10000\n}"
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
-                  "pm.test('errors are problem+json', () => {",
-                  "  if (pm.response.code >= 400) {",
-                  "    pm.expect(pm.response.headers.get('content-type')).to.include('application/problem+json');",
-                  "    pm.expect(pm.response.json()).to.have.property('code');",
-                  "  }",
-                  "});",
-                  "pm.test('echoes a request id', () => pm.expect(pm.response.headers.get('x-request-id')).to.be.a('string'));"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Read one line",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "description": "",
-            "url": {
-              "raw": "{{base_url}}/invoice-items/{{invoice_item_id}}",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "invoice-items",
-                "{{invoice_item_id}}"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
-                  "pm.test('errors are problem+json', () => {",
-                  "  if (pm.response.code >= 400) {",
-                  "    pm.expect(pm.response.headers.get('content-type')).to.include('application/problem+json');",
-                  "    pm.expect(pm.response.json()).to.have.property('code');",
-                  "  }",
-                  "});",
-                  "pm.test('echoes a request id', () => pm.expect(pm.response.headers.get('x-request-id')).to.be.a('string'));"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Remove a line from a draft",
-          "request": {
-            "method": "DELETE",
-            "header": [],
-            "description": "Pass `?invoice=` to scope the search. A draft always keeps at least one line.",
-            "url": {
-              "raw": "{{base_url}}/invoice-items/{{invoice_item_id}}",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "invoice-items",
-                "{{invoice_item_id}}"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
-                  "pm.test('errors are problem+json', () => {",
-                  "  if (pm.response.code >= 400) {",
-                  "    pm.expect(pm.response.headers.get('content-type')).to.include('application/problem+json');",
-                  "    pm.expect(pm.response.json()).to.have.property('code');",
-                  "  }",
-                  "});",
-                  "pm.test('echoes a request id', () => pm.expect(pm.response.headers.get('x-request-id')).to.be.a('string'));"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "Webhooks",
-      "item": [
-        {
-          "name": "List webhook endpoints",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "description": "Secrets are never returned here — only once, at creation.",
-            "url": {
-              "raw": "{{base_url}}/webhook-endpoints",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "webhook-endpoints"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
-                  "pm.test('errors are problem+json', () => {",
-                  "  if (pm.response.code >= 400) {",
-                  "    pm.expect(pm.response.headers.get('content-type')).to.include('application/problem+json');",
-                  "    pm.expect(pm.response.json()).to.have.property('code');",
-                  "  }",
-                  "});",
-                  "pm.test('echoes a request id', () => pm.expect(pm.response.headers.get('x-request-id')).to.be.a('string'));"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Register a webhook endpoint",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "description": "The response carries the signing secret, once. The URL must be https and must not resolve to a private or link-local address.",
-            "url": {
-              "raw": "{{base_url}}/webhook-endpoints",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "webhook-endpoints"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"url\": \"https://example.com/webhooks/invoice-ai\",\n  \"events\": [\n    \"invoice.issued\",\n    \"invoice.paid\"\n  ]\n}"
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
-                  "pm.test('errors are problem+json', () => {",
-                  "  if (pm.response.code >= 400) {",
-                  "    pm.expect(pm.response.headers.get('content-type')).to.include('application/problem+json');",
-                  "    pm.expect(pm.response.json()).to.have.property('code');",
-                  "  }",
-                  "});",
-                  "pm.test('echoes a request id', () => pm.expect(pm.response.headers.get('x-request-id')).to.be.a('string'));",
-                  "if (pm.response.code === 201) pm.environment.set('webhook_endpoint_id', pm.response.json().data.id);",
-                  "pm.test('the secret is returned exactly once, here', () => {",
-                  "  if (pm.response.code === 201) pm.expect(pm.response.json().data).to.have.property('secret');",
-                  "});"
-                ]
-              }
-            }
-          ]
-        },
         {
           "name": "Delete a webhook endpoint",
           "request": {
@@ -1412,6 +1543,118 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "pm.test('status is 204', () => pm.response.to.have.status(204));",
+                  "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
+                  "pm.test('errors are problem+json', () => {",
+                  "  if (pm.response.code >= 400) {",
+                  "    pm.expect(pm.response.headers.get('content-type')).to.include('application/problem+json');",
+                  "    pm.expect(pm.response.json()).to.have.property('code');",
+                  "  }",
+                  "});",
+                  "pm.test('echoes a request id', () => pm.expect(pm.response.headers.get('x-request-id')).to.be.a('string'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Archive a price",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "description": "",
+            "url": {
+              "raw": "{{base_url}}/prices/{{price_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "prices",
+                "{{price_id}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
+                  "pm.test('errors are problem+json', () => {",
+                  "  if (pm.response.code >= 400) {",
+                  "    pm.expect(pm.response.headers.get('content-type')).to.include('application/problem+json');",
+                  "    pm.expect(pm.response.json()).to.have.property('code');",
+                  "  }",
+                  "});",
+                  "pm.test('echoes a request id', () => pm.expect(pm.response.headers.get('x-request-id')).to.be.a('string'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Archive a product",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "description": "Prices and invoice lines may reference it, so the row stays with `active: false`.",
+            "url": {
+              "raw": "{{base_url}}/products/{{product_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "products",
+                "{{product_id}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
+                  "pm.test('errors are problem+json', () => {",
+                  "  if (pm.response.code >= 400) {",
+                  "    pm.expect(pm.response.headers.get('content-type')).to.include('application/problem+json');",
+                  "    pm.expect(pm.response.json()).to.have.property('code');",
+                  "  }",
+                  "});",
+                  "pm.test('echoes a request id', () => pm.expect(pm.response.headers.get('x-request-id')).to.be.a('string'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete a customer",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "description": "Archives rather than deletes: issued invoices reference customers and must keep naming who they were billed to.",
+            "url": {
+              "raw": "{{base_url}}/customers/{{customer_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "customers",
+                "{{customer_id}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
                   "pm.test('is not an auth failure', () => pm.expect(pm.response.code).to.not.be.oneOf([401, 403]));",
                   "pm.test('errors are problem+json', () => {",
                   "  if (pm.response.code >= 400) {",
