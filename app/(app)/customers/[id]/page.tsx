@@ -65,7 +65,7 @@ export default async function CustomerPage({ params }: PageProps<'/customers/[id
   const archived = Boolean(customer.archived_at)
 
   return (
-    <div className="mx-auto w-full max-w-5xl px-6 py-10">
+    <div className="mx-auto w-full max-w-6xl px-6 py-10">
       <Link
         href="/customers"
         className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
