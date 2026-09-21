@@ -19,6 +19,16 @@ export interface LineItemFormValue {
   rate: string
   discount_percent: string
   tax_rate: string
+  /**
+   * A catalog price (`price_…`) this line was added from. Description, rate
+   * and tax rate are prefilled from it but stay editable — explicit values win
+   * on the server — while the line keeps its product/price link.
+   */
+  price?: string
+  /** The price's currency, kept to flag a mismatch if the invoice currency changes. */
+  price_currency?: string
+  /** Display only: "₹2,500 / month". */
+  price_label?: string
 }
 
 export interface InvoiceFormValues {
@@ -121,6 +131,7 @@ export function toSavePayload(values: InvoiceFormValues) {
       rate: num(item.rate),
       discount_percent: num(item.discount_percent),
       tax_rate: num(item.tax_rate),
+      ...(item.price ? { price: item.price } : {}),
     })),
   }
 }

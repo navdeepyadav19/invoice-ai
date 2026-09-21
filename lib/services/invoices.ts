@@ -138,18 +138,40 @@ export async function pdf(ctx: AuthContext, id: string): Promise<{ buffer: Buffe
 // Draft writes
 // ---------------------------------------------------------------------------
 
-export async function createDraft(ctx: AuthContext, input: InvoiceInput): Promise<InvoiceWithItems> {
+/**
+ * How a draft save treats its Bill-to row.
+ *
+ *   customer: 'cus_…' | uuid   Bill a saved customer. The draft points at that
+ *                              row and the row is NOT modified — the invoice's
+ *                              client_snapshot records what was billed.
+ *   customer: null             The draft used to point at a saved customer and
+ *                              the user detached (edited the fields or clicked
+ *                              "change"). Give the draft a fresh row of its own
+ *                              so the saved customer is never overwritten.
+ *   customer omitted           Existing behaviour: reuse and update the row
+ *                              this draft already owns, or create one.
+ */
+export interface DraftClientOptions {
+  customer?: string | null
+}
+
+export async function createDraft(
+  ctx: AuthContext,
+  input: InvoiceInput,
+  options: DraftClientOptions = {},
+): Promise<InvoiceWithItems> {
   requireScope(ctx, 'invoices:write')
-  return writeDraft(ctx, input, undefined)
+  return writeDraft(ctx, input, undefined, options)
 }
 
 export async function updateDraft(
   ctx: AuthContext,
   id: string,
   input: InvoiceInput,
+  options: DraftClientOptions = {},
 ): Promise<InvoiceWithItems> {
   requireScope(ctx, 'invoices:write')
-  return writeDraft(ctx, input, id)
+  return writeDraft(ctx, input, id, options)
 }
 
 /**
@@ -462,6 +484,7 @@ async function writeDraft(
   ctx: AuthContext,
   input: InvoiceInput,
   id: string | undefined,
+  options: DraftClientOptions = {},
 ): Promise<InvoiceWithItems> {
   const parsed = invoiceSchema.safeParse(input)
   if (!parsed.success) {
@@ -528,7 +551,12 @@ async function writeDraft(
   // trail of near-identical clients behind.
   let clientId = existingClientId
 
-  if (clientId) {
+  if (options.customer) {
+    // A saved customer: link, never overwrite. RLS makes someone else's id a
+    // plain 404. The row is left exactly as the customer list has it.
+    const saved = await getClient(ctx, options.customer)
+    clientId = saved.id
+  } else if (clientId && options.customer !== null) {
     const { error } = await ctx.supabase.from('clients').update(clientValues).eq('id', clientId)
     if (error) throw fromPostgres(error)
   } else {
