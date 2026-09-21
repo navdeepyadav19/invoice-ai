@@ -5,6 +5,8 @@ import { useActionState } from 'react'
 
 import { claimAccountAction } from '@/lib/actions/claim'
 import type { ClaimState } from '@/lib/claim-state'
+import { keptValues } from '@/lib/form-state'
+import { useSubmissionKey } from '@/lib/use-submission-key'
 import { FormError, FormSuccess } from '@/components/auth/form-error'
 import { SubmitButton } from '@/components/submit-button'
 import { Button } from '@/components/ui/button'
@@ -13,6 +15,9 @@ import { Label } from '@/components/ui/label'
 
 export function ClaimForm({ invoiceCount }: { invoiceCount: number }) {
   const [state, formAction] = useActionState<ClaimState, FormData>(claimAccountAction, {})
+  // The email comes back on failure; the password deliberately does not.
+  const kept = keptValues(state.values)
+  const formKey = useSubmissionKey(state)
 
   if (state.message) {
     return (
@@ -60,7 +65,7 @@ export function ClaimForm({ invoiceCount }: { invoiceCount: number }) {
         </p>
       </div>
 
-      <form action={formAction} className="space-y-4">
+      <form key={formKey} action={formAction} className="space-y-4">
         <div className="space-y-2">
           <Label htmlFor="email">Email</Label>
           <Input
@@ -69,6 +74,7 @@ export function ClaimForm({ invoiceCount }: { invoiceCount: number }) {
             type="email"
             autoComplete="email"
             placeholder="you@company.com"
+            defaultValue={kept.text('email')}
             required
           />
         </div>

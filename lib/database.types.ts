@@ -37,8 +37,21 @@ export type ProfileRow = {
   full_name: string | null
   onboarding_step: number
   onboarding_completed_at: string | null
+  /** Null = unverified. Only set server-side (migration 0012). */
+  email_verified_at: string | null
   created_at: string
   updated_at: string
+}
+
+/** One emailed verification link. Never readable from a browser session (RLS, no policies). */
+export type EmailVerificationRow = {
+  id: string
+  user_id: string
+  email: string
+  token_hash: string
+  created_at: string
+  expires_at: string
+  used_at: string | null
 }
 
 export type BusinessRow = {
@@ -300,6 +313,11 @@ export type Database = {
   public: {
     Tables: {
       profiles: Table<ProfileRow>
+      email_verifications: Table<
+        EmailVerificationRow,
+        Omit<Partial<EmailVerificationRow>, 'user_id' | 'email' | 'token_hash'> &
+          Pick<EmailVerificationRow, 'user_id' | 'email' | 'token_hash'>
+      >
       businesses: Table<BusinessRow, Omit<Partial<BusinessRow>, 'owner_id' | 'legal_name' | 'country_code'> & Pick<BusinessRow, 'owner_id' | 'legal_name' | 'country_code'>>
       clients: Table<ClientRow, Omit<Partial<ClientRow>, 'owner_id' | 'name'> & Pick<ClientRow, 'owner_id' | 'name'>>
       products: Table<
@@ -391,6 +409,18 @@ export type Database = {
       redeem_merge_token: {
         Args: { p_token: string }
         Returns: number
+      }
+      create_email_verification: {
+        Args: { p_token_hash: string }
+        Returns: 'created' | 'rate_limited' | 'already_verified' | 'no_email'
+      }
+      redeem_email_verification: {
+        Args: { p_token_hash: string }
+        Returns: 'verified' | 'already_verified' | 'expired' | 'used' | 'email_changed' | 'invalid'
+      }
+      sync_oauth_email_verification: {
+        Args: never
+        Returns: boolean
       }
       api_key_by_prefix: {
         Args: { p_prefix: string }

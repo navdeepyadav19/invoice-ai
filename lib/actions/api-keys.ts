@@ -7,6 +7,7 @@ import { contextFromSession, requireRealAccount } from '@/lib/auth/context'
 import { generateApiKey } from '@/lib/auth/api-key'
 import { isScope, type Scope } from '@/lib/auth/scopes'
 import { toActionError } from '@/lib/actions/to-action-error'
+import { withValues, type FormValues } from '@/lib/form-state'
 import type { ApiKeyRow } from '@/lib/database.types'
 
 /**
@@ -24,6 +25,8 @@ export interface CreateKeyState {
   /** The ONLY time the full key exists. Never stored, never recoverable. */
   plaintext?: string
   prefix?: string
+  /** The submitted name/scopes/expiry, echoed back on failure. */
+  values?: FormValues
 }
 
 export async function createApiKeyAction(formData: FormData): Promise<CreateKeyState> {
@@ -34,14 +37,17 @@ export async function createApiKeyAction(formData: FormData): Promise<CreateKeyS
   const expiresInDays = Number(formData.get('expires_in_days') ?? 0)
 
   if (!name) {
-    return { error: 'Give the key a name.', fieldErrors: { name: 'Required' } }
+    return withValues({ error: 'Give the key a name.', fieldErrors: { name: 'Required' } }, formData)
   }
 
   if (!scopes.length) {
-    return {
-      error: 'Pick at least one scope.',
-      fieldErrors: { scopes: 'A key with no scopes cannot do anything' },
-    }
+    return withValues(
+      {
+        error: 'Pick at least one scope.',
+        fieldErrors: { scopes: 'A key with no scopes cannot do anything' },
+      },
+      formData,
+    )
   }
 
   try {
@@ -65,14 +71,14 @@ export async function createApiKeyAction(formData: FormData): Promise<CreateKeyS
           : null,
     })
 
-    if (error) return { error: error.message }
+    if (error) return withValues({ error: error.message }, formData)
 
     revalidatePath('/settings/api-keys')
 
     // Returned once, to be shown once. Nothing persists it.
     return { plaintext: key.plaintext, prefix: key.prefix }
   } catch (cause) {
-    return toActionError(cause)
+    return withValues(toActionError(cause), formData)
   }
 }
 

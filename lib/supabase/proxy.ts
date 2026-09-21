@@ -15,6 +15,9 @@ const PUBLIC_PREFIXES = [
   '/signup',
   '/forgot-password',
   '/reset-password',
+  // Where /auth/verify explains an expired or used link — usually opened on a
+  // phone with no session, so it must not bounce to /login.
+  '/verify-email',
   '/auth',
   '/i/',
   '/api/public/',

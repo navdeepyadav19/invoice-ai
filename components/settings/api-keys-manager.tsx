@@ -21,6 +21,8 @@ import {
 import { createApiKeyAction, revokeApiKeyAction, type CreateKeyState } from '@/lib/actions/api-keys'
 import { SCOPES, SCOPE_DESCRIPTIONS, type Scope } from '@/lib/auth/scopes'
 import type { ApiKeyRow } from '@/lib/database.types'
+import { keptValues } from '@/lib/form-state'
+import { useSubmissionKey } from '@/lib/use-submission-key'
 
 /**
  * Nine checkboxes is a decision nobody wants to make.
@@ -59,6 +61,10 @@ export function ApiKeysManager({ keys, ready }: { keys: ApiKeyRow[]; ready: bool
     async (_previous, formData) => createApiKeyAction(formData),
     {},
   )
+  // A failed create echoes name/scopes/expiry back; a successful one doesn't,
+  // so the remounted form starts empty again. The plaintext key is never echoed.
+  const kept = keptValues(state.values)
+  const formKey = useSubmissionKey(state)
 
   const [preset, setPreset] = useState('read')
   const selected = PRESETS.find((p) => p.id === preset) ?? PRESETS[0]
@@ -76,13 +82,14 @@ export function ApiKeysManager({ keys, ready }: { keys: ApiKeyRow[]; ready: bool
           </p>
         </div>
 
-        <form action={formAction} className="space-y-6">
+        <form key={formKey} action={formAction} className="space-y-6">
           <div className="space-y-2">
             <Label htmlFor="key-name">What is it for?</Label>
             <Input
               id="key-name"
               name="name"
               placeholder="Zapier, my laptop, the billing cron…"
+              defaultValue={kept.text('name')}
               aria-invalid={Boolean(state.fieldErrors?.name)}
               className="max-w-sm"
             />
@@ -125,7 +132,12 @@ export function ApiKeysManager({ keys, ready }: { keys: ApiKeyRow[]; ready: bool
                     key={scope}
                     className="flex items-start gap-3 rounded-md border p-3 text-sm"
                   >
-                    <Checkbox name="scopes" value={scope} className="mt-0.5" />
+                    <Checkbox
+                      name="scopes"
+                      value={scope}
+                      defaultChecked={kept.checked('scopes', scope)}
+                      className="mt-0.5"
+                    />
                     <span className="min-w-0">
                       <code className="text-xs font-medium">{scope}</code>
                       <span className="mt-0.5 block text-xs text-muted-foreground">
@@ -160,7 +172,7 @@ export function ApiKeysManager({ keys, ready }: { keys: ApiKeyRow[]; ready: bool
               name="expires_in_days"
               type="number"
               min={0}
-              defaultValue={0}
+              defaultValue={kept.text('expires_in_days', 0)}
               className="max-w-32"
             />
             <p className="text-xs text-muted-foreground">

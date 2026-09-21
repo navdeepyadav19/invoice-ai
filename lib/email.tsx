@@ -1,6 +1,7 @@
 import { Resend } from 'resend'
 
 import { InvoiceEmail } from '@/emails/invoice-email'
+import { VerifyEmail } from '@/emails/verify-email'
 import { formatPaise } from '@/lib/money'
 import type { InvoiceView } from '@/lib/invoice-view'
 
@@ -59,6 +60,32 @@ export async function sendInvoiceEmail({
       // every invoice after the first behind a "show more" fold.
       'X-Entity-Ref-ID': view.number ?? publicUrl,
     },
+  })
+
+  if (error) throw new Error(error.message)
+
+  return data?.id ?? ''
+}
+
+/**
+ * The "verify your email" message. Throws on any failure (including Resend not
+ * being configured) — callers decide whether that blocks anything. Signup
+ * deliberately does not let it.
+ */
+export async function sendVerificationEmail({
+  to,
+  name,
+  verifyUrl,
+}: {
+  to: string
+  name?: string | null
+  verifyUrl: string
+}): Promise<string> {
+  const { data, error } = await resend().emails.send({
+    from: fromAddress(),
+    to: [to],
+    subject: 'Verify your email for Invoice AI',
+    react: <VerifyEmail name={name} verifyUrl={verifyUrl} />,
   })
 
   if (error) throw new Error(error.message)

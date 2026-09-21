@@ -6,6 +6,7 @@ import { requireUser } from '@/lib/queries'
 import { contextFromSession } from '@/lib/auth/context'
 import * as webhooks from '@/lib/services/webhooks'
 import { toActionError } from '@/lib/actions/to-action-error'
+import { withValues, type FormValues } from '@/lib/form-state'
 import type { WebhookDeliveryRow, WebhookEndpointRow } from '@/lib/database.types'
 
 /**
@@ -23,6 +24,8 @@ export interface CreateWebhookState {
   /** Returned once. Never shown again. */
   secret?: string
   url?: string
+  /** The submitted URL and events, echoed back on failure. */
+  values?: FormValues
 }
 
 export async function createWebhookAction(formData: FormData): Promise<CreateWebhookState> {
@@ -32,7 +35,10 @@ export async function createWebhookAction(formData: FormData): Promise<CreateWeb
   const events = formData.getAll('events').map(String)
 
   if (!url) {
-    return { error: 'Enter the URL to send events to.', fieldErrors: { url: 'Required' } }
+    return withValues(
+      { error: 'Enter the URL to send events to.', fieldErrors: { url: 'Required' } },
+      formData,
+    )
   }
 
   try {
@@ -43,7 +49,7 @@ export async function createWebhookAction(formData: FormData): Promise<CreateWeb
 
     return { secret: endpoint.secret, url: endpoint.url }
   } catch (cause) {
-    return toActionError(cause)
+    return withValues(toActionError(cause), formData)
   }
 }
 

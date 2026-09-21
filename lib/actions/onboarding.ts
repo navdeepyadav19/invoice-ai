@@ -7,7 +7,7 @@ import { createClient } from '@/lib/supabase/server'
 import { getPrimaryBusiness, requireUser } from '@/lib/queries'
 import { persistBusiness } from '@/lib/actions/business'
 import { paymentDetailsSchema } from '@/lib/validators'
-import { toFieldErrors, type StepState } from '@/lib/form-state'
+import { toFieldErrors, withValues, type StepState } from '@/lib/form-state'
 
 /**
  * Onboarding is two steps.
@@ -50,7 +50,7 @@ export async function saveBusinessStep(_prev: StepState, formData: FormData): Pr
 /** Step 2 — bank details, then done. Skippable; they can be added later. */
 export async function saveBankStep(_prev: StepState, formData: FormData): Promise<StepState> {
   const business = await getPrimaryBusiness()
-  if (!business) return { error: 'Add your business details first.' }
+  if (!business) return withValues({ error: 'Add your business details first.' }, formData)
 
   // formData.get() yields null for an absent field and Zod's .optional()
   // rejects null — see the `field` helper in lib/actions/business.ts.
@@ -77,7 +77,7 @@ export async function saveBankStep(_prev: StepState, formData: FormData): Promis
     })
     .eq('id', business.id)
 
-  if (error) return saveFailed(error)
+  if (error) return saveFailed(error, formData)
 
   return finishOnboarding()
 }
@@ -102,7 +102,11 @@ export async function goToStep(formData: FormData): Promise<void> {
  * the person filling the form, and leak schema details. Log the real one for us,
  * show them something they can act on.
  */
-function saveFailed(error: { message: string }): { error: string } {
+function saveFailed(error: { message: string }, formData: FormData): StepState {
   console.error('[save failed]', error.message)
-  return { error: "We couldn't save your details. Please try again in a moment." }
+  // Echo the submission: a failed save must not wipe what they typed.
+  return withValues(
+    { error: "We couldn't save your details. Please try again in a moment." },
+    formData,
+  )
 }

@@ -4,17 +4,32 @@ import Link from 'next/link'
 import { useActionState } from 'react'
 
 import { signInAction } from '@/lib/actions/auth'
-import type { AuthFormState } from '@/lib/form-state'
+import { keptValues, type AuthFormState } from '@/lib/form-state'
+import { useSubmissionKey } from '@/lib/use-submission-key'
 import { GoogleButton } from '@/components/auth/google-button'
-import { FormError } from '@/components/auth/form-error'
+import { FormError, FormSuccess } from '@/components/auth/form-error'
 import { SubmitButton } from '@/components/submit-button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
-export function LoginForm({ next, initialError }: { next: string; initialError?: string }) {
+export function LoginForm({
+  next,
+  initialError,
+  initialMessage,
+  initialEmail,
+}: {
+  next: string
+  initialError?: string
+  initialMessage?: string
+  initialEmail?: string
+}) {
   const [state, formAction] = useActionState<AuthFormState, FormData>(signInAction, {
     error: initialError,
+    message: initialMessage,
   })
+  // The email survives a failed sign-in (the password deliberately doesn't).
+  const kept = keptValues(state.values)
+  const formKey = useSubmissionKey(state)
 
   return (
     <div className="space-y-6">
@@ -27,7 +42,7 @@ export function LoginForm({ next, initialError }: { next: string; initialError?:
 
       <Divider />
 
-      <form action={formAction} className="space-y-4">
+      <form key={formKey} action={formAction} className="space-y-4">
         <input type="hidden" name="next" value={next} />
 
         <div className="space-y-2">
@@ -38,6 +53,7 @@ export function LoginForm({ next, initialError }: { next: string; initialError?:
             type="email"
             autoComplete="email"
             placeholder="you@company.com"
+            defaultValue={kept.text('email', initialEmail)}
             required
           />
         </div>
@@ -62,6 +78,7 @@ export function LoginForm({ next, initialError }: { next: string; initialError?:
         </div>
 
         <FormError message={state.error} />
+        <FormSuccess message={state.message} />
 
         <SubmitButton className="w-full" pendingLabel="Signing in…">
           Sign in

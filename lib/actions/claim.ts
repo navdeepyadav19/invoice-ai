@@ -7,7 +7,7 @@ import { z } from 'zod'
 import { createClient } from '@/lib/supabase/server'
 import { siteUrl } from '@/lib/supabase/env'
 import { requireUser } from '@/lib/queries'
-import { PENDING_MERGE_COOKIE } from '@/lib/form-state'
+import { PENDING_MERGE_COOKIE, withValues } from '@/lib/form-state'
 import type { ClaimState } from '@/lib/claim-state'
 
 const schema = z.object({
@@ -40,7 +40,7 @@ export async function claimAccountAction(
     password: formData.get('password'),
   })
 
-  if (!parsed.success) return { error: parsed.error.issues[0]?.message }
+  if (!parsed.success) return withValues({ error: parsed.error.issues[0]?.message }, formData)
 
   const supabase = await createClient()
 
@@ -61,7 +61,12 @@ export async function claimAccountAction(
         .single()
 
       if (tokenError || !token) {
-        return { error: `${parsed.data.email} already has an account, and we couldn't prepare a transfer. Try a different email.` }
+        return withValues(
+          {
+            error: `${parsed.data.email} already has an account, and we couldn't prepare a transfer. Try a different email.`,
+          },
+          formData,
+        )
       }
 
       const jar = await cookies()
@@ -79,7 +84,7 @@ export async function claimAccountAction(
       }
     }
 
-    return { error: error.message }
+    return withValues({ error: error.message }, formData)
   }
 
   // Their business details already exist (they filled them in the builder), so

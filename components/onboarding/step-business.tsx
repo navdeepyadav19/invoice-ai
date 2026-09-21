@@ -3,7 +3,8 @@
 import { useActionState, useState } from 'react'
 
 import { saveBusinessSettings } from '@/lib/actions/business'
-import type { StepState } from '@/lib/form-state'
+import { keptValues, type StepState } from '@/lib/form-state'
+import { useSubmissionKey } from '@/lib/use-submission-key'
 import { FormError, FormSuccess } from '@/components/auth/form-error'
 import { Field } from '@/components/onboarding/field'
 import { SubmitButton } from '@/components/submit-button'
@@ -27,6 +28,8 @@ export function StepBusiness({
   detectedCountry?: string
 }) {
   const [state, formAction] = useActionState<StepState, FormData>(action, {})
+  // Remounts the form per result so React's post-action reset can't wipe input.
+  const formKey = useSubmissionKey(state)
 
   const initialCountry = business?.country_code ?? detectedCountry ?? 'US'
   const [countryCode, setCountryCode] = useState(initialCountry)
@@ -35,7 +38,7 @@ export function StepBusiness({
   )
 
   const errors = state.fieldErrors ?? {}
-  const kept = state.values ?? {}
+  const kept = keptValues(state.values)
 
   function handleCountryChange(code: string) {
     setCountryCode(code)
@@ -49,7 +52,7 @@ export function StepBusiness({
   }
 
   return (
-    <form action={formAction} className="space-y-6">
+    <form key={formKey} action={formAction} className="space-y-6">
       <div className="grid gap-5 sm:grid-cols-2">
         <Field
           label="Business name"
@@ -61,7 +64,7 @@ export function StepBusiness({
           <Input
             id="legal_name"
             name="legal_name"
-            defaultValue={kept.legal_name ?? business?.legal_name ?? ''}
+            defaultValue={kept.text('legal_name', business?.legal_name)}
             placeholder="Umbrella Design Studio"
             required
           />
@@ -77,7 +80,7 @@ export function StepBusiness({
           <Input
             id="trade_name"
             name="trade_name"
-            defaultValue={kept.trade_name ?? business?.trade_name ?? ''}
+            defaultValue={kept.text('trade_name', business?.trade_name)}
             placeholder="Umbrella"
           />
         </Field>
@@ -132,7 +135,7 @@ export function StepBusiness({
           <Input
             id="tax_id"
             name="tax_id"
-            defaultValue={kept.tax_id ?? business?.tax_id ?? ''}
+            defaultValue={kept.text('tax_id', business?.tax_id)}
             placeholder="VAT ID"
             className="font-mono uppercase"
             spellCheck={false}
@@ -151,7 +154,7 @@ export function StepBusiness({
           <Input
             id="address_line1"
             name="address_line1"
-            defaultValue={kept.address_line1 ?? business?.address_line1 ?? ''}
+            defaultValue={kept.text('address_line1', business?.address_line1)}
             placeholder="4th Floor, Trade Centre"
             required
           />
@@ -161,19 +164,19 @@ export function StepBusiness({
           <Input
             id="address_line2"
             name="address_line2"
-            defaultValue={kept.address_line2 ?? business?.address_line2 ?? ''}
+            defaultValue={kept.text('address_line2', business?.address_line2)}
           />
         </Field>
 
         <Field label="City" htmlFor="city" required error={errors.city}>
-          <Input id="city" name="city" defaultValue={kept.city ?? business?.city ?? ''} placeholder="Austin" required />
+          <Input id="city" name="city" defaultValue={kept.text('city', business?.city)} placeholder="Austin" required />
         </Field>
 
         <Field label="Region / State" htmlFor="region" error={errors.region}>
           <Input
             id="region"
             name="region"
-            defaultValue={kept.region ?? business?.region ?? ''}
+            defaultValue={kept.text('region', business?.region)}
             placeholder="TX"
           />
         </Field>
@@ -182,7 +185,7 @@ export function StepBusiness({
           <Input
             id="postal_code"
             name="postal_code"
-            defaultValue={kept.postal_code ?? business?.postal_code ?? business?.pincode ?? ''}
+            defaultValue={kept.text('postal_code', business?.postal_code ?? business?.pincode)}
             placeholder="73301"
           />
         </Field>
@@ -192,7 +195,7 @@ export function StepBusiness({
             id="email"
             name="email"
             type="email"
-            defaultValue={kept.email ?? business?.email ?? ''}
+            defaultValue={kept.text('email', business?.email)}
             placeholder="billing@umbrella.co"
           />
         </Field>
@@ -202,7 +205,7 @@ export function StepBusiness({
             id="phone"
             name="phone"
             type="tel"
-            defaultValue={kept.phone ?? business?.phone ?? ''}
+            defaultValue={kept.text('phone', business?.phone)}
             placeholder="+1 512 000 0000"
           />
         </Field>

@@ -4,7 +4,8 @@ import Link from 'next/link'
 import { useActionState } from 'react'
 
 import { requestPasswordResetAction, updatePasswordAction } from '@/lib/actions/auth'
-import type { AuthFormState } from '@/lib/form-state'
+import { keptValues, type AuthFormState } from '@/lib/form-state'
+import { useSubmissionKey } from '@/lib/use-submission-key'
 import { FormError, FormSuccess } from '@/components/auth/form-error'
 import { SubmitButton } from '@/components/submit-button'
 import { Input } from '@/components/ui/input'
@@ -15,6 +16,9 @@ export function ForgotPasswordForm() {
     requestPasswordResetAction,
     {},
   )
+  // Restores the email if the action echoes `values` (see withValues).
+  const kept = keptValues(state.values)
+  const formKey = useSubmissionKey(state)
 
   return (
     <div className="space-y-6">
@@ -25,10 +29,17 @@ export function ForgotPasswordForm() {
         </p>
       </div>
 
-      <form action={formAction} className="space-y-4">
+      <form key={formKey} action={formAction} className="space-y-4">
         <div className="space-y-2">
           <Label htmlFor="email">Email</Label>
-          <Input id="email" name="email" type="email" autoComplete="email" required />
+          <Input
+            id="email"
+            name="email"
+            type="email"
+            autoComplete="email"
+            defaultValue={kept.text('email')}
+            required
+          />
         </div>
 
         <FormError message={state.error} />
@@ -50,6 +61,9 @@ export function ForgotPasswordForm() {
 
 export function ResetPasswordForm() {
   const [state, formAction] = useActionState<AuthFormState, FormData>(updatePasswordAction, {})
+  // Only password fields here, which are never echoed: clearing them after a
+  // failure is intentional. The key just keeps the reset behaviour uniform.
+  const formKey = useSubmissionKey(state)
 
   return (
     <div className="space-y-6">
@@ -60,7 +74,7 @@ export function ResetPasswordForm() {
         </p>
       </div>
 
-      <form action={formAction} className="space-y-4">
+      <form key={formKey} action={formAction} className="space-y-4">
         <div className="space-y-2">
           <Label htmlFor="password">New password</Label>
           <Input
