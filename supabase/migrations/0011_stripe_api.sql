@@ -23,6 +23,12 @@ $$;
 alter table public.invoices
   alter column status drop default;
 
+-- This CHECK stores 'draft' as the OLD enum type, so ALTER COLUMN TYPE fails
+-- re-validating it ("operator does not exist: invoice_status_new =
+-- invoice_status"). Drop it here, re-add it once the swap is done.
+alter table public.invoices
+  drop constraint if exists invoices_sent_has_number;
+
 alter table public.invoices
   alter column status type invoice_status_new
   using (
@@ -40,6 +46,10 @@ alter table public.invoices
 drop type if exists invoice_status;
 
 alter type invoice_status_new rename to invoice_status;
+
+alter table public.invoices
+  add constraint invoices_sent_has_number
+  check (status = 'draft' or invoice_number is not null);
 
 -- ---------------------------------------------------------------------------
 -- 2. Event type swap
@@ -278,6 +288,22 @@ where public_id is null;
 alter table public.clients alter column public_id set not null;
 alter table public.invoices alter column public_id set not null;
 alter table public.invoice_items alter column public_id set not null;
+
+-- Safety net: any insert path that forgets to mint an id (the invoice editor's
+-- inline client insert did) still gets a well-formed one instead of a NOT NULL
+-- violation.
+alter table public.clients
+  alter column public_id set default 'cus_' || substr(md5(gen_random_uuid()::text), 1, 24);
+alter table public.invoices
+  alter column public_id set default 'in_' || substr(md5(gen_random_uuid()::text), 1, 24);
+alter table public.invoice_items
+  alter column public_id set default 'ii_' || substr(md5(gen_random_uuid()::text), 1, 24);
+
+-- Existing subscriptions use the pre-rename event names; without this they
+-- silently stop matching.
+update public.webhook_endpoints
+set events = array_replace(array_replace(events, 'invoice.issued', 'invoice.finalized'), 'invoice.cancelled', 'invoice.voided')
+where events && array['invoice.issued', 'invoice.cancelled'];
 
 alter table public.clients
   drop constraint if exists clients_public_id_shape;

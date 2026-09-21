@@ -7,7 +7,7 @@ import { invoiceSchema, emptyClientInput, type InvoiceInput, type InvoiceWireInp
 import { computeInvoice, type TaxLineInput } from '@/lib/tax'
 import { paiseToStored } from '@/lib/money-api'
 import { getManyWithProducts } from '@/lib/services/prices'
-import { isInvoiceId, isInvoiceItemId, nextInvoiceId, nextInvoiceItemId } from '@/lib/catalog/ids'
+import { isInvoiceId, isInvoiceItemId, nextCustomerId, nextInvoiceId, nextInvoiceItemId } from '@/lib/catalog/ids'
 import { resolvePricedLines, type CatalogPrice, type ResolvedLine } from '@/lib/catalog/resolve'
 import { snapshotBusiness } from '@/lib/invoice-view'
 import { viewFromRows } from '@/lib/invoice-load'
@@ -534,7 +534,7 @@ async function writeDraft(
   } else {
     const { data: created, error } = await ctx.supabase
       .from('clients')
-      .insert(clientValues)
+      .insert({ ...clientValues, public_id: nextCustomerId() })
       .select('id')
       .single()
     if (error) throw fromPostgres(error)
