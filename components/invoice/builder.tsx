@@ -13,21 +13,13 @@ import { SendControls } from '@/components/invoice/send-controls'
 import { Field } from '@/components/onboarding/field'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { saveInvoiceDraft } from '@/lib/actions/invoice'
-import { computeInvoice } from '@/lib/gst'
-import { GST_STATES, stateName } from '@/lib/india'
+import { computeInvoice } from '@/lib/tax'
+import { COUNTRIES, CURRENCIES, defaultsForCountry } from '@/lib/locale/countries'
 import {
   defaultInvoiceValues,
-  toGstInput,
+  toTaxInput,
   toSavePayload,
   type InvoiceFormValues,
 } from '@/lib/invoice-form'
@@ -65,12 +57,16 @@ export function InvoiceBuilder({
   })
 
   const values = useWatch({ control: form.control }) as InvoiceFormValues
+  const countryDefaults = useMemo(
+    () => defaultsForCountry(business.country_code),
+    [business.country_code],
+  )
 
   // The same engine the server runs, so what the user sees while typing is what
   // gets persisted — no second implementation to drift.
   const computed = useMemo(
-    () => computeInvoice(toGstInput(values, business), values.currency || 'INR'),
-    [values, business],
+    () => computeInvoice(toTaxInput(values), values.currency || business.currency || 'USD'),
+    [values, business.currency],
   )
 
   const view: InvoiceView = useMemo(
@@ -78,13 +74,13 @@ export function InvoiceBuilder({
       business: snapshotBusiness(business),
       client: {
         name: values.client?.name ?? '',
-        gstin: values.client?.gstin || null,
+        tax_id: values.client?.tax_id || null,
         address_line1: values.client?.address_line1 || null,
         address_line2: values.client?.address_line2 || null,
         city: values.client?.city || null,
-        state_code: values.client?.state_code || null,
-        pincode: values.client?.pincode || null,
-        country: values.client?.country || null,
+        region: values.client?.region || null,
+        postal_code: values.client?.postal_code || null,
+        country_code: values.client?.country_code || null,
         email: values.client?.email || null,
         phone: values.client?.phone || null,
       },
@@ -92,8 +88,7 @@ export function InvoiceBuilder({
       status,
       issueDate: values.issue_date,
       dueDate: values.due_date || null,
-      currency: values.currency || 'INR',
-      placeOfSupplyStateCode: values.place_of_supply_state_code,
+      currency: values.currency || business.currency || 'USD',
       notes: values.notes || null,
       terms: values.terms || null,
       computed,
@@ -135,7 +130,7 @@ export function InvoiceBuilder({
 
   const isDirty = form.formState.isDirty
   const hasClient = Boolean(values.client?.name?.trim())
-  const hasLine = computed.lines.some((line) => line.description.trim() && line.taxablePaise > 0)
+  const hasLine = computed.lines.some((line) => line.description.trim() && line.taxableMinor > 0)
   const canSave = hasClient && hasLine && !isIssued
 
   // Debounced autosave. Only runs once the invoice is worth saving — otherwise
@@ -146,8 +141,6 @@ export function InvoiceBuilder({
     const timer = setTimeout(() => save(true), AUTOSAVE_DELAY_MS)
     return () => clearTimeout(timer)
   }, [values, isDirty, canSave, save])
-
-  const showTax = business.is_gst_registered && !values.is_export
 
   /**
    * Apply an AI-parsed draft to the form.
@@ -163,13 +156,8 @@ export function InvoiceBuilder({
     const dirty = { shouldDirty: true } as const
 
     if (draft.client_name) form.setValue('client.name', draft.client_name, dirty)
-    if (draft.client_gstin) form.setValue('client.gstin', draft.client_gstin, dirty)
     if (draft.client_city) form.setValue('client.city', draft.client_city, dirty)
     if (draft.client_email) form.setValue('client.email', draft.client_email, dirty)
-
-    if (draft.place_of_supply_state_code) {
-      form.setValue('place_of_supply_state_code', draft.place_of_supply_state_code, dirty)
-    }
 
     if (draft.notes) form.setValue('notes', draft.notes, dirty)
 
@@ -184,13 +172,11 @@ export function InvoiceBuilder({
         'items',
         draft.items.map((item) => ({
           description: item.description,
-          hsn_sac: item.hsn_sac,
           quantity: String(item.quantity),
           unit: item.unit,
           rate: String(item.rate),
           discount_percent: '0',
-          gst_rate: String(item.gst_rate),
-          cess_rate: '0',
+          tax_rate: String(item.tax_rate),
         })),
         dirty,
       )
@@ -264,7 +250,7 @@ export function InvoiceBuilder({
                 This invoice has been issued as {invoiceNumber}.
               </span>{' '}
               It can no longer be edited — your client may already have the PDF. Raise a new invoice
-              or a credit note instead.
+              instead.
             </p>
           )}
 
@@ -273,7 +259,7 @@ export function InvoiceBuilder({
             <AiPanel
               onDraft={applyDraft}
               business={business}
-              currency={values.currency || 'INR'}
+              currency={values.currency || business.currency || 'USD'}
               disabled={isSaving}
             />
           )}
@@ -283,18 +269,17 @@ export function InvoiceBuilder({
               <Field label="Client name" htmlFor="client.name" required className="sm:col-span-2">
                 <Input
                   id="client.name"
-                  placeholder="Kadam Retail Pvt Ltd"
+                  placeholder="Acme Industries"
                   {...form.register('client.name')}
                 />
               </Field>
 
-              <Field label="Client GSTIN" htmlFor="client.gstin" hint="Leave blank for B2C.">
+              <Field label="Tax ID" htmlFor="client.tax_id" hint="VAT / EIN, if applicable.">
                 <Input
-                  id="client.gstin"
-                  placeholder="27AAPFU0939F1ZV"
-                  maxLength={15}
+                  id="client.tax_id"
+                  placeholder="VAT ID"
                   className="font-mono uppercase"
-                  {...form.register('client.gstin')}
+                  {...form.register('client.tax_id')}
                 />
               </Field>
 
@@ -310,15 +295,33 @@ export function InvoiceBuilder({
                 <Input id="client.city" {...form.register('client.city')} />
               </Field>
 
-              <Field label="PIN code" htmlFor="client.pincode">
-                <Input id="client.pincode" maxLength={6} inputMode="numeric" {...form.register('client.pincode')} />
+              <Field label="Region / State" htmlFor="client.region">
+                <Input id="client.region" {...form.register('client.region')} />
+              </Field>
+
+              <Field label="Postal code" htmlFor="client.postal_code">
+                <Input id="client.postal_code" {...form.register('client.postal_code')} />
+              </Field>
+
+              <Field label="Country" htmlFor="client.country_code">
+                <select
+                  id="client.country_code"
+                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+                  {...form.register('client.country_code')}
+                >
+                  {COUNTRIES.map((c) => (
+                    <option key={c.code} value={c.code}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
               </Field>
             </div>
           </Section>
 
           <Section
             title="Invoice details"
-            description="The place of supply decides how GST is split."
+            description="Dates and currency for this invoice."
           >
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Issue date" htmlFor="issue_date" required>
@@ -329,66 +332,24 @@ export function InvoiceBuilder({
                 <Input id="due_date" type="date" {...form.register('due_date')} />
               </Field>
 
-              <Field
-                label="Place of supply"
-                htmlFor="place_of_supply_state_code"
-                required
-                hint={
-                  business.state_code === values.place_of_supply_state_code
-                    ? 'Same state as you — CGST + SGST'
-                    : 'Different state — IGST'
-                }
-                className="sm:col-span-2"
-              >
-                <Select
-                  value={values.place_of_supply_state_code}
-                  onValueChange={(value) =>
-                    form.setValue('place_of_supply_state_code', value ?? '', { shouldDirty: true })
-                  }
+              <Field label="Currency" htmlFor="currency" required>
+                <select
+                  id="currency"
+                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+                  {...form.register('currency')}
                 >
-                  <SelectTrigger id="place_of_supply_state_code" className="w-full">
-                    {/* Base UI renders the raw value, which would show a bare
-                        "29" where the user needs to read "Karnataka". */}
-                    <SelectValue placeholder="Select a state">
-                      {(value) =>
-                        value ? `${value} — ${stateName(String(value))}` : 'Select a state'
-                      }
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {GST_STATES.map((s) => (
-                      <SelectItem key={s.code} value={s.code}>
-                        <span className="font-mono text-xs text-muted-foreground">{s.code}</span>
-                        {s.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  {CURRENCIES.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
               </Field>
             </div>
-
-            {business.is_gst_registered && (
-              <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                <Toggle
-                  label="Export under LUT"
-                  description="Zero-rated, no tax charged."
-                  checked={values.is_export}
-                  onChange={(checked) => form.setValue('is_export', checked, { shouldDirty: true })}
-                />
-                <Toggle
-                  label="Reverse charge"
-                  description="Recipient pays the tax directly."
-                  checked={values.reverse_charge}
-                  onChange={(checked) =>
-                    form.setValue('reverse_charge', checked, { shouldDirty: true })
-                  }
-                />
-              </div>
-            )}
           </Section>
 
           <Section title="Line items" description="What are you billing for?">
-            <LineItems showTax={showTax} />
+            <LineItems defaultTaxRate={countryDefaults.defaultTaxRate} />
           </Section>
 
           <Section title="Notes and terms" description="Printed at the foot of the invoice.">
@@ -429,28 +390,6 @@ function Section({
       </div>
       {children}
     </section>
-  )
-}
-
-function Toggle({
-  label,
-  description,
-  checked,
-  onChange,
-}: {
-  label: string
-  description: string
-  checked: boolean
-  onChange: (checked: boolean) => void
-}) {
-  return (
-    <label className="flex cursor-pointer items-start justify-between gap-3 rounded-lg border border-border bg-card p-3">
-      <span className="space-y-0.5">
-        <span className="block text-sm font-medium">{label}</span>
-        <span className="block text-xs text-muted-foreground">{description}</span>
-      </span>
-      <Switch checked={checked} onCheckedChange={onChange} />
-    </label>
   )
 }
 
@@ -496,7 +435,7 @@ function SaveIndicator({ saving, savedAt }: { saving: boolean; savedAt: string |
     <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
       <Check className="size-3 text-success" />
       Saved{' '}
-      {new Date(savedAt).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })}
+      {new Date(savedAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
     </span>
   )
 }

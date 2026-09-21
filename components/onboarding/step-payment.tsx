@@ -55,30 +55,18 @@ export function StepPayment({
           />
         </Field>
 
-        <Field label="IFSC" htmlFor="ifsc" error={errors.ifsc} hint="Eleven characters, like HDFC0001234.">
-          <Input
-            id="ifsc"
-            name="ifsc"
-            defaultValue={kept.ifsc ?? business?.ifsc ?? ''}
-            placeholder="HDFC0001234"
-            maxLength={11}
-            className="font-mono uppercase"
-            spellCheck={false}
-          />
-        </Field>
-
         <Field
-          label="UPI ID"
-          htmlFor="upi_id"
-          error={errors.upi_id}
-          hint="Shown on the invoice so clients can pay instantly."
-          className="sm:col-span-2"
+          label="Routing number"
+          htmlFor="routing_number"
+          error={errors.routing_number}
+          hint="Bank or branch code, whatever your country uses."
         >
           <Input
-            id="upi_id"
-            name="upi_id"
-            defaultValue={kept.upi_id ?? business?.upi_id ?? ''}
-            placeholder="umbrella@hdfcbank"
+            id="routing_number"
+            name="routing_number"
+            defaultValue={kept.routing_number ?? business?.routing_number ?? ''}
+            placeholder="111000025"
+            className="font-mono uppercase"
             spellCheck={false}
           />
         </Field>

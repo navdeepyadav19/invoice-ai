@@ -2,23 +2,23 @@ import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 
 import { StepBank } from '@/components/onboarding/step-bank'
-import { StepIdentity } from '@/components/onboarding/step-identity'
+import { StepBusiness } from '@/components/onboarding/step-business'
 import { Stepper } from '@/components/onboarding/stepper'
-import { isSandboxConfigured } from '@/lib/sandbox/client'
+import { countryFromRequest } from '@/lib/locale/geo'
 import { getPrimaryBusiness, getProfile, requireUser } from '@/lib/queries'
 
 export const metadata: Metadata = { title: 'Set up your business' }
 
 const COPY = {
   1: {
-    title: 'Let’s find your business',
+    title: 'Tell us about your business',
     blurb:
-      'Give us your GSTIN and we’ll pull your registered name, address and business type from the GST portal — no typing.',
+      'Pick your country and we pre-select your currency. Add your address and an optional tax ID — that is all an invoice needs from you.',
   },
   2: {
     title: 'How do you get paid?',
     blurb:
-      'These three details go at the foot of every invoice so your client can pay without asking. You can skip and add them later.',
+      'These details go at the foot of every invoice so your client can pay without asking. You can skip and add them later.',
   },
 } as const
 
@@ -38,6 +38,10 @@ export default async function OnboardingPage() {
   const step = (Math.min(2, Math.max(1, profile?.onboarding_step ?? 1)) || 1) as 1 | 2
   const copy = COPY[step]
 
+  // Pre-select country (and currency via the form) from the request IP.
+  // The user can still change it — this is a default, not a decision.
+  const detectedCountry = business?.country_code ?? (await countryFromRequest())
+
   return (
     <div className="space-y-8">
       <Stepper current={step} />
@@ -48,7 +52,7 @@ export default async function OnboardingPage() {
       </div>
 
       {step === 1 ? (
-        <StepIdentity business={business} lookupAvailable={isSandboxConfigured()} />
+        <StepBusiness business={business} detectedCountry={detectedCountry} />
       ) : (
         <StepBank business={business} />
       )}

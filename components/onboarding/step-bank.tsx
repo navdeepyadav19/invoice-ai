@@ -42,7 +42,7 @@ export function StepBank({ business }: { business: BusinessRow | null }) {
             id="account_name"
             name="account_name"
             defaultValue={kept.account_name ?? business?.account_name ?? business?.legal_name ?? ''}
-            placeholder="Umbrella Design Studio LLP"
+            placeholder="Umbrella Design Studio LLC"
           />
         </Field>
 
@@ -51,7 +51,7 @@ export function StepBank({ business }: { business: BusinessRow | null }) {
             id="account_number"
             name="account_number"
             defaultValue={kept.account_number ?? business?.account_number ?? ''}
-            placeholder="50200012345678"
+            placeholder="123456789"
             className="font-mono"
             inputMode="numeric"
             autoComplete="off"
@@ -59,17 +59,16 @@ export function StepBank({ business }: { business: BusinessRow | null }) {
         </Field>
 
         <Field
-          label="IFSC"
-          htmlFor="ifsc"
-          error={errors.ifsc}
-          hint="Eleven characters, like HDFC0001234."
+          label="Routing number"
+          htmlFor="routing_number"
+          error={errors.routing_number}
+          hint="Bank or branch code, whatever your country uses."
         >
           <Input
-            id="ifsc"
-            name="ifsc"
-            defaultValue={kept.ifsc ?? business?.ifsc ?? ''}
-            placeholder="HDFC0001234"
-            maxLength={11}
+            id="routing_number"
+            name="routing_number"
+            defaultValue={kept.routing_number ?? business?.routing_number ?? ''}
+            placeholder="111000025"
             className="font-mono uppercase"
             spellCheck={false}
             autoComplete="off"
@@ -79,8 +78,8 @@ export function StepBank({ business }: { business: BusinessRow | null }) {
 
       <p className="flex items-start gap-2 rounded-md border border-border bg-muted/40 px-3 py-2.5 text-xs leading-relaxed text-muted-foreground">
         <Info className="mt-0.5 size-3.5 shrink-0" />
-        These are printed at the foot of every invoice so your client can pay without asking. Add a
-        UPI ID, logo, payment terms or a different invoice number format any time from settings.
+        These are printed at the foot of every invoice so your client can pay without asking. Add
+        payment terms or a different invoice number format any time from settings.
       </p>
 
       <FormError message={state.error} />

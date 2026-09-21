@@ -20,8 +20,8 @@ export default async function NewInvoicePage() {
         <div className="space-y-2">
           <h1 className="text-2xl font-semibold tracking-tight">First, who&rsquo;s billing?</h1>
           <p className="text-muted-foreground">
-            These details go in the &ldquo;From&rdquo; block of every invoice. Your state decides how
-            GST is split, so it&rsquo;s worth getting right. You only do this once.
+            These details go in the &ldquo;From&rdquo; block of every invoice. Your country decides
+            the currency default. You only do this once.
           </p>
         </div>
 

@@ -4,7 +4,7 @@ import { Document, Font, Page, StyleSheet, Text, View } from '@react-pdf/rendere
 
 import { formatInvoiceDate, formatPartyAddress, type InvoiceView } from '@/lib/invoice-view'
 import { formatPaise, formatPaisePlain } from '@/lib/money'
-import { stateName } from '@/lib/india'
+import { countryName, localeForCountry } from '@/lib/locale/countries'
 
 /**
  * The PDF rendition of an invoice.
@@ -123,7 +123,7 @@ export function InvoicePdf({ view }: { view: InvoiceView }) {
   registerFonts()
 
   const { business, client, computed } = view
-  const isTaxInvoice = business.is_gst_registered && computed.treatment !== 'unregistered'
+  const locale = localeForCountry(business.country_code)
 
   return (
     <Document
@@ -134,7 +134,7 @@ export function InvoicePdf({ view }: { view: InvoiceView }) {
       <Page size="A4" style={styles.page}>
         <View style={styles.spread}>
           <View style={{ width: '58%' }}>
-            <Text style={styles.docType}>{isTaxInvoice ? 'Tax Invoice' : 'Bill of Supply'}</Text>
+            <Text style={styles.docType}>Invoice</Text>
             <Text style={styles.supplierName}>{business.trade_name || business.name}</Text>
             {business.trade_name ? (
               <Text style={[styles.small, styles.muted]}>{business.name}</Text>
@@ -145,7 +145,7 @@ export function InvoicePdf({ view }: { view: InvoiceView }) {
                 {line}
               </Text>
             ))}
-            {business.gstin ? <Text style={styles.small}>GSTIN {business.gstin}</Text> : null}
+            {business.tax_id ? <Text style={styles.small}>Tax ID {business.tax_id}</Text> : null}
             {business.email ? (
               <Text style={[styles.small, styles.muted]}>{business.email}</Text>
             ) : null}
@@ -182,15 +182,15 @@ export function InvoicePdf({ view }: { view: InvoiceView }) {
                 {line}
               </Text>
             ))}
-            {client.gstin ? <Text style={styles.small}>GSTIN {client.gstin}</Text> : null}
+            {client.tax_id ? <Text style={styles.small}>Tax ID {client.tax_id}</Text> : null}
           </View>
 
           <View style={[styles.party, { alignItems: 'flex-end' }]}>
-            <Text style={styles.label}>Place of supply</Text>
+            <Text style={styles.label}>Billed from</Text>
             <Text style={{ fontWeight: 600, marginTop: 3 }}>
-              {view.placeOfSupplyStateCode} — {stateName(view.placeOfSupplyStateCode)}
+              {countryName(business.country_code)}
             </Text>
-            <Text style={[styles.small, styles.muted]}>{treatmentLabel(view)}</Text>
+            <Text style={[styles.small, styles.muted]}>Currency {view.currency}</Text>
           </View>
         </View>
 
@@ -199,7 +199,7 @@ export function InvoicePdf({ view }: { view: InvoiceView }) {
             <Text style={[styles.cDesc, styles.label]}>Description</Text>
             <Text style={[styles.cQty, styles.label]}>Qty</Text>
             <Text style={[styles.cRate, styles.label]}>Rate</Text>
-            {isTaxInvoice ? <Text style={[styles.cGst, styles.label]}>GST</Text> : null}
+            <Text style={[styles.cGst, styles.label]}>Tax</Text>
             <Text style={[styles.cAmt, styles.label]}>Amount</Text>
           </View>
 
@@ -207,57 +207,33 @@ export function InvoicePdf({ view }: { view: InvoiceView }) {
             <View key={index} style={styles.tr} wrap={false}>
               <View style={styles.cDesc}>
                 <Text>{line.description}</Text>
-                {line.hsnSac || line.discountPercent > 0 ? (
-                  <Text style={[styles.small, styles.muted]}>
-                    {[
-                      line.hsnSac ? `HSN/SAC ${line.hsnSac}` : null,
-                      line.discountPercent > 0 ? `−${line.discountPercent}%` : null,
-                    ]
-                      .filter(Boolean)
-                      .join('   ')}
-                  </Text>
+                {line.discountPercent > 0 ? (
+                  <Text style={[styles.small, styles.muted]}>−{line.discountPercent}%</Text>
                 ) : null}
               </View>
               <Text style={styles.cQty}>
                 {line.quantity} {line.unit}
               </Text>
-              <Text style={styles.cRate}>{formatPaisePlain(Math.round(line.rate * 100))}</Text>
-              {isTaxInvoice ? <Text style={styles.cGst}>{line.gstRate}%</Text> : null}
-              <Text style={styles.cAmt}>{formatPaisePlain(line.taxablePaise)}</Text>
+              <Text style={styles.cRate}>{formatPaisePlain(Math.round(line.rate * 100), locale)}</Text>
+              <Text style={styles.cGst}>{line.taxRate}%</Text>
+              <Text style={styles.cAmt}>{formatPaisePlain(line.taxableMinor, locale)}</Text>
             </View>
           ))}
         </View>
 
         <View style={styles.totals}>
-          <TotalRow label="Subtotal" value={formatPaisePlain(computed.subtotalPaise)} />
-          {computed.discountTotalPaise > 0 ? (
-            <TotalRow label="Discount" value={`−${formatPaisePlain(computed.discountTotalPaise)}`} />
+          <TotalRow label="Subtotal" value={formatPaisePlain(computed.subtotalMinor, locale)} />
+          {computed.discountTotalMinor > 0 ? (
+            <TotalRow label="Discount" value={`−${formatPaisePlain(computed.discountTotalMinor, locale)}`} />
           ) : null}
-          <TotalRow label="Taxable value" value={formatPaisePlain(computed.taxableTotalPaise)} />
-          {computed.cgstTotalPaise > 0 ? (
-            <TotalRow label="CGST" value={formatPaisePlain(computed.cgstTotalPaise)} />
-          ) : null}
-          {computed.sgstTotalPaise > 0 ? (
-            <TotalRow label="SGST" value={formatPaisePlain(computed.sgstTotalPaise)} />
-          ) : null}
-          {computed.igstTotalPaise > 0 ? (
-            <TotalRow label="IGST" value={formatPaisePlain(computed.igstTotalPaise)} />
-          ) : null}
-          {computed.cessTotalPaise > 0 ? (
-            <TotalRow label="Cess" value={formatPaisePlain(computed.cessTotalPaise)} />
-          ) : null}
-          {computed.roundOffPaise !== 0 ? (
-            <TotalRow
-              label="Round off"
-              value={`${computed.roundOffPaise > 0 ? '+' : '−'}${formatPaisePlain(
-                Math.abs(computed.roundOffPaise),
-              )}`}
-            />
+          <TotalRow label="Taxable value" value={formatPaisePlain(computed.taxableTotalMinor, locale)} />
+          {computed.taxTotalMinor > 0 ? (
+            <TotalRow label="Tax" value={formatPaisePlain(computed.taxTotalMinor, locale)} />
           ) : null}
 
           <View style={styles.grandRow}>
             <Text style={{ fontWeight: 600 }}>Total</Text>
-            <Text style={styles.grand}>{formatPaise(computed.totalPaise, view.currency)}</Text>
+            <Text style={styles.grand}>{formatPaise(computed.totalMinor, view.currency, locale)}</Text>
           </View>
 
           <Text style={[styles.small, styles.muted, { marginTop: 4 }]}>
@@ -283,8 +259,6 @@ export function InvoicePdf({ view }: { view: InvoiceView }) {
           <PaymentBlock view={view} />
         </View>
 
-        {declaration(view) ? <Text style={styles.declaration}>{declaration(view)}</Text> : null}
-
         <Text
           style={styles.pageNumber}
           render={({ pageNumber, totalPages }) =>
@@ -309,7 +283,7 @@ function TotalRow({ label, value }: { label: string; value: string }) {
 function PaymentBlock({ view }: { view: InvoiceView }) {
   const payment = view.business.payment
   if (!payment) return null
-  if (!payment.bank_name && !payment.account_number && !payment.upi_id) return null
+  if (!payment.bank_name && !payment.account_number) return null
 
   return (
     <View>
@@ -323,34 +297,9 @@ function PaymentBlock({ view }: { view: InvoiceView }) {
       {payment.account_number ? (
         <Text style={[styles.small, styles.muted]}>A/C {payment.account_number}</Text>
       ) : null}
-      {payment.ifsc ? <Text style={[styles.small, styles.muted]}>IFSC {payment.ifsc}</Text> : null}
-      {payment.upi_id ? <Text style={[styles.small, styles.muted]}>UPI {payment.upi_id}</Text> : null}
+      {payment.routing_number ? (
+        <Text style={[styles.small, styles.muted]}>Routing {payment.routing_number}</Text>
+      ) : null}
     </View>
   )
-}
-
-function treatmentLabel(view: InvoiceView): string {
-  switch (view.computed.treatment) {
-    case 'intra_state':
-      return 'Intra-state supply — CGST + SGST'
-    case 'inter_state':
-      return 'Inter-state supply — IGST'
-    case 'export':
-      return 'Export — zero rated'
-    case 'unregistered':
-      return 'Supplier not registered for GST'
-  }
-}
-
-function declaration(view: InvoiceView): string {
-  if (view.computed.reverseCharge) {
-    return 'Tax is payable on reverse charge basis by the recipient under Section 9(3)/9(4) of the CGST Act.'
-  }
-  if (view.computed.treatment === 'export') {
-    return 'Supply meant for export under Letter of Undertaking without payment of integrated tax.'
-  }
-  if (view.computed.treatment === 'unregistered') {
-    return 'The supplier is not registered under GST. This is a Bill of Supply and no tax is charged.'
-  }
-  return ''
 }

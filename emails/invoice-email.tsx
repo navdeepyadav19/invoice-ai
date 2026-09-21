@@ -24,7 +24,7 @@ import { formatPaise } from '@/lib/money'
  */
 export function InvoiceEmail({ view, publicUrl }: { view: InvoiceView; publicUrl: string }) {
   const supplier = view.business.trade_name || view.business.name
-  const total = formatPaise(view.computed.totalPaise, view.currency)
+  const total = formatPaise(view.computed.totalMinor, view.currency)
 
   return (
     <Html>
@@ -63,7 +63,7 @@ export function InvoiceEmail({ view, publicUrl }: { view: InvoiceView; publicUrl
 
           <Text style={smallMuted}>
             Sent by {view.business.name}
-            {view.business.gstin ? ` · GSTIN ${view.business.gstin}` : ''}
+            {view.business.tax_id ? ` · Tax ID ${view.business.tax_id}` : ''}
             {view.business.email ? ` · ${view.business.email}` : ''}
           </Text>
         </Container>

@@ -1,58 +1,7 @@
 import { z } from 'zod'
 
-import { GST_RATES, GST_STATES, UNITS, isValidStateCode } from './india'
-
-/**
- * A GSTIN is 15 characters: 2-digit state code, 10-character PAN, an entity
- * number, a literal 'Z', and a checksum character.
- *   27 AAPFU 0939 F 1 Z V
- */
-export const GSTIN_REGEX = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/
-
-/** PAN: 5 letters, 4 digits, 1 letter. */
-export const PAN_REGEX = /^[A-Z]{5}[0-9]{4}[A-Z]$/
-
-/** IFSC: 4-letter bank code, a literal 0, then a 6-character branch code. */
-export const IFSC_REGEX = /^[A-Z]{4}0[A-Z0-9]{6}$/
-
-/** UPI VPA: name@handle. */
-export const UPI_REGEX = /^[\w.\-]{2,256}@[a-zA-Z]{2,64}$/
-
-export const PINCODE_REGEX = /^[1-9][0-9]{5}$/
-
-/**
- * The GSTIN checksum: characters are scored against a 36-character alphabet,
- * weighted alternately 1 and 2, and the remainder must produce the final digit.
- * Worth doing because a transposed digit passes the regex but fails here, and a
- * wrong GSTIN on an issued invoice is a correction the merchant has to chase.
- */
-export function hasValidGstinChecksum(gstin: string): boolean {
-  if (!GSTIN_REGEX.test(gstin)) return false
-
-  const alphabet = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'
-  let sum = 0
-
-  for (let i = 0; i < 14; i++) {
-    const value = alphabet.indexOf(gstin[i])
-    if (value < 0) return false
-    const weighted = value * (i % 2 === 0 ? 1 : 2)
-    sum += Math.floor(weighted / 36) + (weighted % 36)
-  }
-
-  const checksum = alphabet[(36 - (sum % 36)) % 36]
-  return checksum === gstin[14]
-}
-
-/** The state a GSTIN is registered in, taken from its first two digits. */
-export function stateCodeFromGstin(gstin: string): string | null {
-  if (gstin.length < 2) return null
-  const code = gstin.slice(0, 2)
-  return isValidStateCode(code) ? code : null
-}
-
-const stateCodeSchema = z
-  .string()
-  .refine(isValidStateCode, { message: 'Pick a valid state' })
+import { isCountryCode } from './locale/countries'
+import { UNITS } from './units'
 
 const optionalTrimmed = z
   .string()
@@ -60,72 +9,37 @@ const optionalTrimmed = z
   .optional()
   .transform((v) => (v ? v : undefined))
 
-export const gstinSchema = z
+const countryCodeSchema = z
   .string()
   .trim()
   .toUpperCase()
-  .regex(GSTIN_REGEX, 'A GSTIN is 15 characters, like 27AAPFU0939F1ZV')
-  .refine(hasValidGstinChecksum, 'That GSTIN fails its checksum — check for a typo')
-
-export const panSchema = z
-  .string()
-  .trim()
-  .toUpperCase()
-  .regex(PAN_REGEX, 'A PAN is 10 characters, like AAPFU0939F')
+  .refine(isCountryCode, { message: 'Pick a country' })
 
 /**
- * Business profile, collected in onboarding step 1 and editable in settings.
- *
- * The cross-field rule is the interesting part: if you claim GST registration
- * the GSTIN becomes required AND its embedded state must agree with the state
- * you selected. A Maharashtra GSTIN on a Karnataka address would silently
- * produce the wrong CGST/SGST-vs-IGST split on every invoice you ever raise.
+ * Business profile collected at onboarding and in settings.
+ * Country and currency are required; tax ID is optional free text
+ * (VAT / EIN / GSTIN / ABN — no format check).
  */
-export const businessSchema = z
-  .object({
-    legal_name: z.string().trim().min(2, 'Enter the name that appears on your PAN'),
-    trade_name: optionalTrimmed,
-    is_gst_registered: z.boolean(),
-    gstin: z.union([gstinSchema, z.literal('')]).optional(),
-    pan: z.union([panSchema, z.literal('')]).optional(),
-    address_line1: z.string().trim().min(3, 'Enter your address'),
-    address_line2: optionalTrimmed,
-    city: z.string().trim().min(2, 'Enter your city'),
-    state_code: stateCodeSchema,
-    pincode: z
-      .union([z.string().trim().regex(PINCODE_REGEX, 'Enter a 6-digit PIN code'), z.literal('')])
-      .optional(),
-    country: z.string().trim().default('India'),
-    email: z.union([z.email('Enter a valid email'), z.literal('')]).optional(),
-    phone: optionalTrimmed,
-    // Derived from the GST registry's constitution field when a GSTIN was
-    // looked up, chosen by the user only when it wasn't.
-    business_type: z
-      .enum(['sole_trader', 'partnership', 'limited_company', 'other'])
-      .optional(),
-  })
-  .superRefine((value, ctx) => {
-    if (!value.is_gst_registered) return
-
-    if (!value.gstin) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['gstin'],
-        message: 'Enter your GSTIN, or turn off GST registration',
-      })
-      return
-    }
-
-    const gstinState = stateCodeFromGstin(value.gstin)
-    if (gstinState && gstinState !== value.state_code) {
-      const expected = GST_STATES.find((s) => s.code === gstinState)?.name ?? gstinState
-      ctx.addIssue({
-        code: 'custom',
-        path: ['gstin'],
-        message: `This GSTIN is registered in ${expected}, which doesn't match the state you selected`,
-      })
-    }
-  })
+export const businessSchema = z.object({
+  legal_name: z.string().trim().min(2, 'Enter your business name'),
+  trade_name: optionalTrimmed,
+  country_code: countryCodeSchema,
+  currency: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .length(3, 'Pick a currency')
+    .regex(/^[A-Z]{3}$/, 'Pick a currency'),
+  tax_id: optionalTrimmed,
+  address_line1: z.string().trim().min(3, 'Enter your address'),
+  address_line2: optionalTrimmed,
+  city: z.string().trim().min(2, 'Enter your city'),
+  region: optionalTrimmed,
+  postal_code: optionalTrimmed,
+  email: z.union([z.email('Enter a valid email'), z.literal('')]).optional(),
+  phone: optionalTrimmed,
+  business_type: z.enum(['sole_trader', 'partnership', 'limited_company', 'other']).optional(),
+})
 
 export type BusinessInput = z.infer<typeof businessSchema>
 
@@ -133,10 +47,7 @@ export const paymentDetailsSchema = z.object({
   bank_name: optionalTrimmed,
   account_name: optionalTrimmed,
   account_number: optionalTrimmed,
-  ifsc: z
-    .union([z.string().trim().toUpperCase().regex(IFSC_REGEX, 'Enter a valid IFSC, like HDFC0001234'), z.literal('')])
-    .optional(),
-  upi_id: z.union([z.string().trim().regex(UPI_REGEX, 'Enter a valid UPI ID'), z.literal('')]).optional(),
+  routing_number: optionalTrimmed,
   default_terms: optionalTrimmed,
   default_notes: optionalTrimmed,
 })
@@ -149,7 +60,7 @@ export const numberingSchema = z.object({
     .trim()
     .toUpperCase()
     .min(1, 'Enter a prefix')
-    .max(10, 'Keep the prefix under 10 characters')
+    .max(16, 'Keep the prefix to 16 characters')
     .regex(/^[A-Z0-9\-/]+$/, 'Letters, numbers, hyphens and slashes only'),
   next_invoice_number: z.coerce
     .number()
@@ -162,45 +73,289 @@ export type NumberingInput = z.infer<typeof numberingSchema>
 
 export const clientSchema = z.object({
   name: z.string().trim().min(2, "Enter your client's name"),
-  gstin: z.union([gstinSchema, z.literal('')]).optional(),
+  tax_id: optionalTrimmed,
   email: z.union([z.email('Enter a valid email'), z.literal('')]).optional(),
   phone: optionalTrimmed,
   address_line1: optionalTrimmed,
   address_line2: optionalTrimmed,
   city: optionalTrimmed,
-  state_code: z.union([stateCodeSchema, z.literal('')]).optional(),
-  pincode: z
-    .union([z.string().trim().regex(PINCODE_REGEX, 'Enter a 6-digit PIN code'), z.literal('')])
-    .optional(),
-  country: z.string().trim().default('India'),
+  region: optionalTrimmed,
+  postal_code: optionalTrimmed,
+  country_code: z.union([countryCodeSchema, z.literal('')]).optional(),
+  country: optionalTrimmed,
 })
 
 export type ClientInput = z.infer<typeof clientSchema>
 
-export const lineItemSchema = z.object({
-  description: z.string().trim().min(1, 'Describe what you are billing for'),
-  hsn_sac: z
-    .union([z.string().trim().regex(/^[0-9]{4,8}$/, 'HSN/SAC is 4 to 8 digits'), z.literal('')])
-    .optional(),
-  quantity: z.coerce.number().gt(0, 'Quantity must be more than zero'),
-  unit: z.enum(UNITS).default('NOS'),
-  rate: z.coerce.number().min(0, 'Rate cannot be negative'),
-  discount_percent: z.coerce.number().min(0).max(100).default(0),
-  gst_rate: z.coerce.number().refine((r) => (GST_RATES as readonly number[]).includes(r), 'Pick a GST slab'),
-  cess_rate: z.coerce.number().min(0).max(100).default(0),
-})
+/**
+ * A blank client in the schema's output shape.
+ *
+ * Needed because `optionalTrimmed` (`.optional().transform(…)`) infers keys as
+ * required-but-possibly-`undefined` — a bare `{ name }` does not satisfy the
+ * type, so every place that builds a client from scratch uses this.
+ */
+export function emptyClientInput(name = ''): ClientInput {
+  return {
+    name,
+    tax_id: undefined,
+    phone: undefined,
+    address_line1: undefined,
+    address_line2: undefined,
+    city: undefined,
+    region: undefined,
+    postal_code: undefined,
+    country: undefined,
+  }
+}
+
+export const lineItemSchema = z
+  .object({
+    description: z.string().trim().default(''),
+    quantity: z.coerce.number().gt(0, 'Quantity must be more than zero').default(1),
+    unit: z.enum(UNITS).default('NOS'),
+    /** Omitted on priced lines — borrowed from the price. Required ad-hoc. */
+    rate: z.coerce.number().min(0, 'Rate cannot be negative').optional(),
+    discount_percent: z.coerce.number().min(0).max(100).default(0),
+    /** Omitted on priced lines — borrowed from the price. Defaults to 0 ad-hoc. */
+    tax_rate: z.coerce.number().min(0).max(100).optional(),
+    /**
+     * A catalog price (`price_…` or UUID). When present, a missing
+     * description/rate/tax_rate is borrowed from the price's product name,
+     * unit amount and tax rate. The price currency must match the invoice
+     * currency.
+     */
+    price: z.string().trim().optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.price) return
+    // An ad-hoc line has nothing to borrow from, so it must stand alone.
+    if (!value.description.trim()) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['description'],
+        message: 'Describe what you are billing for',
+      })
+    }
+    if (value.rate === undefined) {
+      ctx.addIssue({ code: 'custom', path: ['rate'], message: 'Enter a rate' })
+    }
+  })
 
 export const invoiceSchema = z.object({
   client: clientSchema,
   issue_date: z.iso.date(),
   due_date: z.union([z.iso.date(), z.literal('')]).optional(),
-  place_of_supply_state_code: stateCodeSchema,
-  is_export: z.boolean().default(false),
-  reverse_charge: z.boolean().default(false),
-  currency: z.string().trim().length(3).default('INR'),
+  /** Omitted → the business default currency. The API wire layer fills USD only as a last resort. */
+  currency: z.string().trim().toUpperCase().length(3).optional(),
+  collection_method: z.enum(['charge_automatically', 'send_invoice']).default('send_invoice'),
   notes: optionalTrimmed,
   terms: optionalTrimmed,
   items: z.array(lineItemSchema).min(1, 'Add at least one line item'),
 })
 
 export type InvoiceInput = z.infer<typeof invoiceSchema>
+
+/**
+ * Products & Prices — the Stripe-style catalog.
+ *
+ * A Product names something you sell. A Price is one way to charge for it:
+ * an amount in a currency, one-off or recurring (interval + count).
+ * Recurring is a data model only in this phase — nothing auto-bills yet.
+ */
+
+export const productSchema = z.object({
+  name: z.string().trim().min(1, 'Name your product').max(200),
+  description: optionalTrimmed,
+  images: z.array(z.string().trim().url('Enter a valid image URL')).max(8).default([]),
+  active: z.boolean().default(true),
+})
+
+export type ProductInput = z.infer<typeof productSchema>
+
+export const RECURRING_INTERVALS = ['day', 'week', 'month', 'year'] as const
+
+export const priceSchema = z
+  .object({
+    /** The parent product: UUID or `prod_…` public ID. */
+    product: z.string().trim().min(1, 'Pick a product'),
+    nickname: optionalTrimmed,
+    unit_amount: z.coerce.number().min(0, 'Amount cannot be negative'),
+    currency: z
+      .string()
+      .trim()
+      .toUpperCase()
+      .length(3, 'Pick a currency')
+      .regex(/^[A-Z]{3}$/, 'Pick a currency'),
+    type: z.enum(['one_time', 'recurring']).default('one_time'),
+    recurring_interval: z.enum(RECURRING_INTERVALS).optional(),
+    interval_count: z.coerce.number().int().min(1).max(52).default(1),
+    tax_rate: z.coerce.number().min(0).max(100).default(0),
+    active: z.boolean().default(true),
+  })
+  .superRefine((value, ctx) => {
+    if (value.type === 'recurring' && !value.recurring_interval) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['recurring_interval'],
+        message: 'Pick how often this price recurs',
+      })
+    }
+    if (value.type === 'one_time' && value.recurring_interval) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['recurring_interval'],
+        message: 'One-off prices do not recur',
+      })
+    }
+  })
+
+export type PriceInput = z.infer<typeof priceSchema>
+
+/**
+ * Stripe-shaped wire schemas for the REST API.
+ *
+ * Same resource and field names as Stripe (`customer`, `unit_amount`,
+ * `recurring: { interval }`), adapted to this API's conventions: ISO dates
+ * (not Unix timestamps), JSON only, `{ data }` envelope, minor-unit integers
+ * for money. Routes convert these to the internal schemas above.
+ */
+
+const addressWireSchema = z.object({
+  line1: optionalTrimmed,
+  line2: optionalTrimmed,
+  city: optionalTrimmed,
+  state: optionalTrimmed,
+  postal_code: optionalTrimmed,
+  country: z.string().trim().toUpperCase().length(2).optional(),
+})
+
+export const customerWireSchema = z.object({
+  name: z.string().trim().min(1, "Enter your customer's name"),
+  email: z.union([z.email('Enter a valid email'), z.literal('')]).optional(),
+  phone: optionalTrimmed,
+  tax_id: optionalTrimmed,
+  address: addressWireSchema.optional(),
+})
+
+export type CustomerWireInput = z.infer<typeof customerWireSchema>
+
+export function customerWireToClient(input: CustomerWireInput): ClientInput {
+  return {
+    name: input.name,
+    email: input.email,
+    phone: input.phone,
+    tax_id: input.tax_id,
+    address_line1: input.address?.line1,
+    address_line2: input.address?.line2,
+    city: input.address?.city,
+    region: input.address?.state,
+    postal_code: input.address?.postal_code,
+    country_code: input.address?.country,
+    country: input.address?.country,
+  }
+}
+
+export function customerWirePartialToClient(
+  input: Partial<CustomerWireInput>,
+): Partial<ClientInput> {
+  const out: Partial<ClientInput> = {}
+  if (input.name !== undefined) out.name = input.name
+  if (input.email !== undefined) out.email = input.email
+  if (input.phone !== undefined) out.phone = input.phone
+  if (input.tax_id !== undefined) out.tax_id = input.tax_id
+  if (input.address?.line1 !== undefined) out.address_line1 = input.address.line1
+  if (input.address?.line2 !== undefined) out.address_line2 = input.address.line2
+  if (input.address?.city !== undefined) out.city = input.address.city
+  if (input.address?.state !== undefined) out.region = input.address.state
+  if (input.address?.postal_code !== undefined) out.postal_code = input.address.postal_code
+  if (input.address?.country !== undefined) {
+    out.country_code = input.address.country
+    out.country = input.address.country
+  }
+  return out
+}
+
+const recurringWireSchema = z.object({
+  interval: z.enum(RECURRING_INTERVALS),
+  interval_count: z.coerce.number().int().min(1).max(52).default(1),
+})
+
+export const priceWireSchema = z.object({
+  product: z.string().trim().min(1, 'Pick a product'),
+  nickname: optionalTrimmed,
+  /** Minor units, like Stripe: 5000 is $50.00. */
+  unit_amount: z.coerce.number().int('Use whole minor units').min(0, 'Amount cannot be negative'),
+  currency: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .length(3, 'Pick a currency')
+    .regex(/^[A-Z]{3}$/, 'Pick a currency'),
+  type: z.enum(['one_time', 'recurring']).default('one_time'),
+  recurring: recurringWireSchema.optional(),
+  tax_rate: z.coerce.number().min(0).max(100).default(0),
+  active: z.boolean().default(true),
+})
+
+export type PriceWireInput = z.infer<typeof priceWireSchema>
+
+export function priceWireToInput(input: PriceWireInput): PriceInput {
+  return {
+    product: input.product,
+    nickname: input.nickname,
+    unit_amount: input.unit_amount / 100,
+    currency: input.currency,
+    type: input.type,
+    recurring_interval: input.recurring?.interval,
+    interval_count: input.recurring?.interval_count ?? 1,
+    tax_rate: input.tax_rate,
+    active: input.active,
+  }
+}
+
+export function priceWirePartialToInput(input: Partial<PriceWireInput>): Partial<PriceInput> {
+  const out: Partial<PriceInput> = {}
+  if (input.nickname !== undefined) out.nickname = input.nickname ?? undefined
+  if (input.unit_amount !== undefined) out.unit_amount = input.unit_amount / 100
+  if (input.currency !== undefined) out.currency = input.currency
+  if (input.type !== undefined) out.type = input.type
+  if (input.recurring !== undefined) {
+    out.recurring_interval = input.recurring?.interval
+    out.interval_count = input.recurring?.interval_count ?? 1
+  }
+  if (input.tax_rate !== undefined) out.tax_rate = input.tax_rate
+  if (input.active !== undefined) out.active = input.active
+  return out
+}
+
+const invoiceLineWireSchema = z.object({
+  price: z.string().trim().optional(),
+  description: z.string().trim().default(''),
+  quantity: z.coerce.number().gt(0, 'Quantity must be more than zero').default(1),
+  unit: z.enum(UNITS).default('NOS'),
+  /** Minor units, like Stripe. Omitted on priced lines — borrowed from the price. */
+  unit_amount: z.coerce.number().int('Use whole minor units').min(0).optional(),
+  discount_percent: z.coerce.number().min(0).max(100).default(0),
+  tax_rate: z.coerce.number().min(0).max(100).optional(),
+})
+
+export const invoiceWireSchema = z.object({
+  /** An existing customer: `cus_…` or UUID. Required, like Stripe. */
+  customer: z.string().trim().min(1, 'Pick a customer'),
+  currency: z.string().trim().toUpperCase().length(3).regex(/^[A-Z]{3}$/, 'Pick a currency').optional(),
+  collection_method: z.enum(['charge_automatically', 'send_invoice']).optional(),
+  due_date: z.union([z.iso.date(), z.literal('')]).optional(),
+  days_until_due: z.coerce.number().int().min(0).max(365).optional(),
+  description: optionalTrimmed,
+  footer: optionalTrimmed,
+  items: z.array(invoiceLineWireSchema).min(1, 'Add at least one line item').optional(),
+})
+
+export type InvoiceWireInput = z.infer<typeof invoiceWireSchema>
+
+/** Create requires a customer; updates merge over the stored draft. */
+export const invoiceCreateWireSchema = invoiceWireSchema.superRefine((value, ctx) => {
+  if (!value.customer) {
+    ctx.addIssue({ code: 'custom', path: ['customer'], message: 'Pick a customer' })
+  }
+})

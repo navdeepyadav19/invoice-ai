@@ -31,7 +31,7 @@ export default async function DashboardPage() {
   }))
 
   const outstanding = rows
-    .filter((i) => i.displayStatus === 'sent' || i.displayStatus === 'overdue')
+    .filter((i) => i.displayStatus === 'open' || i.displayStatus === 'overdue')
     .reduce((sum, i) => sum + toPaise(Number(i.total)), 0)
 
   const paid = rows
@@ -152,7 +152,7 @@ function InvoiceTable({ invoices }: { invoices: (InvoiceRow & { displayStatus: I
   )
 }
 
-/** The snapshot is the source of truth for a sent invoice, so read the name from it. */
+/** The snapshot is the source of truth for a finalized invoice, so read the name from it. */
 function clientName(invoice: InvoiceRow): string {
   const snapshot = invoice.client_snapshot
   if (snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot)) {

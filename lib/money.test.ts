@@ -11,17 +11,17 @@ import {
 } from './money'
 
 describe('paise conversion', () => {
-  it('turns float-hostile rupee sums into exact integers', () => {
-    // 0.1 + 0.2 is 0.30000000000000004 in IEEE-754 — the whole reason paise exist.
+  it('turns float-hostile sums into exact integers', () => {
+    // 0.1 + 0.2 is 0.30000000000000004 in IEEE-754 — the whole reason minor units exist.
     expect(toPaise(0.1 + 0.2)).toBe(30)
   })
 
-  it('rounds sub-paisa input to the nearest paisa', () => {
+  it('rounds sub-cent input to the nearest minor unit', () => {
     expect(toPaise(19.999)).toBe(2000)
     expect(toPaise(19.994)).toBe(1999)
   })
 
-  it('round-trips back to rupees', () => {
+  it('round-trips back to major units', () => {
     expect(toRupees(toPaise(1234.56))).toBe(1234.56)
   })
 })
@@ -44,17 +44,17 @@ describe('mulPaise', () => {
 })
 
 describe('roundToRupee', () => {
-  it('rounds to the nearer whole rupee', () => {
+  it('rounds to the nearer whole major unit', () => {
     expect(roundToRupee(11849)).toBe(11800)
     expect(roundToRupee(11850)).toBe(11900)
   })
 })
 
 describe('display formatting', () => {
-  it('groups digits the Indian way (lakh, not million)', () => {
-    const formatted = formatPaise(1_23_45_678_90)
-    expect(formatted.startsWith('₹')).toBe(true)
-    expect(formatted).toContain('1,23,45,678.90')
+  it('formats with the currency and locale', () => {
+    const formatted = formatPaise(1234567890, 'USD', 'en-US')
+    expect(formatted).toContain('$')
+    expect(formatted).toContain('12,345,678.90')
   })
 
   it('always shows two decimals in table columns, with no symbol', () => {
@@ -64,30 +64,27 @@ describe('display formatting', () => {
 })
 
 describe('amountInWords edge cases', () => {
-  it('names amounts under a rupee', () => {
-    expect(amountInWords(99)).toBe('Zero Rupees and Ninety Nine Paise Only')
+  it('names amounts under one major unit', () => {
+    expect(amountInWords(99)).toBe('Zero USD and Ninety Nine Cents Only')
   })
 
   it('prefixes credit notes with Minus', () => {
-    expect(amountInWords(-50000)).toBe('Minus Five Hundred Rupees Only')
+    expect(amountInWords(-50000)).toBe('Minus Five Hundred USD Only')
   })
 
-  it('skips empty lakh and thousand groups instead of saying "Zero Lakh"', () => {
-    expect(amountInWords(1_00_00_101_00)).toBe('One Crore One Hundred One Rupees Only')
+  it('skips empty groups instead of saying "Zero Million"', () => {
+    expect(amountInWords(10000010100)).toBe('One Hundred Million One Hundred One USD Only')
   })
 
-  it('lets the crore group grow past 99', () => {
-    expect(amountInWords(100_00_00_000_00)).toBe('One Hundred Crore Rupees Only')
+  it('uses thousand / million / billion grouping', () => {
+    expect(amountInWords(199900)).toBe('One Thousand Nine Hundred Ninety Nine USD Only')
+    expect(amountInWords(2000)).toBe('Twenty USD Only')
+    expect(amountInWords(1300)).toBe('Thirteen USD Only')
+    expect(amountInWords(100000000000)).toBe('One Billion USD Only')
   })
 
-  it('handles teens and round tens', () => {
-    expect(amountInWords(1_999_00)).toBe('One Thousand Nine Hundred Ninety Nine Rupees Only')
-    expect(amountInWords(20_00)).toBe('Twenty Rupees Only')
-    expect(amountInWords(13_00)).toBe('Thirteen Rupees Only')
-  })
-
-  it('uses the currency code and cents for export invoices', () => {
+  it('uses the currency code and cents', () => {
     expect(amountInWords(12345, 'USD')).toBe('One Hundred Twenty Three USD and Forty Five Cents Only')
-    expect(amountInWords(0, 'USD')).toBe('Zero Only')
+    expect(amountInWords(0, 'USD')).toBe('Zero USD Only')
   })
 })

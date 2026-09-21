@@ -9,7 +9,6 @@ import { Field } from '@/components/onboarding/field'
 import { StepFooter } from '@/components/onboarding/step-footer'
 import { SubmitButton } from '@/components/submit-button'
 import { Input } from '@/components/ui/input'
-import { financialYearLabel } from '@/lib/india'
 import type { BusinessRow } from '@/lib/database.types'
 
 export function StepNumbering({
@@ -27,9 +26,8 @@ export function StepNumbering({
   const [prefix, setPrefix] = useState(business?.invoice_prefix ?? 'INV')
   const [start, setStart] = useState(String(business?.next_invoice_number ?? 1))
 
-  const fy = financialYearLabel(new Date())
   const padded = String(Math.max(1, Number(start) || 1)).padStart(4, '0')
-  const preview = `${prefix || 'INV'}/${fy}/${padded}`
+  const preview = `${prefix || 'INV'}-${padded}`
 
   return (
     <form action={formAction} className="space-y-6">
@@ -78,9 +76,8 @@ export function StepNumbering({
         </p>
         <p className="mt-2 font-mono text-2xl font-semibold tracking-tight">{preview}</p>
         <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-          The financial year ({fy}) is inserted automatically and rolls over each April. Numbers are
-          assigned when you <em>send</em> an invoice, not when you start a draft — so an abandoned
-          draft never leaves a gap in your series.
+          Numbers are assigned when you <em>issue</em> an invoice, not when you start a draft — so
+          an abandoned draft never leaves a gap in your series.
         </p>
       </div>
 

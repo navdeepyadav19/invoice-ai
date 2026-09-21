@@ -11,33 +11,39 @@ import {
 
 describe('snapshotBusiness', () => {
   const row = {
-    legal_name: 'Acme Traders Pvt Ltd',
+    legal_name: 'Acme Traders LLC',
     trade_name: 'Acme',
-    gstin: '27AAPFU0939F1ZV',
-    state_code: '27',
-    is_gst_registered: true,
-    bank_name: 'HDFC Bank',
+    country_code: 'US',
+    currency: 'USD',
+    tax_id: 'US-EIN 12-3456789',
+    bank_name: 'First Bank',
     account_number: '000123456789',
-    ifsc: 'HDFC0000001',
-    upi_id: 'acme@hdfc',
+    routing_number: '111000025',
   } as BusinessRow
 
   it('stores the legal name as the party name', () => {
-    expect(snapshotBusiness(row).name).toBe('Acme Traders Pvt Ltd')
+    expect(snapshotBusiness(row).name).toBe('Acme Traders LLC')
   })
 
-  it('nests bank and UPI details under payment', () => {
+  it('nests bank details under payment', () => {
     expect(snapshotBusiness(row).payment).toMatchObject({
-      bank_name: 'HDFC Bank',
-      ifsc: 'HDFC0000001',
-      upi_id: 'acme@hdfc',
+      bank_name: 'First Bank',
+      routing_number: '111000025',
+    })
+  })
+
+  it('carries country, currency and tax ID', () => {
+    expect(snapshotBusiness(row)).toMatchObject({
+      country_code: 'US',
+      currency: 'USD',
+      tax_id: 'US-EIN 12-3456789',
     })
   })
 })
 
 describe('readSnapshot', () => {
   it('returns a stored object as-is', () => {
-    const stored = { name: 'Client Co', gstin: '29ABCDE1234F1Z5' }
+    const stored = { name: 'Client Co', tax_id: 'EU VAT 123' }
     expect(readSnapshot<PartySnapshot>(stored, 'Unknown')).toEqual(stored)
   })
 
@@ -53,28 +59,29 @@ describe('readSnapshot', () => {
 })
 
 describe('formatPartyAddress', () => {
-  it('puts city and pincode on one line', () => {
+  it('puts city, region and postal code on one line', () => {
     expect(
       formatPartyAddress({
         name: 'Client Co',
-        address_line1: '12 MG Road',
-        city: 'Pune',
-        pincode: '411001',
-        country: 'India',
+        address_line1: '12 Main St',
+        city: 'Austin',
+        region: 'TX',
+        postal_code: '73301',
+        country: 'United States',
       }),
-    ).toEqual(['12 MG Road', 'Pune 411001', 'India'])
+    ).toEqual(['12 Main St', 'Austin, TX, 73301', 'United States'])
   })
 
   it('drops blank and whitespace-only lines', () => {
     expect(
       formatPartyAddress({
         name: 'Client Co',
-        address_line1: '  12 MG Road  ',
+        address_line1: '  12 Main St  ',
         address_line2: '   ',
         city: null,
-        pincode: '411001',
+        postal_code: '73301',
       }),
-    ).toEqual(['12 MG Road', '411001'])
+    ).toEqual(['12 Main St', '73301'])
   })
 
   it('returns no lines for a party with no address', () => {
@@ -89,8 +96,7 @@ describe('formatInvoiceDate', () => {
     expect(formatInvoiceDate('')).toBe('—')
   })
 
-  it('formats as day, short month, year', () => {
-    // ICU versions disagree on "Sep" vs "Sept" for en-IN, so match either.
-    expect(formatInvoiceDate('2026-09-14T12:00:00')).toMatch(/^14 Sept? 2026$/)
+  it('formats as short month, day, year (US locale)', () => {
+    expect(formatInvoiceDate('2026-09-14T12:00:00')).toMatch(/^Sept? 14, 2026$/)
   })
 })

@@ -19,11 +19,11 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: 'Invoice-AI — GST invoices in a minute',
+    default: 'Invoice-AI — invoices in a minute',
     template: '%s · Invoice-AI',
   },
   description:
-    'Create a GST-compliant tax invoice, download the PDF, and send your client a link. No signup needed to start.',
+    'Create an invoice, download the PDF, and send your client a link. No signup needed to start.',
 }
 
 export default function RootLayout({ children }: LayoutProps<'/'>) {

@@ -8,16 +8,7 @@ import { FormError, FormSuccess } from '@/components/auth/form-error'
 import { Field } from '@/components/onboarding/field'
 import { SubmitButton } from '@/components/submit-button'
 import { Input } from '@/components/ui/input'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import { Switch } from '@/components/ui/switch'
-import { GST_STATES, stateName } from '@/lib/india'
-import { GSTIN_REGEX, stateCodeFromGstin } from '@/lib/validators'
+import { COUNTRIES, CURRENCIES, countryByCode } from '@/lib/locale/countries'
 import type { BusinessRow } from '@/lib/database.types'
 
 type StepAction = (prev: StepState, formData: FormData) => Promise<StepState>
@@ -26,45 +17,45 @@ export function StepBusiness({
   business,
   action = saveBusinessSettings,
   submitLabel = 'Continue',
+  detectedCountry,
 }: {
   business: BusinessRow | null
   /** Settings passes its own action so the same form doesn't advance the wizard. */
   action?: StepAction
   submitLabel?: string
+  /** ISO country from the request IP — a default, not a decision. */
+  detectedCountry?: string
 }) {
   const [state, formAction] = useActionState<StepState, FormData>(action, {})
 
-  const [isRegistered, setIsRegistered] = useState(business?.is_gst_registered ?? true)
-  const [gstin, setGstin] = useState(business?.gstin ?? '')
-  const [stateCode, setStateCode] = useState(business?.state_code ?? '')
+  const initialCountry = business?.country_code ?? detectedCountry ?? 'US'
+  const [countryCode, setCountryCode] = useState(initialCountry)
+  const [currency, setCurrency] = useState(
+    business?.currency ?? countryByCode(initialCountry).currency,
+  )
 
   const errors = state.fieldErrors ?? {}
   const kept = state.values ?? {}
 
-  /**
-   * A GSTIN already contains the state, so once a complete one is typed we set
-   * the dropdown from it. That turns the most common validation failure — a
-   * GSTIN and a state that disagree — into something the user can't easily hit.
-   */
-  function handleGstinChange(value: string) {
-    const next = value.toUpperCase()
-    setGstin(next)
-
-    if (GSTIN_REGEX.test(next)) {
-      const derived = stateCodeFromGstin(next)
-      if (derived) setStateCode(derived)
-    }
+  function handleCountryChange(code: string) {
+    setCountryCode(code)
+    // Keep currency in sync only when the user hasn't customised it away from
+    // the previous country's default — an explicit choice must survive.
+    setCurrency((prev) => {
+      const prevDefault = countryByCode(countryCode).currency
+      if (prev === prevDefault) return countryByCode(code).currency
+      return prev
+    })
   }
 
   return (
     <form action={formAction} className="space-y-6">
       <div className="grid gap-5 sm:grid-cols-2">
         <Field
-          label="Legal name"
+          label="Business name"
           htmlFor="legal_name"
           required
           error={errors.legal_name}
-          hint="As it appears on your PAN or GST certificate."
           className="sm:col-span-2"
         >
           <Input
@@ -90,59 +81,63 @@ export function StepBusiness({
             placeholder="Umbrella"
           />
         </Field>
-      </div>
 
-      <div className="rounded-lg border border-border bg-card p-4">
-        <div className="flex items-start justify-between gap-4">
-          <div className="space-y-1">
-            <p className="text-sm font-medium">I&rsquo;m registered for GST</p>
-            <p className="text-xs text-muted-foreground">
-              Turn this off and we&rsquo;ll issue a Bill of Supply with no tax columns.
-            </p>
-          </div>
-          <Switch
-            id="is_gst_registered"
-            name="is_gst_registered"
-            checked={isRegistered}
-            onCheckedChange={setIsRegistered}
+        <Field label="Country" htmlFor="country_code" required error={errors.country_code}>
+          <select
+            id="country_code"
+            name="country_code"
+            value={countryCode}
+            onChange={(e) => handleCountryChange(e.target.value)}
+            className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+            required
+          >
+            {COUNTRIES.map((c) => (
+              <option key={c.code} value={c.code}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+
+        <Field
+          label="Currency"
+          htmlFor="currency"
+          required
+          error={errors.currency}
+          hint="Default for new invoices. Each invoice can override it."
+        >
+          <select
+            id="currency"
+            name="currency"
+            value={currency}
+            onChange={(e) => setCurrency(e.target.value)}
+            className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+            required
+          >
+            {CURRENCIES.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        </Field>
+
+        <Field
+          label="Tax ID"
+          htmlFor="tax_id"
+          error={errors.tax_id}
+          hint="Optional — VAT, EIN, ABN, GSTIN, whatever your country uses."
+          className="sm:col-span-2"
+        >
+          <Input
+            id="tax_id"
+            name="tax_id"
+            defaultValue={kept.tax_id ?? business?.tax_id ?? ''}
+            placeholder="VAT ID"
+            className="font-mono uppercase"
+            spellCheck={false}
           />
-        </div>
-
-        {isRegistered && (
-          <div className="mt-4 grid gap-5 sm:grid-cols-2">
-            <Field
-              label="GSTIN"
-              htmlFor="gstin"
-              required
-              error={errors.gstin}
-              hint="15 characters. We check the checksum, so a typo won't slip through."
-            >
-              <Input
-                id="gstin"
-                name="gstin"
-                value={gstin}
-                onChange={(event) => handleGstinChange(event.target.value)}
-                placeholder="27AAPFU0939F1ZV"
-                maxLength={15}
-                className="font-mono uppercase"
-                autoCapitalize="characters"
-                spellCheck={false}
-              />
-            </Field>
-
-            <Field label="PAN" htmlFor="pan" error={errors.pan} hint="Optional.">
-              <Input
-                id="pan"
-                name="pan"
-                defaultValue={kept.pan ?? business?.pan ?? ''}
-                placeholder="AAPFU0939F"
-                maxLength={10}
-                className="font-mono uppercase"
-                spellCheck={false}
-              />
-            </Field>
-          </div>
-        )}
+        </Field>
       </div>
 
       <div className="grid gap-5 sm:grid-cols-2">
@@ -157,7 +152,7 @@ export function StepBusiness({
             id="address_line1"
             name="address_line1"
             defaultValue={kept.address_line1 ?? business?.address_line1 ?? ''}
-            placeholder="4th Floor, Trade Centre, Bandra Kurla Complex"
+            placeholder="4th Floor, Trade Centre"
             required
           />
         </Field>
@@ -171,51 +166,24 @@ export function StepBusiness({
         </Field>
 
         <Field label="City" htmlFor="city" required error={errors.city}>
-          <Input id="city" name="city" defaultValue={kept.city ?? business?.city ?? ''} placeholder="Mumbai" required />
+          <Input id="city" name="city" defaultValue={kept.city ?? business?.city ?? ''} placeholder="Austin" required />
         </Field>
 
-        <Field
-          label="State"
-          htmlFor="state_code"
-          required
-          error={errors.state_code}
-          hint="This decides whether your invoices charge CGST+SGST or IGST."
-        >
-          <Select
-            name="state_code"
-            value={stateCode}
-            onValueChange={(value) => setStateCode(value ?? '')}
-            required
-          >
-            <SelectTrigger id="state_code" className="w-full">
-              {/* Base UI's Select.Value renders the raw value by default, so the
-                  trigger would read "27" once a state is picked. The render
-                  function puts the name back. */}
-              <SelectValue placeholder="Select your state">
-                {(value) =>
-                  value ? `${value} — ${stateName(String(value))}` : 'Select your state'
-                }
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              {GST_STATES.map((s) => (
-                <SelectItem key={s.code} value={s.code}>
-                  <span className="font-mono text-xs text-muted-foreground">{s.code}</span>
-                  {s.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </Field>
-
-        <Field label="PIN code" htmlFor="pincode" error={errors.pincode}>
+        <Field label="Region / State" htmlFor="region" error={errors.region}>
           <Input
-            id="pincode"
-            name="pincode"
-            defaultValue={kept.pincode ?? business?.pincode ?? ''}
-            placeholder="400051"
-            maxLength={6}
-            inputMode="numeric"
+            id="region"
+            name="region"
+            defaultValue={kept.region ?? business?.region ?? ''}
+            placeholder="TX"
+          />
+        </Field>
+
+        <Field label="Postal code" htmlFor="postal_code" error={errors.postal_code}>
+          <Input
+            id="postal_code"
+            name="postal_code"
+            defaultValue={kept.postal_code ?? business?.postal_code ?? business?.pincode ?? ''}
+            placeholder="73301"
           />
         </Field>
 
@@ -225,7 +193,7 @@ export function StepBusiness({
             name="email"
             type="email"
             defaultValue={kept.email ?? business?.email ?? ''}
-            placeholder="billing@umbrella.in"
+            placeholder="billing@umbrella.co"
           />
         </Field>
 
@@ -235,7 +203,7 @@ export function StepBusiness({
             name="phone"
             type="tel"
             defaultValue={kept.phone ?? business?.phone ?? ''}
-            placeholder="+91 98200 00000"
+            placeholder="+1 512 000 0000"
           />
         </Field>
       </div>

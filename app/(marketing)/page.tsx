@@ -41,11 +41,11 @@ export default async function LandingPage() {
           <div className="space-y-7">
             <p className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1 text-xs font-medium text-muted-foreground">
               <ShieldCheck className="size-3.5 text-primary" />
-              CGST, SGST and IGST worked out for you
+              Tax worked out for you
             </p>
 
             <h1 className="text-balance text-4xl font-semibold leading-[1.08] tracking-tight sm:text-5xl lg:text-6xl">
-              GST invoices,
+              Invoices,
               <br />
               done in a minute.
             </h1>
@@ -80,7 +80,7 @@ export default async function LandingPage() {
             <Feature
               icon={<ShieldCheck className="size-5" />}
               title="The right tax split, every time"
-              body="Same state as your client? CGST and SGST, halved to the paisa. Different state? IGST. Exporting? Zero-rated. You pick the place of supply; we do the rest."
+              body="Pick your country and currency; each line carries its own tax rate. You type the rate, we do the maths — in any currency."
             />
             <Feature
               icon={<FileText className="size-5" />}

@@ -46,8 +46,8 @@ export default async function PublicInvoicePage({ params }: PageProps<'/i/[token
                 Invoice {view.number} from {view.business.trade_name || view.business.name}
               </p>
               <p className="text-xs text-muted-foreground">
-                {formatPaise(view.computed.totalPaise, view.currency)} due{' '}
-                {view.dueDate ? new Date(view.dueDate).toLocaleDateString('en-IN', {
+                {formatPaise(view.computed.totalMinor, view.currency)} due{' '}
+                {view.dueDate ? new Date(view.dueDate).toLocaleDateString('en-US', {
                   day: 'numeric',
                   month: 'long',
                   year: 'numeric',

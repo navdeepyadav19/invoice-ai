@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 
 import { createClient } from '@/lib/supabase/server'
 import { getPrimaryBusiness, requireUser } from '@/lib/queries'
+import { countryName } from '@/lib/locale/countries'
 import { businessSchema, numberingSchema, paymentDetailsSchema } from '@/lib/validators'
 import { toFieldErrors, type StepState } from '@/lib/form-state'
 
@@ -21,38 +22,11 @@ function nullable(value: FormDataEntryValue | null): string | null {
  * result straight to the schema means any form that omits an optional field
  * fails validation — and the error lands under a field name that form doesn't
  * render, so the user sees "fix the highlighted fields" with nothing
- * highlighted. This is exactly what happened once step-identity.tsx's manual
- * form stopped rendering email/phone: onboarding was completely blocked.
- * Every optional field must come through here.
+ * highlighted. Every optional field must come through here.
  */
 function field(formData: FormData, name: string): string | undefined {
   const value = formData.get(name)
   return value === null ? undefined : String(value)
-}
-
-/**
- * Pull the GST registry metadata that the lookup step posts as hidden fields.
- * Returns an empty object when absent, so a plain settings edit never blanks
- * out previously fetched registry data.
- */
-function readGstMetadata(formData: FormData): Record<string, unknown> {
-  const raw = formData.get('gst_data')
-  if (!raw) return {}
-
-  let parsed: unknown = null
-  try {
-    parsed = JSON.parse(String(raw))
-  } catch {
-    return {}
-  }
-
-  return {
-    gst_data: parsed,
-    gst_constitution: nullable(formData.get('gst_constitution')),
-    gst_status: nullable(formData.get('gst_status')),
-    gst_registered_on: nullable(formData.get('gst_registered_on')),
-    gst_fetched_at: new Date().toISOString(),
-  }
 }
 
 /**
@@ -68,15 +42,14 @@ export async function persistBusiness(formData: FormData): Promise<StepState> {
   const parsed = businessSchema.safeParse({
     legal_name: field(formData, 'legal_name'),
     trade_name: field(formData, 'trade_name'),
-    is_gst_registered: formData.get('is_gst_registered') === 'on',
-    gstin: field(formData, 'gstin'),
-    pan: field(formData, 'pan'),
+    country_code: field(formData, 'country_code'),
+    currency: field(formData, 'currency'),
+    tax_id: field(formData, 'tax_id'),
     address_line1: field(formData, 'address_line1'),
     address_line2: field(formData, 'address_line2'),
     city: field(formData, 'city'),
-    state_code: field(formData, 'state_code'),
-    pincode: field(formData, 'pincode'),
-    country: field(formData, 'country') || 'India',
+    region: field(formData, 'region'),
+    postal_code: field(formData, 'postal_code'),
     email: field(formData, 'email'),
     phone: field(formData, 'phone'),
     business_type: field(formData, 'business_type') || undefined,
@@ -87,29 +60,22 @@ export async function persistBusiness(formData: FormData): Promise<StepState> {
   const supabase = await createClient()
   const existing = await getPrimaryBusiness()
 
-  // Present only when this submission came from a successful GST lookup.
-  const gstMeta = readGstMetadata(formData)
-
   const values = {
     owner_id: user.id,
     legal_name: parsed.data.legal_name,
     trade_name: parsed.data.trade_name ?? null,
-    is_gst_registered: parsed.data.is_gst_registered,
-    // Clearing the GSTIN when registration is switched off matters: the database
-    // CHECK constraint ties the two together, and a stale GSTIN would keep tax
-    // columns appearing on a Bill of Supply.
-    gstin: parsed.data.is_gst_registered ? (parsed.data.gstin ?? null) : null,
-    pan: parsed.data.pan || null,
+    country_code: parsed.data.country_code,
+    currency: parsed.data.currency,
+    country: countryName(parsed.data.country_code),
+    tax_id: parsed.data.tax_id ?? null,
     address_line1: parsed.data.address_line1,
     address_line2: parsed.data.address_line2 ?? null,
     city: parsed.data.city,
-    state_code: parsed.data.state_code,
-    pincode: parsed.data.pincode || null,
-    country: parsed.data.country,
+    region: parsed.data.region ?? null,
+    postal_code: parsed.data.postal_code ?? null,
     email: parsed.data.email || null,
     phone: parsed.data.phone ?? null,
     business_type: parsed.data.business_type ?? null,
-    ...gstMeta,
   }
 
   const { error } = existing
@@ -130,8 +96,7 @@ export async function persistPayment(formData: FormData): Promise<StepState> {
     bank_name: field(formData, 'bank_name'),
     account_name: field(formData, 'account_name'),
     account_number: field(formData, 'account_number'),
-    ifsc: field(formData, 'ifsc'),
-    upi_id: field(formData, 'upi_id'),
+    routing_number: field(formData, 'routing_number'),
     default_terms: field(formData, 'default_terms'),
     default_notes: field(formData, 'default_notes'),
   })
@@ -145,8 +110,7 @@ export async function persistPayment(formData: FormData): Promise<StepState> {
       bank_name: nullable(formData.get('bank_name')),
       account_name: nullable(formData.get('account_name')),
       account_number: nullable(formData.get('account_number')),
-      ifsc: parsed.data.ifsc || null,
-      upi_id: parsed.data.upi_id || null,
+      routing_number: parsed.data.routing_number || null,
       default_terms: nullable(formData.get('default_terms')),
       default_notes: nullable(formData.get('default_notes')),
     })

@@ -13,10 +13,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { GST_RATES, UNITS } from '@/lib/india'
+import { UNITS } from '@/lib/units'
 import { emptyLineItem, type InvoiceFormValues } from '@/lib/invoice-form'
 
-export function LineItems({ showTax }: { showTax: boolean }) {
+export function LineItems({ defaultTaxRate = 0 }: { defaultTaxRate?: number }) {
   const { control, register, watch, setValue } = useFormContext<InvoiceFormValues>()
   const { fields, append, remove } = useFieldArray({ control, name: 'items' })
 
@@ -29,30 +29,15 @@ export function LineItems({ showTax }: { showTax: boolean }) {
         >
           <div className="flex items-start gap-3">
             <div className="flex-1 space-y-3">
-              <div className="grid gap-3 sm:grid-cols-[1fr_9rem]">
-                <div className="space-y-1.5">
-                  <Label htmlFor={`items.${index}.description`} className="text-xs">
-                    Description
-                  </Label>
-                  <Input
-                    id={`items.${index}.description`}
-                    placeholder="Brand identity design"
-                    {...register(`items.${index}.description`)}
-                  />
-                </div>
-
-                <div className="space-y-1.5">
-                  <Label htmlFor={`items.${index}.hsn_sac`} className="text-xs">
-                    HSN / SAC
-                  </Label>
-                  <Input
-                    id={`items.${index}.hsn_sac`}
-                    placeholder="998912"
-                    inputMode="numeric"
-                    className="font-mono"
-                    {...register(`items.${index}.hsn_sac`)}
-                  />
-                </div>
+              <div className="space-y-1.5">
+                <Label htmlFor={`items.${index}.description`} className="text-xs">
+                  Description
+                </Label>
+                <Input
+                  id={`items.${index}.description`}
+                  placeholder="Brand identity design"
+                  {...register(`items.${index}.description`)}
+                />
               </div>
 
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
@@ -114,28 +99,18 @@ export function LineItems({ showTax }: { showTax: boolean }) {
                   />
                 </div>
 
-                {showTax && (
-                  <div className="space-y-1.5">
-                    <Label htmlFor={`items.${index}.gst_rate`} className="text-xs">
-                      GST %
-                    </Label>
-                    <Select
-                      value={watch(`items.${index}.gst_rate`)}
-                      onValueChange={(value) => setValue(`items.${index}.gst_rate`, value ?? '18')}
-                    >
-                      <SelectTrigger id={`items.${index}.gst_rate`} className="w-full">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {GST_RATES.map((rate) => (
-                          <SelectItem key={rate} value={String(rate)}>
-                            {rate}%
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
+                <div className="space-y-1.5">
+                  <Label htmlFor={`items.${index}.tax_rate`} className="text-xs">
+                    Tax %
+                  </Label>
+                  <Input
+                    id={`items.${index}.tax_rate`}
+                    inputMode="decimal"
+                    placeholder="0"
+                    className="font-mono"
+                    {...register(`items.${index}.tax_rate`)}
+                  />
+                </div>
               </div>
             </div>
 
@@ -157,7 +132,7 @@ export function LineItems({ showTax }: { showTax: boolean }) {
         </div>
       ))}
 
-      <Button type="button" variant="outline" onClick={() => append(emptyLineItem())}>
+      <Button type="button" variant="outline" onClick={() => append(emptyLineItem(defaultTaxRate))}>
         <Plus className="size-4" />
         Add line item
       </Button>

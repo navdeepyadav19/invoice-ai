@@ -161,6 +161,9 @@ site_url = "https://invoice-ai-horizonpay.vercel.app"
 # external_url = ""
 # A list of *exact* URLs that auth providers are permitted to redirect to post authentication.
 additional_redirect_urls = [
+  "https://invoice-ai-jade.vercel.app/**",
+  "https://invoice-ai-jade.vercel.app/auth/callback",
+  "https://*-float.vercel.app/**",
   "https://invoice-ai-horizonpay.vercel.app/**",
   "https://invoice-ai-horizonpay.vercel.app/auth/callback",
   "http://localhost:3000/**",

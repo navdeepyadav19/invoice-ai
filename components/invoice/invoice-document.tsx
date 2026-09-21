@@ -1,6 +1,6 @@
 import { formatInvoiceDate, formatPartyAddress, type InvoiceView } from '@/lib/invoice-view'
 import { formatPaise, formatPaisePlain } from '@/lib/money'
-import { stateName } from '@/lib/india'
+import { countryName, localeForCountry } from '@/lib/locale/countries'
 import { cn } from '@/lib/utils'
 
 /**
@@ -13,10 +13,7 @@ import { cn } from '@/lib/utils'
  */
 export function InvoiceDocument({ view, className }: { view: InvoiceView; className?: string }) {
   const { business, client, computed } = view
-
-  const isTaxInvoice = business.is_gst_registered && computed.treatment !== 'unregistered'
-  const showIgst = computed.igstTotalPaise > 0 || computed.treatment === 'inter_state'
-  const noTaxCollected = computed.taxTotalPaise === 0
+  const locale = localeForCountry(business.country_code)
 
   return (
     <article
@@ -45,8 +42,8 @@ export function InvoiceDocument({ view, className }: { view: InvoiceView; classN
             {formatPartyAddress(business).map((line) => (
               <p key={line}>{line}</p>
             ))}
-            {business.gstin && (
-              <p className="font-mono text-foreground">GSTIN {business.gstin}</p>
+            {business.tax_id && (
+              <p className="font-mono text-foreground">Tax ID {business.tax_id}</p>
             )}
             {business.email && <p>{business.email}</p>}
             {business.phone && <p>{business.phone}</p>}
@@ -55,7 +52,7 @@ export function InvoiceDocument({ view, className }: { view: InvoiceView; classN
 
         <div className="text-right">
           <p className="text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
-            {isTaxInvoice ? 'Tax Invoice' : 'Bill of Supply'}
+            Invoice
           </p>
           <p className="mt-1.5 font-mono text-base font-semibold">
             {view.number ?? 'Draft'}
@@ -63,12 +60,12 @@ export function InvoiceDocument({ view, className }: { view: InvoiceView; classN
           <dl className="mt-3 space-y-1 text-xs">
             <div className="flex justify-end gap-3">
               <dt className="text-muted-foreground">Issued</dt>
-              <dd className="tabular-nums">{formatInvoiceDate(view.issueDate)}</dd>
+              <dd className="tabular-nums">{formatInvoiceDate(view.issueDate, locale)}</dd>
             </div>
             {view.dueDate && (
               <div className="flex justify-end gap-3">
                 <dt className="text-muted-foreground">Due</dt>
-                <dd className="tabular-nums">{formatInvoiceDate(view.dueDate)}</dd>
+                <dd className="tabular-nums">{formatInvoiceDate(view.dueDate, locale)}</dd>
               </div>
             )}
           </dl>
@@ -85,18 +82,18 @@ export function InvoiceDocument({ view, className }: { view: InvoiceView; classN
             {formatPartyAddress(client).map((line) => (
               <p key={line}>{line}</p>
             ))}
-            {client.gstin && <p className="font-mono text-foreground">GSTIN {client.gstin}</p>}
+            {client.tax_id && <p className="font-mono text-foreground">Tax ID {client.tax_id}</p>}
           </div>
         </div>
 
         <div className="sm:text-right">
           <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
-            Place of supply
+            Billed from
           </p>
           <p className="mt-2 font-medium">
-            {view.placeOfSupplyStateCode} — {stateName(view.placeOfSupplyStateCode) || 'Not set'}
+            {countryName(business.country_code) || 'Not set'}
           </p>
-          <p className="mt-1 text-xs text-muted-foreground">{treatmentLabel(view)}</p>
+          <p className="mt-1 text-xs text-muted-foreground">Currency {view.currency}</p>
         </div>
       </section>
 
@@ -106,7 +103,7 @@ export function InvoiceDocument({ view, className }: { view: InvoiceView; classN
             <th className="px-8 py-2.5 font-medium">Description</th>
             <th className="py-2.5 pr-4 text-right font-medium">Qty</th>
             <th className="py-2.5 pr-4 text-right font-medium">Rate</th>
-            {isTaxInvoice && <th className="py-2.5 pr-4 text-right font-medium">GST</th>}
+            <th className="py-2.5 pr-4 text-right font-medium">Tax</th>
             <th className="py-2.5 pr-8 text-right font-medium">Amount</th>
           </tr>
         </thead>
@@ -123,7 +120,6 @@ export function InvoiceDocument({ view, className }: { view: InvoiceView; classN
                 <td className="px-8 py-3">
                   <p className="font-medium text-foreground">{line.description || 'Untitled item'}</p>
                   <p className="mt-0.5 space-x-2 font-mono text-[10px] text-muted-foreground">
-                    {line.hsnSac && <span>HSN/SAC {line.hsnSac}</span>}
                     {line.discountPercent > 0 && <span>−{line.discountPercent}% discount</span>}
                   </p>
                 </td>
@@ -131,15 +127,13 @@ export function InvoiceDocument({ view, className }: { view: InvoiceView; classN
                   {line.quantity} {line.unit}
                 </td>
                 <td className="py-3 pr-4 text-right font-mono tabular-nums">
-                  {formatPaisePlain(Math.round(line.rate * 100))}
+                  {formatPaisePlain(Math.round(line.rate * 100), locale)}
                 </td>
-                {isTaxInvoice && (
-                  <td className="py-3 pr-4 text-right tabular-nums text-muted-foreground">
-                    {line.gstRate}%
-                  </td>
-                )}
+                <td className="py-3 pr-4 text-right tabular-nums text-muted-foreground">
+                  {line.taxRate}%
+                </td>
                 <td className="py-3 pr-8 text-right font-mono tabular-nums">
-                  {formatPaisePlain(line.taxablePaise)}
+                  {formatPaisePlain(line.taxableMinor, locale)}
                 </td>
               </tr>
             ))
@@ -165,35 +159,20 @@ export function InvoiceDocument({ view, className }: { view: InvoiceView; classN
         </div>
 
         <dl className="w-full max-w-[16rem] space-y-1.5 text-xs">
-          <Total label="Subtotal" value={formatPaisePlain(computed.subtotalPaise)} />
-          {computed.discountTotalPaise > 0 && (
-            <Total label="Discount" value={`−${formatPaisePlain(computed.discountTotalPaise)}`} />
+          <Total label="Subtotal" value={formatPaisePlain(computed.subtotalMinor, locale)} />
+          {computed.discountTotalMinor > 0 && (
+            <Total label="Discount" value={`−${formatPaisePlain(computed.discountTotalMinor, locale)}`} />
           )}
-          <Total label="Taxable value" value={formatPaisePlain(computed.taxableTotalPaise)} />
+          <Total label="Taxable value" value={formatPaisePlain(computed.taxableTotalMinor, locale)} />
 
-          {computed.cgstTotalPaise > 0 && (
-            <Total label="CGST" value={formatPaisePlain(computed.cgstTotalPaise)} />
-          )}
-          {computed.sgstTotalPaise > 0 && (
-            <Total label="SGST" value={formatPaisePlain(computed.sgstTotalPaise)} />
-          )}
-          {showIgst && computed.igstTotalPaise > 0 && (
-            <Total label="IGST" value={formatPaisePlain(computed.igstTotalPaise)} />
-          )}
-          {computed.cessTotalPaise > 0 && (
-            <Total label="Cess" value={formatPaisePlain(computed.cessTotalPaise)} />
-          )}
-          {computed.roundOffPaise !== 0 && (
-            <Total
-              label="Round off"
-              value={`${computed.roundOffPaise > 0 ? '+' : '−'}${formatPaisePlain(Math.abs(computed.roundOffPaise))}`}
-            />
+          {computed.taxTotalMinor > 0 && (
+            <Total label="Tax" value={formatPaisePlain(computed.taxTotalMinor, locale)} />
           )}
 
           <div className="!mt-3 flex items-baseline justify-between border-t border-border pt-3">
             <dt className="text-sm font-medium">Total</dt>
             <dd className="font-mono text-lg font-semibold tabular-nums">
-              {formatPaise(computed.totalPaise, view.currency)}
+              {formatPaise(computed.totalMinor, view.currency, locale)}
             </dd>
           </div>
 
@@ -202,12 +181,6 @@ export function InvoiceDocument({ view, className }: { view: InvoiceView; classN
           </p>
         </dl>
       </section>
-
-      {(noTaxCollected || computed.reverseCharge) && (
-        <p className="border-t border-border px-8 py-4 text-[10px] leading-relaxed text-muted-foreground">
-          {declaration(view)}
-        </p>
-      )}
 
       {business.signature_url && (
         <div className="flex justify-end border-t border-border px-8 py-6">
@@ -238,7 +211,7 @@ function PaymentDetails({ view }: { view: InvoiceView }) {
   if (!payment) return null
 
   const hasBank = payment.bank_name || payment.account_number
-  if (!hasBank && !payment.upi_id) return null
+  if (!hasBank) return null
 
   return (
     <div>
@@ -249,40 +222,8 @@ function PaymentDetails({ view }: { view: InvoiceView }) {
         {payment.account_number && (
           <p className="font-mono">A/C {payment.account_number}</p>
         )}
-        {payment.ifsc && <p className="font-mono">IFSC {payment.ifsc}</p>}
-        {payment.upi_id && <p className="font-mono">UPI {payment.upi_id}</p>}
+        {payment.routing_number && <p className="font-mono">Routing {payment.routing_number}</p>}
       </div>
     </div>
   )
-}
-
-function treatmentLabel(view: InvoiceView): string {
-  switch (view.computed.treatment) {
-    case 'intra_state':
-      return 'Intra-state supply — CGST + SGST'
-    case 'inter_state':
-      return 'Inter-state supply — IGST'
-    case 'export':
-      return 'Export — zero rated'
-    case 'unregistered':
-      return 'Supplier not registered for GST'
-  }
-}
-
-/**
- * The mandatory declaration when no tax is collected. Which sentence applies
- * depends on WHY it's zero, and getting the wrong one on an invoice is the kind
- * of thing a client's accountant sends back.
- */
-function declaration(view: InvoiceView): string {
-  if (view.computed.reverseCharge) {
-    return 'Tax is payable on reverse charge basis by the recipient under Section 9(3)/9(4) of the CGST Act.'
-  }
-  if (view.computed.treatment === 'export') {
-    return 'Supply meant for export under Letter of Undertaking without payment of integrated tax.'
-  }
-  if (view.computed.treatment === 'unregistered') {
-    return 'The supplier is not registered under GST. This is a Bill of Supply and no tax is charged.'
-  }
-  return ''
 }

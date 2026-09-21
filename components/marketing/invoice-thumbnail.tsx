@@ -5,8 +5,8 @@ import { cn } from '@/lib/utils'
  *
  * Deliberately hand-built rather than a screenshot: it stays crisp at any size,
  * follows the theme into dark mode, and costs no image bytes. The numbers are a
- * real intra-state example — ₹92,000 taxable at 18% splitting into 9% CGST and
- * 9% SGST — so anyone who knows GST can sanity-check it at a glance.
+ * real example — $92,000 taxable at 18% — so anyone can sanity-check it at
+ * a glance.
  */
 export function InvoiceThumbnail({ className }: { className?: string }) {
   return (
@@ -19,15 +19,15 @@ export function InvoiceThumbnail({ className }: { className?: string }) {
       <div className="flex items-start justify-between border-b border-border px-7 py-6">
         <div>
           <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
-            Tax Invoice
+            Invoice
           </p>
           <p className="mt-1.5 text-lg font-semibold tracking-tight">Umbrella Design Studio</p>
           <p className="mt-0.5 font-mono text-[11px] text-muted-foreground">
-            GSTIN 27AAPFU0939F1ZV
+            Austin, TX
           </p>
         </div>
         <div className="text-right">
-          <p className="font-mono text-sm font-medium">INV/26-27/0042</p>
+          <p className="font-mono text-sm font-medium">INV-0042</p>
           <p className="mt-1 text-[11px] text-muted-foreground">16 Aug 2026</p>
         </div>
       </div>
@@ -35,15 +35,15 @@ export function InvoiceThumbnail({ className }: { className?: string }) {
       <div className="grid grid-cols-2 gap-6 border-b border-border px-7 py-5 text-[11px]">
         <div>
           <p className="font-medium uppercase tracking-[0.12em] text-muted-foreground">Bill to</p>
-          <p className="mt-1.5 text-sm font-medium text-foreground">Kadam Retail Pvt Ltd</p>
-          <p className="mt-0.5 text-muted-foreground">Pune, Maharashtra</p>
+          <p className="mt-1.5 text-sm font-medium text-foreground">Acme Retail LLC</p>
+          <p className="mt-0.5 text-muted-foreground">Dallas, TX</p>
         </div>
         <div>
           <p className="font-medium uppercase tracking-[0.12em] text-muted-foreground">
-            Place of supply
+            Currency
           </p>
-          <p className="mt-1.5 text-sm font-medium text-foreground">27 — Maharashtra</p>
-          <p className="mt-0.5 text-muted-foreground">Intra-state supply</p>
+          <p className="mt-1.5 text-sm font-medium text-foreground">USD</p>
+          <p className="mt-0.5 text-muted-foreground">United States</p>
         </div>
       </div>
 
@@ -51,24 +51,23 @@ export function InvoiceThumbnail({ className }: { className?: string }) {
         <thead>
           <tr className="border-b border-border text-left text-muted-foreground">
             <th className="px-7 py-2.5 font-medium">Description</th>
-            <th className="py-2.5 pr-3 text-right font-medium">GST</th>
+            <th className="py-2.5 pr-3 text-right font-medium">Tax</th>
             <th className="py-2.5 pr-7 text-right font-medium">Amount</th>
           </tr>
         </thead>
         <tbody className="text-foreground">
-          <Row label="Brand identity system" hsn="998912" gst="18%" amount="60,000.00" />
-          <Row label="Website design, 8 screens" hsn="998314" gst="18%" amount="32,000.00" />
+          <Row label="Brand identity system" tax="18%" amount="60,000.00" />
+          <Row label="Website design, 8 screens" tax="18%" amount="32,000.00" />
         </tbody>
       </table>
 
       <div className="border-t border-border px-7 py-5">
         <dl className="ml-auto w-full max-w-[15rem] space-y-1.5 text-[11px]">
           <Total label="Taxable value" value="92,000.00" />
-          <Total label="CGST @ 9%" value="8,280.00" />
-          <Total label="SGST @ 9%" value="8,280.00" />
+          <Total label="Tax @ 18%" value="16,560.00" />
           <div className="!mt-3 flex items-baseline justify-between border-t border-border pt-3">
             <dt className="text-sm font-medium">Total</dt>
-            <dd className="font-mono text-base font-semibold tabular-nums">₹1,08,560.00</dd>
+            <dd className="font-mono text-base font-semibold tabular-nums">$108,560.00</dd>
           </div>
         </dl>
       </div>
@@ -78,22 +77,19 @@ export function InvoiceThumbnail({ className }: { className?: string }) {
 
 function Row({
   label,
-  hsn,
-  gst,
+  tax,
   amount,
 }: {
   label: string
-  hsn: string
-  gst: string
+  tax: string
   amount: string
 }) {
   return (
     <tr className="border-b border-border/60 last:border-0">
       <td className="px-7 py-3">
         <span className="block font-medium">{label}</span>
-        <span className="font-mono text-[10px] text-muted-foreground">SAC {hsn}</span>
       </td>
-      <td className="py-3 pr-3 text-right tabular-nums text-muted-foreground">{gst}</td>
+      <td className="py-3 pr-3 text-right tabular-nums text-muted-foreground">{tax}</td>
       <td className="py-3 pr-7 text-right font-mono tabular-nums">{amount}</td>
     </tr>
   )

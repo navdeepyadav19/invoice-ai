@@ -1,8 +1,8 @@
 # Invoice-AI
 
-GST-compliant invoicing for Indian merchants and freelancers. Create an invoice
-signed in or as a guest, get a PDF and a shareable link, and email it to your
-client.
+Global invoicing for freelancers and small businesses, Stripe-shaped. Pick your
+country and currency, create an invoice signed in or as a guest, get a PDF and
+a shareable link, and email it to your client.
 
 ## Live
 
@@ -94,17 +94,26 @@ app/(marketing)   landing page, guest entry point
 app/(auth)        login, signup, check-email, password reset
 app/(setup)       onboarding wizard, guest account claim
 app/(app)         dashboard, invoice builder, settings — gated
-lib/gst.ts        the tax engine (pure, unit tested)
-lib/money.ts      integer-paise arithmetic, amount in words
-lib/validators.ts Zod schemas incl. GSTIN checksum
+lib/tax.ts        the tax engine (pure, unit tested)
+lib/money.ts      integer minor-unit arithmetic, amount in words
+lib/validators.ts Zod schemas (internal) + Stripe-shaped wire schemas
+lib/catalog/      products & prices (prod_… / price_… ids)
 supabase/         schema, RLS, and the SQL functions
 ```
 
-**The tax engine is the load-bearing part.** `lib/gst.ts` decides CGST+SGST vs
-IGST from the supplier's state and the place of supply, computes in integer
-paise, and is the same code the browser runs for the live preview and the server
-runs before persisting. The server always recomputes and never trusts totals
-from the client.
+**The tax engine is the load-bearing part.** `lib/tax.ts` charges a free-form
+exclusive rate per line, computes in integer minor units, and is the same code
+the browser runs for the live preview and the server runs before persisting.
+The server always recomputes and never trusts totals from the client.
+
+**Products & prices work like Stripe.** A product names what you sell; a price
+is one way to charge for it (`unit_amount` in minor units, one-off or
+recurring). Invoice lines name a `price_…` or carry ad-hoc amounts.
+
+**The API is Stripe-shaped.** `customers`, `products`, `prices`, `invoices`
+(`draft → open → paid`, `void`), `invoice-items`, `finalize` / `pay` / `void`
+lifecycle, `cus_…` / `in_…` / `ii_…` ids — with this API's envelope
+(`{ data }`), Bearer keys, cursor pagination, and problem+json errors.
 
 **Tenant isolation is RLS, not application code.** Every table keys off
 `owner_id = auth.uid()`. Guests get a real `auth.uid()` from anonymous sign-in,
@@ -120,44 +129,24 @@ column. An invoice is not overdue *during* its due date, only after it.
 
 ## Onboarding
 
-Two steps, and the first one is fifteen characters:
+Two steps:
 
-1. **Who are you?** "Do you have a GSTIN?" → enter it → we call the Sandbox GST
-   API and prefill legal name, trade name, address, PIN, state and business type.
-   No GSTIN? Enter a PAN and state and we try that; if nothing comes back (which
-   is normal for a business that isn't registered) a short manual form appears.
-2. **How do you get paid?** Account name, number, IFSC. Skippable.
+1. **Who are you?** Pick your country — pre-selected from your IP, changeable —
+   and the currency follows it. Add your address and an optional tax ID
+   (VAT, EIN, whatever your country uses).
+2. **How do you get paid?** Account name, number, routing code. Skippable.
 
-Everything else — logo, signature, UPI, payment terms, default notes, invoice
+Everything else — logo, signature, payment terms, default notes, invoice
 numbering — has a sensible default and lives in **Settings → Business** instead.
 None of it is worth standing between someone and their first invoice.
-
-### Why "do you have a GSTIN?" and not "what type of business are you?"
-
-GST registration in India is turnover-based, not entity-type-based: a sole trader
-over ₹40L has a GSTIN, a small Pvt Ltd may not. And the PAN endpoint only returns
-GSTINs for businesses that are *already registered*, so routing sole traders down
-a PAN path returns `NOGSTIN` for exactly the people it was meant to help.
-
-Asking about the GSTIN directly means the one question that actually predicts
-whether we can prefill. Business type then comes free — the registry returns it
-in the `ctb` field, so we never ask.
-
-### Configuring GST lookup
-
-Set `SANDBOX_API_KEY` and `SANDBOX_API_SECRET`. Without them the lookup step is
-skipped and users type their details, so onboarding never hard-depends on a
-third party being up. Three gotchas are handled in `lib/sandbox/client.ts`:
-the token is **not** a Bearer token, failures arrive as **HTTP 200** with an
-error body, and the PAN endpoint needs a **`state_code` query param**.
 
 ## AI invoice creation
 
 Click "Use AI" and a chat panel opens above the form. Type or dictate what
-you're billing for — the model parses it, shows a **summary you must confirm**
-(client, line items, totals, tax note), and only touches the form once you
-click "Fill this in." Set `OPENAI_API_KEY` to enable it; without the key the
-button doesn't render.
+you're billing for — say "Invoice Acme $45,000 for brand design" — the model
+parses it, shows a **summary you must confirm** (client, line items, totals,
+tax note), and only touches the form once you click "Fill this in."
+Set `OPENAI_API_KEY` to enable it; without the key the button doesn't render.
 
 - **Voice** → `MediaRecorder` → `/api/ai/transcribe` → Whisper.
 - **Text** → `/api/ai/parse-invoice` → a chat model with a Zod schema.
@@ -165,10 +154,9 @@ button doesn't render.
   form after the user accepts the summary; the normal autosave takes over
   from there.
 
-Two things the model is deliberately not trusted with, both in
+One thing the model is deliberately not trusted with, in
 `lib/ai/normalise.ts`: converting a tax-inclusive amount back to a pre-tax rate
-(arithmetic), and turning a spoken state name into a GST state code (a lookup it
-would hallucinate, and a wrong code silently flips CGST/SGST to IGST).
+(arithmetic).
 
 ## Emailing invoices
 
@@ -183,8 +171,7 @@ Until a domain is verified, Resend only delivers to your own address from
 
 ## Not built yet
 
-- Payment links (Stripe / Razorpay) and marking paid from a webhook
-- Recurring invoices, credit notes, e-invoice IRN / e-way bill
-- A saved client and line-item library for autofill
-- Logo and signature upload UI (the storage bucket and policies exist; the
-  invoice renders them when `logo_url` / `signature_url` are set)
+- Payment links and marking paid from a webhook
+- Recurring billing runs (intervals are stored on prices; nothing auto-bills yet)
+- Credit notes, subscriptions with trials/proration
+- A catalog picker in the invoice builder (the catalog is API-first today)
