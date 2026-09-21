@@ -142,14 +142,17 @@ None of it is worth standing between someone and their first invoice.
 
 ## AI invoice creation
 
-Type or dictate "Invoice Acme $45,000 for brand design" and the
-builder fills itself in. Set `OPENAI_API_KEY` to enable it; without the key the
-prompt box simply doesn't render.
+Click "Use AI" and a chat panel opens above the form. Type or dictate what
+you're billing for — say "Invoice Acme $45,000 for brand design" — the model
+parses it, shows a **summary you must confirm** (client, line items, totals,
+tax note), and only touches the form once you click "Fill this in."
+Set `OPENAI_API_KEY` to enable it; without the key the button doesn't render.
 
 - **Voice** → `MediaRecorder` → `/api/ai/transcribe` → Whisper.
-- **Text** → `/api/ai/parse-invoice` → `gpt-4o-mini` with a Zod schema.
-- **Nothing is saved.** The parsed fields land in the form and the user reviews
-  them; the normal autosave takes over from there.
+- **Text** → `/api/ai/parse-invoice` → a chat model with a Zod schema.
+- **Nothing is saved without confirmation.** The parsed fields only reach the
+  form after the user accepts the summary; the normal autosave takes over
+  from there.
 
 One thing the model is deliberately not trusted with, in
 `lib/ai/normalise.ts`: converting a tax-inclusive amount back to a pre-tax rate
