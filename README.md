@@ -8,7 +8,7 @@ a shareable link, and email it to your client.
 
 | | |
 |---|---|
-| **App** | https://invoice-ai-horizonpay.vercel.app |
+| **App** | https://invoice.horizonpay.co |
 | Vercel project | `horizonpay/invoice-ai` |
 | Supabase project | `invoice-ai` — ref `pdsoufmhwnxkzxfigaxp`, region `ap-south-1` (Mumbai) |
 | Supabase dashboard | https://supabase.com/dashboard/project/pdsoufmhwnxkzxfigaxp |

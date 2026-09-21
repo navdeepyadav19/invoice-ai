@@ -149,7 +149,7 @@ function main(): void {
       },
     ],
     variable: [
-      { key: 'base_url', value: 'https://invoice-ai-horizonpay.vercel.app/api/v1' },
+      { key: 'base_url', value: 'https://invoice.horizonpay.co/api/v1' },
       { key: 'invoice_id', value: '' },
       { key: 'customer_id', value: '' },
       { key: 'product_id', value: '' },
@@ -165,7 +165,7 @@ function main(): void {
   write(`${OUT_DIR}/invoice-ai.postman_environment.json`, {
     name: 'Invoice-AI — local',
     values: [
-      { key: 'base_url', value: 'https://invoice-ai-horizonpay.vercel.app/api/v1', enabled: true },
+      { key: 'base_url', value: 'https://invoice.horizonpay.co/api/v1', enabled: true },
       // `secret` keeps it out of exports, so a shared environment file cannot
       // leak a working credential.
       { key: 'api_key', value: '', type: 'secret', enabled: true },
