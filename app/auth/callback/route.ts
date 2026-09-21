@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
   // Only ever redirect to a path on this origin — an open redirect here would
   // let someone email a "confirm your account" link that lands on their site.
   const rawNext = searchParams.get('next') ?? '/dashboard'
-  const next = rawNext.startsWith('/') ? rawNext : '/dashboard'
+  const next = rawNext.startsWith('/') && !rawNext.startsWith('//') ? rawNext : '/dashboard'
 
   const supabase = await createClient()
 

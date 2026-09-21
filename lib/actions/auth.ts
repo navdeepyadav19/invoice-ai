@@ -78,7 +78,8 @@ export async function signInAction(
   await mergePendingGuestData()
 
   const next = String(formData.get('next') ?? '/dashboard')
-  redirect(next.startsWith('/') ? next : '/dashboard')
+  // '//evil.com' also starts with '/', and browsers treat it as another host.
+  redirect(next.startsWith('/') && !next.startsWith('//') ? next : '/dashboard')
 }
 
 /**
