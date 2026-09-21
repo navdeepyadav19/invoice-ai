@@ -33,18 +33,22 @@ const SECTIONS = [
   },
 ] as const
 
+/**
+ * Horizontal section tabs for small screens only. On md+ the app sidebar's
+ * Settings group links to the same pages, so showing both would just repeat it.
+ */
 export function SettingsNav() {
   const pathname = usePathname()
 
   return (
-    <nav aria-label="Settings sections" className="lg:w-56 lg:shrink-0">
-      <ul className="flex gap-1 overflow-x-auto pb-2 lg:flex-col lg:overflow-visible lg:pb-0">
+    <nav aria-label="Settings sections" className="md:hidden">
+      <ul className="flex gap-1 overflow-x-auto pb-2">
         {SECTIONS.map((section) => {
           const active = pathname === section.href
           const Icon = section.icon
 
           return (
-            <li key={section.href} className="shrink-0 lg:shrink">
+            <li key={section.href} className="shrink-0">
               <Link
                 href={section.href}
                 aria-current={active ? 'page' : undefined}

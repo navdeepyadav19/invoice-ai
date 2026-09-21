@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { FilePlus2, FileText } from 'lucide-react'
 
+import { PageContainer, PageHeader } from '@/components/app/page-header'
 import { StatusBadge } from '@/components/app/status-badge'
 import { Button } from '@/components/ui/button'
 import { createClient } from '@/lib/supabase/server'
@@ -41,22 +42,21 @@ export default async function DashboardPage() {
   const overdueCount = rows.filter((i) => i.displayStatus === 'overdue').length
 
   return (
-    <div className="mx-auto w-full max-w-6xl px-6 py-10">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Invoices</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {rows.length === 0
-              ? 'Nothing here yet.'
-              : `${rows.length} invoice${rows.length === 1 ? '' : 's'}`}
-          </p>
-        </div>
-
-        <Button nativeButton={false} render={<Link href="/invoices/new" />}>
-          <FilePlus2 className="size-4" />
-          New invoice
-        </Button>
-      </div>
+    <PageContainer>
+      <PageHeader
+        title="Invoices"
+        description={
+          rows.length === 0
+            ? 'Nothing here yet.'
+            : `${rows.length} invoice${rows.length === 1 ? '' : 's'}`
+        }
+        actions={
+          <Button nativeButton={false} render={<Link href="/invoices/new" />}>
+            <FilePlus2 className="size-4" />
+            New invoice
+          </Button>
+        }
+      />
 
       {rows.length > 0 && (
         <div className="mt-8 grid gap-4 sm:grid-cols-2">
@@ -76,7 +76,7 @@ export default async function DashboardPage() {
       <div className="mt-8">
         {rows.length === 0 ? <EmptyState /> : <InvoiceTable invoices={rows} />}
       </div>
-    </div>
+    </PageContainer>
   )
 }
 

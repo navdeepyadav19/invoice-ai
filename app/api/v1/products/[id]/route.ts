@@ -2,7 +2,7 @@ import { json, readJson, withApi } from '@/lib/api/handler'
 import { parseWire } from '@/lib/api/validate'
 import { serializeProduct } from '@/lib/api/serialize'
 import * as products from '@/lib/services/products'
-import { productSchema } from '@/lib/validators'
+import { productUpdateSchema } from '@/lib/validators'
 
 type Params = { id: string }
 
@@ -15,7 +15,7 @@ export const GET = withApi<Params>({ scope: 'products:read' }, async (ctx, _requ
 /** PATCH /api/v1/products/{id} */
 export const PATCH = withApi<Params>({ scope: 'products:write' }, async (ctx, request, route) => {
   const { id } = await route.params
-  const body = parseWire(productSchema.partial(), (await readJson(request)) as unknown)
+  const body = parseWire(productUpdateSchema, (await readJson(request)) as unknown)
 
   return json({ data: serializeProduct(await products.update(ctx, id, body)) })
 })

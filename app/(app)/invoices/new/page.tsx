@@ -4,6 +4,7 @@ import { InvoiceBuilder } from '@/components/invoice/builder'
 import { StepBusiness } from '@/components/onboarding/step-business'
 import { saveBusinessSettings } from '@/lib/actions/business'
 import { getPrimaryBusiness, requireUser } from '@/lib/queries'
+import { pickerAvailability } from '@/lib/catalog/availability'
 
 export const metadata: Metadata = { title: 'New invoice' }
 
@@ -32,5 +33,11 @@ export default async function NewInvoicePage() {
     )
   }
 
-  return <InvoiceBuilder business={business} aiEnabled={Boolean(process.env.OPENAI_API_KEY)} />
+  return (
+    <InvoiceBuilder
+      business={business}
+      aiEnabled={Boolean(process.env.OPENAI_API_KEY)}
+      pickers={await pickerAvailability()}
+    />
+  )
 }

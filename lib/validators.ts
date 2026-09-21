@@ -163,34 +163,89 @@ export type InvoiceInput = z.infer<typeof invoiceSchema>
  * Recurring is a data model only in this phase — nothing auto-bills yet.
  */
 
-export const productSchema = z.object({
+/**
+ * Update schemas are NOT `createSchema.partial()`.
+ *
+ * `.partial()` makes a key optional but keeps its `.default()`, so an omitted
+ * key is filled with the create-time default: a PATCH of `{ nickname }` would
+ * come out as `{ nickname, type: 'one_time', active: true, … }` and silently
+ * turn a recurring price into a one-off (or un-archive a product, or wipe its
+ * images). Each resource therefore declares its fields once WITHOUT defaults;
+ * the create schema layers the defaults on, the update schema makes the plain
+ * fields partial. Omitted means "leave it alone".
+ *
+ * Updates also accept `null` / `""` on clearable text so a description or
+ * nickname can actually be removed (`optionalTrimmed` turns "" into "not
+ * sent", which is right on create and wrong on update).
+ */
+const clearableTrimmed = z
+  .string()
+  .trim()
+  .nullable()
+  .optional()
+  .transform((v) => (v === '' ? null : v))
+
+const productFields = {
   name: z.string().trim().min(1, 'Name your product').max(200),
   description: optionalTrimmed,
-  images: z.array(z.string().trim().url('Enter a valid image URL')).max(8).default([]),
-  active: z.boolean().default(true),
+  images: z.array(z.string().trim().url('Enter a valid image URL')).max(8),
+  active: z.boolean(),
+}
+
+export const productSchema = z.object({
+  ...productFields,
+  images: productFields.images.default([]),
+  active: productFields.active.default(true),
 })
 
 export type ProductInput = z.infer<typeof productSchema>
 
+/** PATCH a product: omitted fields are left untouched (no defaults). */
+export const productUpdateSchema = z
+  .object({ ...productFields, description: clearableTrimmed })
+  .partial()
+
+export type ProductUpdateInput = z.input<typeof productUpdateSchema>
+
 export const RECURRING_INTERVALS = ['day', 'week', 'month', 'year'] as const
+
+const currencyField = z
+  .string()
+  .trim()
+  .toUpperCase()
+  .length(3, 'Pick a currency')
+  .regex(/^[A-Z]{3}$/, 'Pick a currency')
+
+const priceFields = {
+  /** The parent product: UUID or `prod_…` public ID. */
+  product: z.string().trim().min(1, 'Pick a product'),
+  nickname: optionalTrimmed,
+  unit_amount: z.coerce.number().min(0, 'Amount cannot be negative'),
+  currency: currencyField,
+  type: z.enum(['one_time', 'recurring']),
+  recurring_interval: z.enum(RECURRING_INTERVALS).optional(),
+  interval_count: z.coerce.number().int().min(1).max(52),
+  tax_rate: z.coerce.number().min(0).max(100),
+  active: z.boolean(),
+}
+
+/**
+ * PATCH a price: omitted fields are left untouched. The one_time/recurring
+ * consistency check needs the stored row, so the service adds it.
+ */
+export const priceUpdateSchema = z
+  .object({ ...priceFields, nickname: clearableTrimmed })
+  .partial()
+
+export type PriceUpdateInput = z.input<typeof priceUpdateSchema>
 
 export const priceSchema = z
   .object({
-    /** The parent product: UUID or `prod_…` public ID. */
-    product: z.string().trim().min(1, 'Pick a product'),
-    nickname: optionalTrimmed,
-    unit_amount: z.coerce.number().min(0, 'Amount cannot be negative'),
-    currency: z
-      .string()
-      .trim()
-      .toUpperCase()
-      .length(3, 'Pick a currency')
-      .regex(/^[A-Z]{3}$/, 'Pick a currency'),
-    type: z.enum(['one_time', 'recurring']).default('one_time'),
-    recurring_interval: z.enum(RECURRING_INTERVALS).optional(),
-    interval_count: z.coerce.number().int().min(1).max(52).default(1),
-    tax_rate: z.coerce.number().min(0).max(100).default(0),
-    active: z.boolean().default(true),
+    ...priceFields,
+    type: priceFields.type.default('one_time'),
+    interval_count: priceFields.interval_count.default(1),
+    tax_rate: priceFields.tax_rate.default(0),
+    active: priceFields.active.default(true),
   })
   .superRefine((value, ctx) => {
     if (value.type === 'recurring' && !value.recurring_interval) {
@@ -280,24 +335,33 @@ const recurringWireSchema = z.object({
   interval_count: z.coerce.number().int().min(1).max(52).default(1),
 })
 
-export const priceWireSchema = z.object({
+const priceWireFields = {
   product: z.string().trim().min(1, 'Pick a product'),
   nickname: optionalTrimmed,
   /** Minor units, like Stripe: 5000 is $50.00. */
   unit_amount: z.coerce.number().int('Use whole minor units').min(0, 'Amount cannot be negative'),
-  currency: z
-    .string()
-    .trim()
-    .toUpperCase()
-    .length(3, 'Pick a currency')
-    .regex(/^[A-Z]{3}$/, 'Pick a currency'),
-  type: z.enum(['one_time', 'recurring']).default('one_time'),
+  currency: currencyField,
+  type: z.enum(['one_time', 'recurring']),
   recurring: recurringWireSchema.optional(),
-  tax_rate: z.coerce.number().min(0).max(100).default(0),
-  active: z.boolean().default(true),
+  tax_rate: z.coerce.number().min(0).max(100),
+  active: z.boolean(),
+}
+
+export const priceWireSchema = z.object({
+  ...priceWireFields,
+  type: priceWireFields.type.default('one_time'),
+  tax_rate: priceWireFields.tax_rate.default(0),
+  active: priceWireFields.active.default(true),
 })
 
 export type PriceWireInput = z.infer<typeof priceWireSchema>
+
+/** PATCH /v1/prices/{id}: omitted fields are left untouched (see productUpdateSchema). */
+export const priceWireUpdateSchema = z
+  .object({ ...priceWireFields, nickname: clearableTrimmed })
+  .partial()
+
+export type PriceWireUpdateInput = z.infer<typeof priceWireUpdateSchema>
 
 export function priceWireToInput(input: PriceWireInput): PriceInput {
   return {
@@ -313,9 +377,10 @@ export function priceWireToInput(input: PriceWireInput): PriceInput {
   }
 }
 
-export function priceWirePartialToInput(input: Partial<PriceWireInput>): Partial<PriceInput> {
-  const out: Partial<PriceInput> = {}
-  if (input.nickname !== undefined) out.nickname = input.nickname ?? undefined
+export function priceWirePartialToInput(input: PriceWireUpdateInput): PriceUpdateInput {
+  const out: PriceUpdateInput = {}
+  // null clears the nickname, like Stripe's `nickname: ""`.
+  if (input.nickname !== undefined) out.nickname = input.nickname
   if (input.unit_amount !== undefined) out.unit_amount = input.unit_amount / 100
   if (input.currency !== undefined) out.currency = input.currency
   if (input.type !== undefined) out.type = input.type
