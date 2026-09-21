@@ -3,7 +3,7 @@ import { parseWire } from '@/lib/api/validate'
 import { serializePrice } from '@/lib/api/serialize'
 import * as prices from '@/lib/services/prices'
 import { mapPublicIds } from '@/lib/services/products'
-import { priceWireSchema, priceWirePartialToInput, type PriceWireInput } from '@/lib/validators'
+import { priceWireUpdateSchema, priceWirePartialToInput } from '@/lib/validators'
 
 type Params = { id: string }
 
@@ -19,7 +19,7 @@ export const GET = withApi<Params>({ scope: 'products:read' }, async (ctx, _requ
 /** PATCH /api/v1/prices/{id} — the parent product cannot change. */
 export const PATCH = withApi<Params>({ scope: 'products:write' }, async (ctx, request, route) => {
   const { id } = await route.params
-  const wire = parseWire(priceWireSchema.partial(), (await readJson(request)) as unknown) as Partial<PriceWireInput>
+  const wire = parseWire(priceWireUpdateSchema, (await readJson(request)) as unknown)
 
   const price = await prices.update(ctx, id, priceWirePartialToInput(wire))
   const productNames = await mapPublicIds(ctx, [price.product_id])

@@ -1,7 +1,12 @@
 import { requireScope, type AuthContext } from '@/lib/auth/context'
 import { fromPostgres, notFound, ServiceError } from '@/lib/services/errors'
 import { decodeCursor, encodeCursor, type Page } from '@/lib/services/pagination'
-import { productSchema, type ProductInput } from '@/lib/validators'
+import {
+  productSchema,
+  productUpdateSchema,
+  type ProductInput,
+  type ProductUpdateInput,
+} from '@/lib/validators'
 import { nextProductId, isProductId } from '@/lib/catalog/ids'
 import type { ProductRow } from '@/lib/database.types'
 
@@ -90,11 +95,13 @@ export async function create(ctx: AuthContext, input: ProductInput): Promise<Pro
 export async function update(
   ctx: AuthContext,
   id: string,
-  input: Partial<ProductInput>,
+  input: ProductUpdateInput,
 ): Promise<ProductRow> {
   requireScope(ctx, 'products:write')
 
-  const parsed = productSchema.partial().safeParse(input)
+  // Not productSchema.partial(): that would re-apply the create defaults
+  // (active: true, images: []) to every PATCH that omits them.
+  const parsed = productUpdateSchema.safeParse(input)
   if (!parsed.success) throw validationError(parsed.error)
 
   const existing = await get(ctx, id)
@@ -130,7 +137,8 @@ export async function restore(ctx: AuthContext, id: string): Promise<ProductRow>
   return setActive(ctx, id, true)
 }
 
-async function setActive(ctx: AuthContext, id: string, active: boolean): Promise<ProductRow> {  requireScope(ctx, 'products:write')
+async function setActive(ctx: AuthContext, id: string, active: boolean): Promise<ProductRow> {
+  requireScope(ctx, 'products:write')
 
   const existing = await get(ctx, id)
   if (existing.active === active) return existing
