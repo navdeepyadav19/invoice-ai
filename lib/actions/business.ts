@@ -6,7 +6,7 @@ import { createClient } from '@/lib/supabase/server'
 import { getPrimaryBusiness, requireUser } from '@/lib/queries'
 import { countryName } from '@/lib/locale/countries'
 import { businessSchema, numberingSchema, paymentDetailsSchema } from '@/lib/validators'
-import { toFieldErrors, type StepState } from '@/lib/form-state'
+import { toFieldErrors, withValues, type StepState } from '@/lib/form-state'
 
 /** Empty strings from an untouched input should be null in the database, not "". */
 function nullable(value: FormDataEntryValue | null): string | null {
@@ -82,15 +82,18 @@ export async function persistBusiness(formData: FormData): Promise<StepState> {
     ? await supabase.from('businesses').update(values).eq('id', existing.id)
     : await supabase.from('businesses').insert(values)
 
-  if (error) return { error: error.message }
+  if (error) return saveFailed(error, formData)
 
   revalidatePath('/settings/business')
+  // A guest fills this same form inline on /invoices/new; without this they
+  // see "Saved." but stay on the form instead of reaching the builder.
+  revalidatePath('/invoices/new')
   return { saved: true }
 }
 
 export async function persistPayment(formData: FormData): Promise<StepState> {
   const business = await getPrimaryBusiness()
-  if (!business) return { error: 'Add your business details first.' }
+  if (!business) return withValues({ error: 'Add your business details first.' }, formData)
 
   const parsed = paymentDetailsSchema.safeParse({
     bank_name: field(formData, 'bank_name'),
@@ -116,7 +119,7 @@ export async function persistPayment(formData: FormData): Promise<StepState> {
     })
     .eq('id', business.id)
 
-  if (error) return { error: error.message }
+  if (error) return saveFailed(error, formData)
 
   revalidatePath('/settings/business')
   return { saved: true }
@@ -124,7 +127,7 @@ export async function persistPayment(formData: FormData): Promise<StepState> {
 
 export async function persistNumbering(formData: FormData): Promise<StepState> {
   const business = await getPrimaryBusiness()
-  if (!business) return { error: 'Add your business details first.' }
+  if (!business) return withValues({ error: 'Add your business details first.' }, formData)
 
   const parsed = numberingSchema.safeParse({
     invoice_prefix: formData.get('invoice_prefix') || 'INV',
@@ -142,7 +145,7 @@ export async function persistNumbering(formData: FormData): Promise<StepState> {
     })
     .eq('id', business.id)
 
-  if (error) return { error: error.message }
+  if (error) return saveFailed(error, formData)
 
   revalidatePath('/settings/business')
   return { saved: true }
@@ -159,4 +162,18 @@ export async function savePaymentSettings(_prev: StepState, formData: FormData) 
 
 export async function saveNumberingSettings(_prev: StepState, formData: FormData) {
   return persistNumbering(formData)
+}
+
+/**
+ * Database errors ("Could not find the 'country_code' column…") mean nothing to
+ * the person filling the form, and leak schema details. Log the real one for us,
+ * show them something they can act on.
+ */
+function saveFailed(error: { message: string }, formData: FormData): StepState {
+  console.error('[save failed]', error.message)
+  // Echo the submission: a failed save must not wipe what they typed.
+  return withValues(
+    { error: "We couldn't save your details. Please try again in a moment." },
+    formData,
+  )
 }

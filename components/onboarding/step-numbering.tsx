@@ -4,6 +4,7 @@ import { useActionState, useState } from 'react'
 
 import { saveNumberingSettings } from '@/lib/actions/business'
 import type { StepState } from '@/lib/form-state'
+import { useSubmissionKey } from '@/lib/use-submission-key'
 import { FormError, FormSuccess } from '@/components/auth/form-error'
 import { Field } from '@/components/onboarding/field'
 import { StepFooter } from '@/components/onboarding/step-footer'
@@ -22,6 +23,9 @@ export function StepNumbering({
 }) {
   const [state, formAction] = useActionState<StepState, FormData>(action, {})
   const errors = state.fieldErrors ?? {}
+  // Both inputs are controlled, so they already survive React's post-action
+  // form reset; the key keeps this form consistent with the others.
+  const formKey = useSubmissionKey(state)
 
   const [prefix, setPrefix] = useState(business?.invoice_prefix ?? 'INV')
   const [start, setStart] = useState(String(business?.next_invoice_number ?? 1))
@@ -30,7 +34,7 @@ export function StepNumbering({
   const preview = `${prefix || 'INV'}-${padded}`
 
   return (
-    <form action={formAction} className="space-y-6">
+    <form key={formKey} action={formAction} className="space-y-6">
       <div className="grid gap-5 sm:grid-cols-2">
         <Field
           label="Prefix"

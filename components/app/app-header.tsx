@@ -3,6 +3,7 @@ import { FilePlus2, KeyRound, LayoutDashboard, LogOut, Settings, UserRound } fro
 
 import { signOutAction } from '@/lib/actions/auth'
 import { Wordmark } from '@/components/brand'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -13,7 +14,15 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 
-export function AppHeader({ email, isGuest }: { email: string | null; isGuest: boolean }) {
+export function AppHeader({
+  email,
+  isGuest,
+  emailUnverified = false,
+}: {
+  email: string | null
+  isGuest: boolean
+  emailUnverified?: boolean
+}) {
   return (
     <header className="sticky top-0 z-20 border-b border-border/70 bg-background/85 backdrop-blur">
       <div className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between gap-4 px-6">
@@ -50,8 +59,17 @@ export function AppHeader({ email, isGuest }: { email: string | null; isGuest: b
                 <UserRound className="size-4" />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
-                <DropdownMenuLabel className="truncate font-normal text-muted-foreground">
-                  {email ?? 'Signed in'}
+                <DropdownMenuLabel className="flex items-center gap-2 font-normal text-muted-foreground">
+                  <span className="truncate">{email ?? 'Signed in'}</span>
+                  {emailUnverified && (
+                    <Badge
+                      variant="outline"
+                      className="border-warning/40 text-warning"
+                      title="Check your inbox for the verification link"
+                    >
+                      Unverified
+                    </Badge>
+                  )}
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem render={<Link href="/settings/business" />}>

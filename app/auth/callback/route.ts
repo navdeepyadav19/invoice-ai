@@ -23,14 +23,22 @@ export async function GET(request: NextRequest) {
   // Only ever redirect to a path on this origin — an open redirect here would
   // let someone email a "confirm your account" link that lands on their site.
   const rawNext = searchParams.get('next') ?? '/dashboard'
-  const next = rawNext.startsWith('/') ? rawNext : '/dashboard'
+  const next = rawNext.startsWith('/') && !rawNext.startsWith('//') ? rawNext : '/dashboard'
 
   const supabase = await createClient()
 
   if (code) {
     const { error } = await supabase.auth.exchangeCodeForSession(code)
-    if (!error) return NextResponse.redirect(`${origin}${next}`)
-    return failure(origin, error.message)
+    if (error) return failure(origin, error.message)
+
+    // Google has already verified the address, so a Google sign-in counts as a
+    // verified email in our own tracking (profiles.email_verified_at). The
+    // function checks auth.identities itself — it trusts nothing we pass — and
+    // is a no-op for any other provider. A failure here must never block login.
+    const { error: syncError } = await supabase.rpc('sync_oauth_email_verification')
+    if (syncError) console.error('[auth/callback] oauth verification sync failed', syncError.message)
+
+    return NextResponse.redirect(`${origin}${next}`)
   }
 
   if (tokenHash && type) {

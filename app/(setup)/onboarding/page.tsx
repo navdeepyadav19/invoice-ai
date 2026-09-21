@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation'
 import { StepBank } from '@/components/onboarding/step-bank'
 import { StepBusiness } from '@/components/onboarding/step-business'
 import { Stepper } from '@/components/onboarding/stepper'
+import { saveBusinessStep } from '@/lib/actions/onboarding'
 import { countryFromRequest } from '@/lib/locale/geo'
 import { getPrimaryBusiness, getProfile, requireUser } from '@/lib/queries'
 
@@ -52,7 +53,7 @@ export default async function OnboardingPage() {
       </div>
 
       {step === 1 ? (
-        <StepBusiness business={business} detectedCountry={detectedCountry} />
+        <StepBusiness business={business} detectedCountry={detectedCountry} action={saveBusinessStep} />
       ) : (
         <StepBank business={business} />
       )}

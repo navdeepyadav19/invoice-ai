@@ -25,6 +25,8 @@ import {
 } from '@/lib/actions/webhooks'
 import { WEBHOOK_EVENTS, WEBHOOK_EVENT_LABELS } from '@/lib/webhooks/events'
 import type { WebhookDeliveryRow, WebhookEndpointRow } from '@/lib/database.types'
+import { keptValues } from '@/lib/form-state'
+import { useSubmissionKey } from '@/lib/use-submission-key'
 
 export function WebhooksManager({
   endpoints,
@@ -37,6 +39,10 @@ export function WebhooksManager({
     async (_previous, formData) => createWebhookAction(formData),
     {},
   )
+  // A failed add echoes the URL and ticked events back; a successful one
+  // doesn't, so the remounted form starts empty again.
+  const kept = keptValues(state.values)
+  const formKey = useSubmissionKey(state)
 
   return (
     <div className="space-y-10">
@@ -51,7 +57,7 @@ export function WebhooksManager({
           </p>
         </div>
 
-        <form action={formAction} className="space-y-6">
+        <form key={formKey} action={formAction} className="space-y-6">
           <div className="space-y-2">
             <Label htmlFor="webhook-url">URL</Label>
             <Input
@@ -59,6 +65,7 @@ export function WebhooksManager({
               name="url"
               type="url"
               placeholder="https://your-system.example/hooks/invoice-ai"
+              defaultValue={kept.text('url')}
               aria-invalid={Boolean(state.fieldErrors?.url)}
             />
             {state.fieldErrors?.url ? (
@@ -80,7 +87,12 @@ export function WebhooksManager({
             <div className="grid gap-2 sm:grid-cols-2">
               {WEBHOOK_EVENTS.map((event) => (
                 <label key={event} className="flex items-start gap-3 rounded-md border p-3">
-                  <Checkbox name="events" value={event} className="mt-0.5" />
+                  <Checkbox
+                    name="events"
+                    value={event}
+                    defaultChecked={kept.checked('events', event)}
+                    className="mt-0.5"
+                  />
                   <span className="min-w-0">
                     <span className="block text-sm">{WEBHOOK_EVENT_LABELS[event] ?? event}</span>
                     <code className="mt-0.5 block text-[11px] text-muted-foreground">{event}</code>

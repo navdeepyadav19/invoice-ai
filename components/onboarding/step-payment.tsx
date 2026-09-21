@@ -3,7 +3,8 @@
 import { useActionState } from 'react'
 
 import { savePaymentSettings } from '@/lib/actions/business'
-import type { StepState } from '@/lib/form-state'
+import { keptValues, type StepState } from '@/lib/form-state'
+import { useSubmissionKey } from '@/lib/use-submission-key'
 import { FormError, FormSuccess } from '@/components/auth/form-error'
 import { Field } from '@/components/onboarding/field'
 import { StepFooter } from '@/components/onboarding/step-footer'
@@ -27,20 +28,22 @@ export function StepPayment({
 }) {
   const [state, formAction] = useActionState<StepState, FormData>(action, {})
   const errors = state.fieldErrors ?? {}
-  const kept = state.values ?? {}
+  const kept = keptValues(state.values)
+  // Remounts the form per result so React's post-action reset can't wipe input.
+  const formKey = useSubmissionKey(state)
 
   return (
-    <form action={formAction} className="space-y-6">
+    <form key={formKey} action={formAction} className="space-y-6">
       <div className="grid gap-5 sm:grid-cols-2">
         <Field label="Bank name" htmlFor="bank_name" error={errors.bank_name}>
-          <Input id="bank_name" name="bank_name" defaultValue={kept.bank_name ?? business?.bank_name ?? ''} placeholder="HDFC Bank" />
+          <Input id="bank_name" name="bank_name" defaultValue={kept.text('bank_name', business?.bank_name)} placeholder="HDFC Bank" />
         </Field>
 
         <Field label="Account holder" htmlFor="account_name" error={errors.account_name}>
           <Input
             id="account_name"
             name="account_name"
-            defaultValue={kept.account_name ?? business?.account_name ?? ''}
+            defaultValue={kept.text('account_name', business?.account_name)}
             placeholder="Umbrella Design Studio"
           />
         </Field>
@@ -49,7 +52,7 @@ export function StepPayment({
           <Input
             id="account_number"
             name="account_number"
-            defaultValue={kept.account_number ?? business?.account_number ?? ''}
+            defaultValue={kept.text('account_number', business?.account_number)}
             className="font-mono"
             inputMode="numeric"
           />
@@ -64,7 +67,7 @@ export function StepPayment({
           <Input
             id="routing_number"
             name="routing_number"
-            defaultValue={kept.routing_number ?? business?.routing_number ?? ''}
+            defaultValue={kept.text('routing_number', business?.routing_number)}
             placeholder="111000025"
             className="font-mono uppercase"
             spellCheck={false}
@@ -83,7 +86,7 @@ export function StepPayment({
             id="default_terms"
             name="default_terms"
             rows={3}
-            defaultValue={kept.default_terms ?? business?.default_terms ?? DEFAULT_TERMS}
+            defaultValue={kept.text('default_terms', business?.default_terms ?? DEFAULT_TERMS)}
           />
         </Field>
 
@@ -92,7 +95,7 @@ export function StepPayment({
             id="default_notes"
             name="default_notes"
             rows={3}
-            defaultValue={kept.default_notes ?? business?.default_notes ?? DEFAULT_NOTES}
+            defaultValue={kept.text('default_notes', business?.default_notes ?? DEFAULT_NOTES)}
           />
         </Field>
       </div>
