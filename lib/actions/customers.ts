@@ -6,7 +6,7 @@ import { redirect } from 'next/navigation'
 import { contextFromSession } from '@/lib/auth/context'
 import { toClientRecord } from '@/lib/customers'
 import { countryName } from '@/lib/locale/countries'
-import { getCurrentUser, requireUser } from '@/lib/queries'
+import { requireUser } from '@/lib/queries'
 import * as clients from '@/lib/services/clients'
 import { fromPostgres, isServiceError } from '@/lib/services/errors'
 import { toFieldErrors, withValues, type StepState } from '@/lib/form-state'
@@ -20,23 +20,6 @@ import type { ClientRow } from '@/lib/database.types'
  * is Postgres's job, not ours. Failures come back as StepState with the
  * submission echoed, so a rejected form keeps what was typed.
  */
-
-/** What a picker needs to show a customer and prefill an invoice's Bill To. */
-export type CustomerOption = Pick<
-  ClientRow,
-  | 'id'
-  | 'public_id'
-  | 'name'
-  | 'email'
-  | 'phone'
-  | 'tax_id'
-  | 'address_line1'
-  | 'address_line2'
-  | 'city'
-  | 'region'
-  | 'postal_code'
-  | 'country_code'
->
 
 function field(formData: FormData, name: string): string | undefined {
   const value = formData.get(name)
@@ -174,62 +157,4 @@ export async function archiveCustomerAction(id: string): Promise<{ error?: strin
 
 export async function unarchiveCustomerAction(id: string): Promise<{ error?: string }> {
   return setArchived(id, false)
-}
-
-/**
- * Name search for pickers (e.g. the invoice builder's Bill To).
- *
- * Active customers only, newest first. Returns [] rather than throwing or
- * redirecting when there is no session, so a picker can call it freely.
- */
-export async function searchCustomers(
-  query: string,
-  options: { limit?: number } = {},
-): Promise<CustomerOption[]> {
-  const user = await getCurrentUser()
-  if (!user) return []
-
-  try {
-    const ctx = await contextFromSession()
-    const page = await clients.list(ctx, {
-      query: String(query ?? '').trim().slice(0, 100),
-      limit: options.limit ?? 10,
-    })
-    return page.data.map(toOption)
-  } catch (cause) {
-    console.error('[customers] search failed', cause)
-    return []
-  }
-}
-
-/** One customer by `cus_…` or uuid, or null. For a picker restoring a selection. */
-export async function getCustomerOption(id: string): Promise<CustomerOption | null> {
-  const user = await getCurrentUser()
-  if (!user) return null
-
-  try {
-    return toOption(await clients.get(await contextFromSession(), id))
-  } catch (cause) {
-    if (!(isServiceError(cause) && cause.code === 'not_found')) {
-      console.error('[customers] lookup failed', cause)
-    }
-    return null
-  }
-}
-
-function toOption(row: ClientRow): CustomerOption {
-  return {
-    id: row.id,
-    public_id: row.public_id,
-    name: row.name,
-    email: row.email,
-    phone: row.phone,
-    tax_id: row.tax_id,
-    address_line1: row.address_line1,
-    address_line2: row.address_line2,
-    city: row.city,
-    region: row.region,
-    postal_code: row.postal_code ?? row.pincode,
-    country_code: row.country_code,
-  }
 }

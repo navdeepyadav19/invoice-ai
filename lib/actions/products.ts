@@ -10,7 +10,7 @@ import * as prices from '@/lib/services/prices'
 import { isServiceError } from '@/lib/services/errors'
 import { toActionError } from '@/lib/actions/to-action-error'
 import { toFieldErrors, withValues, type StepState } from '@/lib/form-state'
-import { formatPriceLabel, parseMajorAmount } from '@/lib/catalog/price-format'
+import { parseMajorAmount } from '@/lib/catalog/price-format'
 import {
   priceSchema,
   priceUpdateSchema,
@@ -18,7 +18,6 @@ import {
   productUpdateSchema,
   type PriceInput,
 } from '@/lib/validators'
-import type { PriceRecurringInterval } from '@/lib/database.types'
 
 /**
  * Products & Prices from the dashboard.
@@ -36,30 +35,6 @@ import type { PriceRecurringInterval } from '@/lib/database.types'
 /** Result of a one-click action (archive / restore). */
 export interface CatalogActionResult {
   error?: string
-}
-
-/**
- * One active price as the invoice builder's picker needs it. Amounts are in
- * major units, like the rest of the builder. Pass `price_id` as an invoice
- * line's `price`.
- */
-export interface PriceOption {
-  /** `price_…` — what an invoice line's `price` field takes. */
-  price_id: string
-  price_uuid: string
-  /** `prod_…` */
-  product_id: string
-  product_uuid: string
-  product_name: string
-  nickname: string | null
-  /** "₹2,500/mo", "¥5,000" */
-  label: string
-  unit_amount: number
-  currency: string
-  tax_rate: number
-  type: 'one_time' | 'recurring'
-  recurring_interval: PriceRecurringInterval | null
-  interval_count: number
 }
 
 /**
@@ -288,60 +263,5 @@ export async function setPriceActiveAction(
   } catch (cause) {
     const fallback = active ? "We couldn't restore this price." : "We couldn't archive this price."
     return { error: failed(cause, null, fallback).error }
-  }
-}
-
-/**
- * Active prices of active products whose name matches `query` (all of them,
- * newest products first, when the query is empty). For the invoice builder's
- * line-item picker. `currency` narrows to prices the invoice can use — the
- * catalog does no FX.
- *
- * Never throws: a failed lookup logs and returns [] so a picker degrades to
- * "no matches" rather than crashing the builder.
- */
-export async function searchPrices(
-  query: string,
-  options: { currency?: string; limit?: number } = {},
-): Promise<PriceOption[]> {
-  await requireUser()
-
-  try {
-    const ctx = await contextFromSession()
-    const page = await products.list(ctx, {
-      query: query.trim() || undefined,
-      active: true,
-      limit: Math.min(options.limit ?? 20, 50),
-    })
-    if (page.data.length === 0) return []
-
-    const byId = new Map(page.data.map((p) => [p.id, p]))
-    const rows = await prices.listForProducts(ctx, [...byId.keys()], { active: true })
-    const currency = options.currency?.trim().toUpperCase()
-
-    return rows
-      .filter((price) => !currency || price.currency === currency)
-      .map((price) => {
-        const product = byId.get(price.product_id)!
-        return {
-          price_id: price.public_id,
-          price_uuid: price.id,
-          product_id: product.public_id,
-          product_uuid: product.id,
-          product_name: product.name,
-          nickname: price.nickname,
-          label: formatPriceLabel(price),
-          unit_amount: Number(price.unit_amount),
-          currency: price.currency,
-          tax_rate: Number(price.tax_rate),
-          type: price.type,
-          recurring_interval: price.recurring_interval,
-          interval_count: price.interval_count,
-        }
-      })
-      .sort((a, b) => a.product_name.localeCompare(b.product_name))
-  } catch (cause) {
-    console.error('[products] price search failed', cause)
-    return []
   }
 }
