@@ -110,14 +110,16 @@ webhook-signature: v1,K5s2fXy0hQ3m9vB8nT1cR7wLpA4eZ6uJ2kD0gH5iO8s=
   "type": "invoice.paid",
   "created_at": "2026-09-22T09:12:44.123456+00:00",
   "data": {
-    "invoice_id": "7f3c2b1a-9d8e-4f6a-b5c4-3e2d1f0a9b8c",
-    "invoice_number": "INV-0042",
-    "status": "paid",
-    "client_id": "c4a1e2b3-6d5f-4a7b-8c9d-0e1f2a3b4c5d",
-    "total": 29500,
-    "currency": "USD",
-    "issue_date": "2026-09-08",
-    "due_date": "2026-09-22"
+    "object": {
+      "id": "in_Pb2Xk7Mv4Qs9Lr1Wd6Tn3Fh8",
+      "object": "invoice",
+      "number": "INV-0042",
+      "status": "paid",
+      "customer": "cus_Nf3kQ8pR2mX7vB1cT9wL4sZ6",
+      "currency": "USD",
+      "total": 2950000,
+      "amount_due": 0
+    }
   }
 }
 ```
@@ -131,40 +133,9 @@ webhook-signature: v1,K5s2fXy0hQ3m9vB8nT1cR7wLpA4eZ6uJ2kD0gH5iO8s=
 <ResponseField name="created_at" type="string">
   When the event happened, as an ISO 8601 timestamp.
 </ResponseField>
-<ResponseField name="data" type="object">
-  A snapshot of the invoice, taken **when the event was recorded**.
-
-  <Expandable title="properties">
-    <ResponseField name="invoice_id" type="string">
-      The invoice's internal **UUID**, not its `in_…` id. `GET /invoices/{id}` accepts either.
-    </ResponseField>
-    <ResponseField name="invoice_number" type="string | null">
-      `null` for drafts.
-    </ResponseField>
-    <ResponseField name="status" type="string">
-      The stored status: `draft`, `open`, `paid` or `void`. It's never `overdue`.
-    </ResponseField>
-    <ResponseField name="client_id" type="string | null">
-      The customer's internal **UUID**, not its `cus_…` id. `GET /customers/{id}` accepts either.
-    </ResponseField>
-    <ResponseField name="total" type="number">
-      The invoice total in **major units**, such as `29500` for 29,500.00. This is the only place in the API where an amount isn't in minor units.
-    </ResponseField>
-    <ResponseField name="currency" type="string">
-      The ISO 4217 currency code.
-    </ResponseField>
-    <ResponseField name="issue_date" type="string">
-      `YYYY-MM-DD`.
-    </ResponseField>
-    <ResponseField name="due_date" type="string | null">
-      `YYYY-MM-DD`, or `null`.
-    </ResponseField>
-  </Expandable>
+<ResponseField name="data.object" type="Invoice">
+  The invoice as it was **when the event was recorded**, in the same shape `GET /invoices` returns: `in_…` and `cus_…` ids, amounts in [minor units](/ids-and-objects#money), and `status` including `overdue`. It has no `lines`; call `GET /invoices/{id}` for those.
 </ResponseField>
-
-<Tip>
-  The payload is a notification, not the full record. For line items, minor-unit totals or the latest state, call `GET /invoices/{data.invoice_id}` after you verify the signature.
-</Tip>
 
 ## Verifying signatures
 
@@ -179,7 +150,7 @@ Deliveries are signed with [Standard Webhooks](https://www.standardwebhooks.com/
 To verify a delivery:
 
 1. Build the signed content: `{webhook-id}.{webhook-timestamp}.{raw request body}`.
-2. Decode your secret: take the part after `whsec_` and **base64url**-decode it to get the key bytes.
+2. Decode your secret: take the part after `whsec_` and **base64**-decode it to get the key bytes. (Secrets issued before September 2026 are base64url, so accept `-` and `_` too.)
 3. Compute HMAC-SHA256 of the signed content with those bytes, then base64-encode it (standard alphabet, with padding).
 4. Compare `v1,<your result>` with each space-separated value in `webhook-signature`, in **constant time**.
 5. Reject the request if `webhook-timestamp` is more than **5 minutes** from your clock, in either direction.
@@ -207,7 +178,8 @@ function verify(headers, rawBody) {
     return false; // too old or too far in the future
   }
 
-  const key = Buffer.from(SECRET.replace(/^whsec_/, ""), "base64url");
+  // Node's base64 decoder also accepts base64url, so older secrets work too.
+  const key = Buffer.from(SECRET.replace(/^whsec_/, ""), "base64");
   const expected =
     "v1," + crypto.createHmac("sha256", key).update(`${id}.${timestamp}.${rawBody}`).digest("base64");
 
@@ -226,7 +198,7 @@ app.post("/hooks/invoice-ai", express.raw({ type: "application/json" }), (req, r
 
   const event = JSON.parse(rawBody);
   // Deduplicate on req.headers["webhook-id"] before acting on the event.
-  console.log(event.type, event.data.invoice_number);
+  console.log(event.type, event.data.object.number);
 
   res.sendStatus(204); // any 2xx acknowledges the delivery
 });
@@ -243,8 +215,9 @@ TOLERANCE_SECONDS = 5 * 60
 
 
 def secret_bytes(secret: str) -> bytes:
-    raw = secret.removeprefix("whsec_")
-    return base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4))
+    # Standard base64; older secrets are base64url, so map - and _ first.
+    raw = secret.removeprefix("whsec_").replace("-", "+").replace("_", "/").rstrip("=")
+    return base64.b64decode(raw + "=" * (-len(raw) % 4))
 
 
 def verify(headers, raw_body: bytes) -> bool:
@@ -278,13 +251,13 @@ def invoice_ai_webhook():
 
     event = request.get_json()
     # Deduplicate on request.headers["webhook-id"] before acting on the event.
-    print(event["type"], event["data"]["invoice_number"])
+    print(event["type"], event["data"]["object"]["number"])
     return "", 204
 ```
 </CodeGroup>
 
 <Note>
-  **About Standard Webhooks libraries.** The official `standardwebhooks` packages expect the part of the secret after `whsec_` to be standard base64. Invoice-AI secrets are **base64url**, so they may contain `-` or `_`, and those libraries can then reject the secret or derive the wrong key. Until that's resolved, use the snippets above. They follow the same algorithm, with a base64url decode of the secret.
+  Secrets are `whsec_` plus standard base64, so the official [Standard Webhooks](https://www.standardwebhooks.com/) libraries work as they are.
 </Note>
 
 ## Responding and retries

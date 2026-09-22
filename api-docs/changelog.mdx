@@ -28,11 +28,18 @@ icon: "clock-rotate-left"
   - Nine webhook event types, signed with Standard Webhooks HMAC-SHA256 and retried on a backoff schedule.
   - A public OpenAPI 3.1 document at `/api/v1/openapi.json`, and a Postman collection generated from it.
 
+  **Hardening before SDKs**
+
+  - `PATCH /invoices/{id}` is a true partial update: `customer` is optional and lines are kept unless `items` is sent.
+  - Money uses each currency's own minor unit (¥5,000 is `5000`), in requests, responses and webhooks.
+  - Webhook payloads carry the REST `Invoice` under `data.object`, with public ids and minor units. New signing secrets are standard base64.
+  - `GET /webhook-endpoints` and `GET /invoices/{id}/events` are cursor-paginated.
+  - `POST /invoices/{id}/send` returns `{ data: Invoice, emailed_to }`.
+  - A malformed id is a `404`, an invalid `cursor` is a `422`, and a reused `Idempotency-Key` is the new `idempotency_mismatch` code.
+
   **Known limitations**
 
   - Webhook deliveries are currently sent once a day. See [Webhooks](/webhooks#responding-and-retries).
-  - Webhook payloads carry internal UUIDs and a `total` in major units. See [Payload](/webhooks#payload).
-  - `PATCH /invoices/{id}` currently requires `customer`.
   - No business profile writes, credit notes, OAuth apps or API key management through the API.
   - There are no official SDKs or CLI yet. Use the OpenAPI document to generate a client.
 </Update>

@@ -81,7 +81,7 @@ export async function claim(
 
     case 'mismatch':
       throw new ServiceError(
-        'validation',
+        'idempotency_mismatch',
         'This Idempotency-Key was already used with a different request body.',
         [
           {

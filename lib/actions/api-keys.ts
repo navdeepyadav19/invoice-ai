@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache'
 
 import { requireUser } from '@/lib/queries'
 import { contextFromSession, requireRealAccount } from '@/lib/auth/context'
-import { generateApiKey } from '@/lib/auth/api-key'
+import { createApiKeyForOwner } from '@/lib/auth/create-api-key'
 import { isScope, type Scope } from '@/lib/auth/scopes'
 import { toActionError } from '@/lib/actions/to-action-error'
 import { withValues, type FormValues } from '@/lib/form-state'
@@ -57,21 +57,17 @@ export async function createApiKeyAction(formData: FormData): Promise<CreateKeyS
     // to a deleted owner is a credential pointing at nothing.
     requireRealAccount(ctx)
 
-    const key = generateApiKey()
-
-    const { error } = await ctx.supabase.from('api_keys').insert({
-      owner_id: ctx.userId,
+    const key = await createApiKeyForOwner(ctx.supabase, {
+      ownerId: ctx.userId,
       name,
-      prefix: key.prefix,
-      secret_hash: key.secretHash,
       scopes,
-      expires_at:
+      expiresAt:
         expiresInDays > 0
           ? new Date(Date.now() + expiresInDays * 86_400_000).toISOString()
           : null,
     })
 
-    if (error) return withValues({ error: error.message }, formData)
+    if (!key.ok) return withValues({ error: key.error }, formData)
 
     revalidatePath('/settings/api-keys')
 

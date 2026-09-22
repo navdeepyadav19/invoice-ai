@@ -40,6 +40,9 @@ const STATUS_BY_CODE: Record<ServiceErrorCode, number> = {
   not_found: 404,
   invalid_state: 409,
   conflict: 409,
+  // 422 like `validation` (the request is well-formed but unusable), with its
+  // own code so an SDK can raise a specific error for a reused key.
+  idempotency_mismatch: 422,
   forbidden: 403,
   // 502, not 500: Resend or OpenAI failing is not our bug, and the distinction
   // tells an integrator whether retrying is worth anything.
@@ -51,6 +54,7 @@ const TITLE_BY_CODE: Record<ServiceErrorCode, string> = {
   not_found: 'Not found',
   invalid_state: 'Invalid state for this operation',
   conflict: 'Conflict',
+  idempotency_mismatch: 'Idempotency-Key reused',
   forbidden: 'Insufficient scope',
   upstream_failed: 'Upstream service failed',
 }

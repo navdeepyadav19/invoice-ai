@@ -14,8 +14,10 @@ List endpoints return results newest first and page through them with a **cursor
 | `GET /products` | `query` (name match), `active` (`true` or `false`) |
 | `GET /prices` | `product` (`prod_…` or UUID), `active`, `currency` (for example `USD`), `type` (`one_time` or `recurring`) |
 | `GET /invoices` | `status` (`draft`, `open`, `paid`, `overdue` or `void`), `customer` (`cus_…` or UUID), `from` and `to` (inclusive `YYYY-MM-DD` bounds on the issue date) |
+| `GET /invoices/{id}/events` | None |
+| `GET /webhook-endpoints` | None |
 
-These return complete lists in one response, with no cursor: `GET /webhook-endpoints`, `GET /invoice-items?invoice=…` and `GET /invoices/{id}/events`.
+`GET /invoice-items?invoice=…` returns all of an invoice's lines in one response, with no cursor.
 
 ## Parameters
 
@@ -94,7 +96,7 @@ for invoice in list_all("/invoices", status="open"):
 
 - **Treat cursors as opaque.** Don't build, parse or change them. Their encoding can change.
 - **Keep the same filters** on every page of a walk. A cursor is a position, not a saved query.
-- **Invalid cursors aren't rejected yet.** A cursor we can't decode is currently ignored, which gives you the first page again. Always pass back exactly the `next_cursor` you received.
-- **Don't paginate `status=overdue`.** Overdue isn't stored. It's worked out when an invoice is read (see [Invoice lifecycle](/invoice-lifecycle#overdue)). The API fetches one page of `open` invoices and then drops the ones that aren't past due, so a page can come back short, and `next_cursor` can be `null` even when older overdue invoices exist. To collect every overdue invoice, page through `status=open` and keep the ones whose `status` is `overdue`. Every item in that walk already has its status worked out.
+- **An invalid cursor is a `422`.** A cursor we didn't issue returns `validation` with an error on `cursor`, never the first page again. Pass back exactly the `next_cursor` you received.
+- **`status=overdue` pages like any other filter.** It selects `open` invoices whose `due_date` is before today (UTC). `status=open` includes overdue invoices too.
 - **Unknown filter values are ignored.** An unrecognised `status` or `type` returns an unfiltered list rather than an error, and any `active` value other than `true` counts as `false`.
 - **Id filters must exist.** A `customer` or `product` filter that doesn't match one of your records returns `404`, not an empty page.

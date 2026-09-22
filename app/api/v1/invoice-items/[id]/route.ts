@@ -14,7 +14,7 @@ export const GET = withApi<Params>({ scope: 'invoices:read' }, async (ctx, _requ
   }
   const refs = await invoices.refsForInvoice(ctx, found.invoice, [found.item])
 
-  return json({ data: serializeLineItem(found.item, refs) })
+  return json({ data: serializeLineItem(found.item, found.invoice.currency, refs) })
 })
 
 /**

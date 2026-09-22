@@ -32,8 +32,10 @@ export const REPLAY_TOLERANCE_SECONDS = 300
 
 export function generateSecret(): string {
   // whsec_ prefix for the same reason API keys carry one: it is recognisable in
-  // a log or a secret scan.
-  return `whsec_${randomBytes(24).toString('base64url')}`
+  // a log or a secret scan. Standard base64 after it, as Standard Webhooks
+  // specifies, so any off-the-shelf verifier library accepts the secret.
+  // (Secrets issued before this used base64url; secretBytes reads both.)
+  return `whsec_${randomBytes(24).toString('base64')}`
 }
 
 export function sign(secret: string, id: string, timestamp: number, body: string): string {
@@ -107,12 +109,19 @@ function constantTimeEquals(a: string, b: string): boolean {
 
 /**
  * Standard Webhooks specifies the secret is base64 after the `whsec_` prefix.
+ *
+ * Both alphabets are accepted: new secrets are standard base64 (`+`, `/`,
+ * `=` padding), but endpoints created earlier hold base64url secrets (`-`,
+ * `_`, no padding), and those must keep verifying. Normalising url-safe
+ * characters to standard ones first means one decoder handles either.
+ *
  * Accepting a raw string too means a hand-made secret still works instead of
  * failing with a confusing signature mismatch.
  */
-function secretBytes(secret: string): Buffer {
+export function secretBytes(secret: string): Buffer {
   if (secret.startsWith('whsec_')) {
-    return Buffer.from(secret.slice('whsec_'.length), 'base64url')
+    const encoded = secret.slice('whsec_'.length).replace(/-/g, '+').replace(/_/g, '/').replace(/=+$/, '')
+    return Buffer.from(encoded, 'base64')
   }
   return Buffer.from(secret, 'utf8')
 }

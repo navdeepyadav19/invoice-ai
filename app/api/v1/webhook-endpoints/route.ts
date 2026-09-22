@@ -1,10 +1,14 @@
 import { json, readJson, withApi } from '@/lib/api/handler'
 import * as webhooks from '@/lib/services/webhooks'
 
-/** GET /api/v1/webhook-endpoints */
-export const GET = withApi({ scope: 'webhooks:manage' }, async (ctx) => {
-  const endpoints = await webhooks.list(ctx)
-  return json({ data: endpoints.map((row) => webhooks.serializeEndpoint(row)) })
+/** GET /api/v1/webhook-endpoints?cursor=&limit= — same paging as every other list. */
+export const GET = withApi({ scope: 'webhooks:manage' }, async (ctx, request) => {
+  const params = new URL(request.url).searchParams
+  const page = await webhooks.list(ctx, {
+    cursor: params.get('cursor'),
+    limit: params.get('limit') ? Number(params.get('limit')) : undefined,
+  })
+  return json({ data: page.data.map((row) => webhooks.serializeEndpoint(row)), next_cursor: page.next_cursor })
 })
 
 /**

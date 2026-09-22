@@ -1,0 +1,37 @@
+---
+title: "Verify webhooks"
+description: "Check a webhook really came from Invoice-AI."
+icon: "shield-check"
+---
+
+Pass the **raw** request body, the headers and your endpoint's `whsec_…` secret. You get a typed event back, or an error if the signature is wrong or too old.
+
+<CodeGroup>
+```ts TypeScript
+import { Webhooks } from '@horizonpay/invoice-ai'
+
+const webhooks = new Webhooks(process.env.INVOICE_AI_WEBHOOK_SECRET!)
+
+export async function POST(req: Request) {
+  const event = await webhooks.constructEvent(await req.text(), req.headers)
+  if (event.type === 'invoice.paid') {
+    console.log('Paid:', event.data.object.number)
+  }
+  return new Response(null, { status: 204 })
+}
+```
+```python Python
+import os
+
+from invoice_ai import Webhook
+
+webhook = Webhook(os.environ["INVOICE_AI_WEBHOOK_SECRET"])
+
+def handle(body: bytes, headers: dict):
+    event = webhook.verify(body, headers)
+    if event.type == "invoice.paid":
+        print("Paid:", event.data.object.number)
+```
+</CodeGroup>
+
+See [Webhooks](/webhooks) for the event list.

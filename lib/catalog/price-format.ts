@@ -1,4 +1,7 @@
+import { currencyDecimals } from '@/lib/currency'
 import type { PriceRecurringInterval, PriceRow } from '@/lib/database.types'
+
+export { currencyDecimals }
 
 /**
  * Display and input helpers for catalog prices — pure, safe on client and server.
@@ -6,19 +9,10 @@ import type { PriceRecurringInterval, PriceRow } from '@/lib/database.types'
  * Prices are stored in MAJOR units (numeric(14,2): 2500.00 is ₹2,500), unlike
  * the REST wire format, so nothing here converts to minor units. What matters
  * is that each currency gets its own number of decimals: ¥5,000 has none,
- * so the formatter asks Intl for the currency's digits instead of forcing 2
- * (which is what lib/money.ts's invoice formatters do).
+ * so the formatter lets Intl pick the currency's digits instead of forcing 2
+ * (which is what lib/money.ts's invoice formatters do). The decimals table
+ * itself lives in lib/currency.ts, shared with the REST wire format.
  */
-
-/** How many decimals a currency uses: USD 2, JPY 0, BHD 3. */
-export function currencyDecimals(currency: string): number {
-  try {
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency }).resolvedOptions()
-      .maximumFractionDigits ?? 2
-  } catch {
-    return 2
-  }
-}
 
 /**
  * A major-unit amount in its currency, e.g. `₹2,500.00`, `¥5,000`, `$30.00`.

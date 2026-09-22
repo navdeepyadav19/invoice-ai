@@ -245,6 +245,32 @@ export type ApiKeyRow = {
   revoked_at: string | null
 }
 
+/**
+ * One CLI device-flow login (migration 0013). Never readable from a browser
+ * session or an API key (RLS, no policies) — only through the cli_device_*
+ * functions below.
+ */
+export type CliDeviceStatus = 'pending' | 'approved' | 'denied' | 'consumed' | 'expired'
+
+export type CliDeviceCodeRow = {
+  id: string
+  /** hex(sha256(device_code)). The device code itself is never stored. */
+  device_code_hash: string
+  /** Normalised, dash-free: WXYZ2345. */
+  user_code: string
+  client_name: string
+  client_os: string | null
+  status: CliDeviceStatus
+  owner_id: string | null
+  scopes: string[]
+  api_key_id: string | null
+  created_at: string
+  expires_at: string
+  approved_at: string | null
+  consumed_at: string | null
+  last_polled_at: string | null
+}
+
 export type IdempotencyKeyRow = {
   owner_id: string
   key: string
@@ -353,6 +379,11 @@ export type Database = {
         Omit<Partial<ApiKeyRow>, 'owner_id' | 'name' | 'prefix' | 'secret_hash' | 'scopes'> &
           Pick<ApiKeyRow, 'owner_id' | 'name' | 'prefix' | 'secret_hash' | 'scopes'>
       >
+      cli_device_codes: Table<
+        CliDeviceCodeRow,
+        Omit<Partial<CliDeviceCodeRow>, 'device_code_hash' | 'user_code' | 'client_name'> &
+          Pick<CliDeviceCodeRow, 'device_code_hash' | 'user_code' | 'client_name'>
+      >
       idempotency_keys: Table<
         IdempotencyKeyRow,
         Omit<Partial<IdempotencyKeyRow>, 'owner_id' | 'key' | 'method' | 'path' | 'request_hash'> &
@@ -437,6 +468,51 @@ export type Database = {
         Args: { p_id: string }
         Returns: undefined
       }
+      cli_device_start: {
+        Args: {
+          p_device_code_hash: string
+          p_user_code: string
+          p_client_name: string
+          p_client_os: string | null
+        }
+        Returns: 'created' | 'collision' | 'rate_limited'
+      }
+      cli_device_lookup: {
+        Args: { p_user_code: string }
+        Returns: {
+          client_name: string
+          client_os: string | null
+          created_at: string
+          expires_at: string
+        }[]
+      }
+      cli_device_decide: {
+        Args: { p_user_code: string; p_approve: boolean; p_scopes: string[] }
+        Returns: 'approved' | 'denied' | 'expired' | 'not_found' | 'guest'
+      }
+      cli_device_poll: {
+        Args: { p_device_code_hash: string }
+        Returns: {
+          outcome:
+            | 'authorization_pending'
+            | 'slow_down'
+            | 'access_denied'
+            | 'expired_token'
+            | 'invalid_grant'
+            | 'approved'
+          owner_id: string | null
+          scopes: string[] | null
+          client_name: string | null
+        }[]
+      }
+      cli_device_attach_key: {
+        Args: { p_device_code_hash: string; p_api_key_id: string }
+        Returns: boolean
+      }
+      cli_device_release: {
+        Args: { p_device_code_hash: string }
+        Returns: boolean
+      }
       claim_idempotency_key: {
         Args: { p_key: string; p_method: string; p_path: string; p_request_hash: string }
         Returns: {
@@ -475,6 +551,7 @@ export type Database = {
     Enums: {
       invoice_status: InvoiceStatus
       invoice_event_type: InvoiceEventType
+      cli_device_status: CliDeviceStatus
     }
     CompositeTypes: { [_ in never]: never }
   }

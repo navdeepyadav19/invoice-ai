@@ -35,7 +35,10 @@
         "groups": [
           {
             "group": "Get started",
-            "pages": ["introduction", "quickstart"]
+            "pages": [
+              "introduction",
+              "quickstart"
+            ]
           },
           {
             "group": "Core concepts",
@@ -51,15 +54,21 @@
           },
           {
             "group": "Webhooks",
-            "pages": ["webhooks"]
+            "pages": [
+              "webhooks"
+            ]
           },
           {
             "group": "Tools",
-            "pages": ["postman"]
+            "pages": [
+              "postman"
+            ]
           },
           {
             "group": "Resources",
-            "pages": ["changelog"]
+            "pages": [
+              "changelog"
+            ]
           }
         ]
       },
@@ -69,11 +78,40 @@
         "groups": [
           {
             "group": "Overview",
-            "pages": ["api-reference/introduction"]
+            "pages": [
+              "api-reference/introduction"
+            ]
           },
           {
             "group": "Endpoints",
             "openapi": "openapi.json"
+          }
+        ]
+      },
+      {
+        "tab": "SDKs",
+        "icon": "cube",
+        "groups": [
+          {
+            "group": "SDKs",
+            "pages": [
+              "sdks/overview",
+              "sdks/errors-and-retries",
+              "sdks/webhooks"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "CLI",
+        "icon": "terminal",
+        "groups": [
+          {
+            "group": "CLI",
+            "pages": [
+              "cli/overview",
+              "cli/commands"
+            ]
           }
         ]
       }
@@ -85,7 +123,11 @@
       "display": "interactive"
     },
     "examples": {
-      "languages": ["curl", "javascript", "python"],
+      "languages": [
+        "curl",
+        "javascript",
+        "python"
+      ],
       "defaults": "required"
     },
     "mdx": {

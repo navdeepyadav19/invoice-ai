@@ -5,7 +5,7 @@ import * as invoices from '@/lib/services/invoices'
 type Params = { id: string }
 
 /**
- * GET /api/v1/invoices/{id}/events
+ * GET /api/v1/invoices/{id}/events?cursor=&limit=
  *
  * The history of one invoice: created, issued, emailed, viewed, downloaded,
  * paid, cancelled. `viewed` and `downloaded` come from the public share link
@@ -16,9 +16,13 @@ type Params = { id: string }
  * Event names follow Stripe: `finalized` is stored and the API says
  * `invoice.finalized`; `voided` becomes `invoice.voided`.
  */
-export const GET = withApi<Params>({ scope: 'invoices:read' }, async (ctx, _request, route) => {
+export const GET = withApi<Params>({ scope: 'invoices:read' }, async (ctx, request, route) => {
   const { id } = await route.params
-  const events = await invoices.events(ctx, id)
+  const params = new URL(request.url).searchParams
+  const page = await invoices.events(ctx, id, {
+    cursor: params.get('cursor'),
+    limit: params.get('limit') ? Number(params.get('limit')) : undefined,
+  })
 
-  return json({ data: events.map(serializeEvent) })
+  return json({ data: page.data.map(serializeEvent), next_cursor: page.next_cursor })
 })

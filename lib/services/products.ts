@@ -1,13 +1,13 @@
 import { requireScope, type AuthContext } from '@/lib/auth/context'
 import { fromPostgres, notFound, ServiceError } from '@/lib/services/errors'
-import { decodeCursor, encodeCursor, type Page } from '@/lib/services/pagination'
+import { afterFilter, clampLimit, parseCursor, toPage, type Page } from '@/lib/services/pagination'
 import {
   productSchema,
   productUpdateSchema,
   type ProductInput,
   type ProductUpdateInput,
 } from '@/lib/validators'
-import { nextProductId, isProductId } from '@/lib/catalog/ids'
+import { nextProductId, isProductId, isUuid } from '@/lib/catalog/ids'
 import type { ProductRow } from '@/lib/database.types'
 
 /**
@@ -43,10 +43,8 @@ export async function list(ctx: AuthContext, options: ListProductsOptions = {}):
     q = q.ilike('name', `%${term}%`)
   }
 
-  const after = decodeCursor(options.cursor)
-  if (after) {
-    q = q.or(`created_at.lt.${after.createdAt},and(created_at.eq.${after.createdAt},id.lt.${after.id})`)
-  }
+  const after = parseCursor(options.cursor)
+  if (after) q = q.or(afterFilter(after))
 
   const { data, error } = await q
   if (error) throw fromPostgres(error)
@@ -57,6 +55,8 @@ export async function list(ctx: AuthContext, options: ListProductsOptions = {}):
 /** Find by UUID or `prod_…` public ID. */
 export async function get(ctx: AuthContext, id: string): Promise<ProductRow> {
   requireScope(ctx, 'products:read')
+
+  if (!isProductId(id) && !isUuid(id)) throw notFound('Product not found.')
 
   const q = ctx.supabase.from('products').select('*')
   const { data, error } = isProductId(id)
@@ -174,22 +174,6 @@ export async function mapPublicIds(ctx: AuthContext, ids: string[]): Promise<Map
     map.set(row.id, row.public_id)
   }
   return map
-}
-
-function clampLimit(limit?: number): number {
-  if (!limit || Number.isNaN(limit)) return 25
-  return Math.min(Math.max(Math.trunc(limit), 1), 100)
-}
-
-function toPage<T extends { created_at: string; id: string }>(rows: T[], limit: number): Page<T> {
-  const hasMore = rows.length > limit
-  const data = hasMore ? rows.slice(0, limit) : rows
-  const last = data.at(-1)
-
-  return {
-    data,
-    next_cursor: hasMore && last ? encodeCursor({ createdAt: last.created_at, id: last.id }) : null,
-  }
 }
 
 function validationError(error: { issues: { path: PropertyKey[]; message: string }[] }): ServiceError {

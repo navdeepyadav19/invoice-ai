@@ -29,10 +29,8 @@ Most resources have a prefixed public id. Their paths and reference fields also 
 | Business | UUID | | Read-only, no lookup by id |
 | Invoice event | UUID | | Returned by `GET /invoices/{id}/events` |
 
-Accepting UUIDs matters mainly for [webhooks](/webhooks#payload), because their payloads carry the invoice's and customer's **UUIDs**, not the prefixed ids. `GET /invoices/{uuid}` works with them directly.
-
 <Tip>
-  Store ids exactly as the API returns them, and treat them as opaque strings. A value that matches neither a prefixed id nor a UUID isn't a valid id.
+  Store ids exactly as the API returns them, and treat them as opaque strings. A value that matches neither a prefixed id nor a UUID isn't a valid id, and returns `404`.
 </Tip>
 
 ## The `object` field
@@ -41,22 +39,20 @@ Customers, products, prices, invoices and invoice items include an `object` fiel
 
 ## Money
 
-Every amount in a request or response is an **integer in minor units**. There are no decimals and no floats.
+Every amount in a request, response or webhook is an **integer in the currency's minor unit** (ISO 4217), like Stripe. There are no decimals and no floats.
 
 | You mean | Send |
 |---|---|
 | $1,500.00 | `150000` |
-| ₹29,500.00 | `2950000` |
 | €0.99 | `99` |
+| ¥5,000 (no minor unit) | `5000` |
+| 1.500 KWD (three decimals) | `1500` |
 
-- The API always uses **two implied decimal places**, whatever the currency. Amounts are stored with two decimals, and the wire value is that amount × 100.
+- Most currencies have two decimals. Zero-decimal currencies (such as `JPY`, `KRW`, `VND`) and three-decimal ones (such as `KWD`, `BHD`, `OMR`) use their own unit.
+- Amounts are stored with at most two decimals, so a three-decimal amount must be a multiple of `10` (`1230`, not `1234`).
 - `unit_amount` must be a whole number of at least `0`. A fraction like `1500.5` is rejected with `422` (`"Use whole minor units"`).
 - Invoice totals (`subtotal`, `discount`, `taxable`, `tax`, `total`, `amount_due`) and line `amount` and `tax_amount` values are worked out by the server and come back in minor units too.
 - `amount_due` equals `total` while an invoice is `open` or `overdue`, and it's `0` for `draft`, `paid` and `void` invoices.
-
-<Warning>
-  One exception: the `data.total` field in [webhook payloads](/webhooks#payload) is in **major units** (for example `29500` or `29500.5`), not minor units. Convert it, or fetch the invoice for minor-unit totals.
-</Warning>
 
 ### Percentages
 

@@ -270,8 +270,8 @@ This walkthrough takes one invoice through its whole life: customer → product 
       method: "POST",
       headers: { ...headers, "Idempotency-Key": crypto.randomUUID() },
       body: JSON.stringify({}),
-    }).then((r) => r.json()).then((b) => b.data);
-    // { id, invoice_number, emailed: true, public_url }
+    }).then((r) => r.json());
+    // { data: Invoice, emailed_to: "ap@…" }
 
     const paid = await fetch(`${BASE}/invoices/${invoice.id}/pay`, {
       method: "POST",
