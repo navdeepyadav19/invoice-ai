@@ -4,7 +4,7 @@
 # pull-request.yml and production.yml both call it, so a PR and a merge to
 # main are held to exactly the same checks.
 #
-# The four jobs run in parallel, so one failing check doesn't hide another.
+# The jobs run in parallel, so one failing check doesn't hide another.
 
 name: CI
 
@@ -46,6 +46,32 @@ jobs:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
       - run: pnpm test
+
+  # The published API reference (api-docs/openapi.json, rendered by Mintlify)
+  # and the Postman collection are generated from lib/api/openapi.ts and
+  # committed. Regenerate both and fail on any diff, so a contract change that
+  # forgot `pnpm openapi:gen && pnpm postman:gen` cannot merge.
+  api-docs:
+    name: API docs up to date
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - run: pnpm openapi:gen
+      - run: pnpm postman:gen
+      - name: Fail if generated docs drifted
+        run: |
+          if ! git diff --exit-code -- api-docs/openapi.json docs/platform/postman; then
+            echo "::error::Generated API docs are stale. Run 'pnpm openapi:gen && pnpm postman:gen' and commit the result."
+            exit 1
+          fi
+          # A newly generated file that was never committed is drift too.
+          untracked=$(git ls-files --others --exclude-standard -- api-docs/openapi.json docs/platform/postman)
+          if [ -n "$untracked" ]; then
+            echo "::error::Generated API docs are not committed: $untracked"
+            exit 1
+          fi
 
   build:
     name: Build

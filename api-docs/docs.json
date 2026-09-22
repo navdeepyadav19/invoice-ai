@@ -1,0 +1,108 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "Invoice-AI API",
+  "description": "Developer documentation for the Invoice-AI REST API by HorizonPay: customers, products, prices, invoices and signed webhooks.",
+  "colors": {
+    "primary": "#454DB0",
+    "light": "#8595F8",
+    "dark": "#6B76E0"
+  },
+  "logo": {
+    "light": "/logo/light.svg",
+    "dark": "/logo/dark.svg",
+    "href": "https://invoice.horizonpay.co"
+  },
+  "favicon": "/favicon.svg",
+  "navbar": {
+    "links": [
+      {
+        "label": "Dashboard",
+        "href": "https://invoice.horizonpay.co/dashboard"
+      }
+    ],
+    "primary": {
+      "type": "button",
+      "label": "Get API key",
+      "href": "https://invoice.horizonpay.co/settings/api-keys"
+    }
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Get started",
+        "icon": "rocket",
+        "groups": [
+          {
+            "group": "Get started",
+            "pages": ["introduction", "quickstart"]
+          },
+          {
+            "group": "Core concepts",
+            "pages": [
+              "authentication",
+              "errors",
+              "idempotency",
+              "pagination",
+              "rate-limits",
+              "ids-and-objects",
+              "invoice-lifecycle"
+            ]
+          },
+          {
+            "group": "Webhooks",
+            "pages": ["webhooks"]
+          },
+          {
+            "group": "Tools",
+            "pages": ["postman"]
+          },
+          {
+            "group": "Resources",
+            "pages": ["changelog"]
+          }
+        ]
+      },
+      {
+        "tab": "API reference",
+        "icon": "code",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": ["api-reference/introduction"]
+          },
+          {
+            "group": "Endpoints",
+            "openapi": "openapi.json"
+          }
+        ]
+      }
+    ]
+  },
+  "api": {
+    "openapi": "openapi.json",
+    "playground": {
+      "display": "interactive"
+    },
+    "examples": {
+      "languages": ["curl", "javascript", "python"],
+      "defaults": "required"
+    },
+    "mdx": {
+      "server": "https://invoice.horizonpay.co/api/v1",
+      "auth": {
+        "method": "bearer"
+      }
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/navdeepyadav19/invoice-ai"
+    }
+  },
+  "seo": {
+    "metatags": {
+      "canonical": "https://docs.horizonpay.co"
+    }
+  }
+}

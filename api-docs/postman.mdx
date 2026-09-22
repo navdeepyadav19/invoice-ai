@@ -1,0 +1,76 @@
+---
+title: "Postman collection"
+description: "Import the generated Postman collection and run every endpoint end to end against your account."
+icon: "paper-plane"
+---
+
+The repository includes a Postman collection and environment generated from the OpenAPI document. Run them top to bottom and they exercise every v1 endpoint, taking an invoice through its whole lifecycle.
+
+| File | What it is |
+|---|---|
+| [`invoice-ai.postman_collection.json`](https://github.com/navdeepyadav19/invoice-ai/blob/main/docs/platform/postman/invoice-ai.postman_collection.json) | Every request, in run order, with Bearer auth and test scripts |
+| [`invoice-ai.postman_environment.json`](https://github.com/navdeepyadav19/invoice-ai/blob/main/docs/platform/postman/invoice-ai.postman_environment.json) | The "Invoice-AI — production" environment, with `base_url` and `api_key` |
+
+Both live in [`docs/platform/postman/`](https://github.com/navdeepyadav19/invoice-ai/tree/main/docs/platform/postman) in the repository.
+
+## Set up
+
+<Steps>
+  <Step title="Create a key with every scope">
+    A full run touches every endpoint, so create a key in [Settings → API keys](https://invoice.horizonpay.co/settings/api-keys) with **Custom** scopes and tick all of them. Give it a short expiry. See [Authentication](/authentication).
+  </Step>
+  <Step title="Import both files">
+    In Postman, choose **Import** and add the collection and the environment.
+  </Step>
+  <Step title="Select the environment and set the key">
+    Select **Invoice-AI — production** in the environment picker, and set `api_key` to your key. `base_url` is already `https://invoice.horizonpay.co/api/v1`.
+  </Step>
+  <Step title="Run the collection in order">
+    Open the **Collection Runner** and run the whole collection without reordering it.
+  </Step>
+</Steps>
+
+Or run it from the command line with [Newman](https://github.com/postmanlabs/newman):
+
+```bash
+newman run invoice-ai.postman_collection.json \
+  -e invoice-ai.postman_environment.json \
+  --env-var api_key=inv_live_...
+```
+
+## Run order
+
+The folders are a lifecycle, not an index. Each request uses ids captured by the requests before it, and those ids are stored as collection variables (`customer_id`, `product_id`, `price_id`, `webhook_endpoint_id`, `invoice_id` and `invoice_item_id`).
+
+<AccordionGroup>
+  <Accordion title="1. Setup">
+    Reads the business profile, then creates, lists, reads and updates a customer, a product and a price. It also registers a webhook endpoint and lists the endpoints.
+  </Accordion>
+  <Accordion title="2. Draft invoice">
+    Creates a draft, lists and reads invoices, updates the draft, and adds, lists, reads and removes a line item.
+  </Accordion>
+  <Accordion title="3. Invoice lifecycle">
+    Finalizes the draft, emails it, downloads the PDF, reads its history, and marks it paid.
+  </Accordion>
+  <Accordion title="4. Delete & void paths">
+    Creates and deletes a throwaway draft, then creates, finalizes and voids a second invoice.
+  </Accordion>
+  <Accordion title="5. Cleanup">
+    Deletes the webhook endpoint and archives the price, the product and the customer.
+  </Accordion>
+</AccordionGroup>
+
+<Note>
+  - The collection sets a fresh `Idempotency-Key` on every request automatically.
+  - A run sends **one real invoice email**, to Resend's test inbox `delivered@resend.dev`. It counts toward the [10 sends per hour](/rate-limits) limit.
+  - A run creates real, numbered invoices in your account. Finalized numbers can't be reused, so run it against an account where that's acceptable.
+  - Running a single request on its own only works once the ids it needs have been filled in by earlier requests, or by you.
+</Note>
+
+## Keeping it up to date
+
+The collection is generated from the OpenAPI document. Don't edit it by hand. After an API change, regenerate it from the repository root:
+
+```bash
+pnpm postman:gen
+```
