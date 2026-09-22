@@ -1,0 +1,73 @@
+---
+title: "SDKs"
+description: "Official TypeScript and Python libraries."
+icon: "cube"
+---
+
+The SDKs wrap the API so you write `invoices.create(...)` instead of HTTP calls. They also handle retries, idempotency keys, pagination and errors for you.
+
+## Install
+
+<CodeGroup>
+```bash TypeScript
+npm install @horizonpay/invoice-ai
+```
+```bash Python
+pip install horizonpay-invoice-ai
+```
+</CodeGroup>
+
+## First call
+
+Set `INVOICE_AI_API_KEY` in your environment, then:
+
+<CodeGroup>
+```ts TypeScript
+import InvoiceAI from '@horizonpay/invoice-ai'
+
+const invoiceai = new InvoiceAI()
+
+const customer = await invoiceai.customers.create({ name: 'Acme', email: 'ap@acme.com' })
+const invoice = await invoiceai.invoices.create({
+  customer: customer.id,
+  currency: 'USD',
+  items: [{ description: 'Consulting', quantity: 1, unit_amount: 250000 }],
+})
+await invoiceai.invoices.finalize(invoice.id)
+await invoiceai.invoices.send(invoice.id)
+```
+```python Python
+from invoice_ai import InvoiceAI
+
+client = InvoiceAI()
+
+customer = client.customers.create(name="Acme", email="ap@acme.com")
+invoice = client.invoices.create(
+    customer=customer.id,
+    currency="USD",
+    items=[{"description": "Consulting", "quantity": 1, "unit_amount": 250000}],
+)
+client.invoices.finalize(invoice.id)
+client.invoices.send(invoice.id)
+```
+</CodeGroup>
+
+Every endpoint in the [API reference](/api-reference/introduction) shows its TypeScript and Python call.
+
+## Lists
+
+Loop over a list and the SDK fetches the next pages for you.
+
+<CodeGroup>
+```ts TypeScript
+for await (const invoice of invoiceai.invoices.list({ status: 'open' })) {
+  console.log(invoice.number)
+}
+```
+```python Python
+for invoice in client.invoices.list(status="open"):
+    print(invoice.number)
+```
+</CodeGroup>
+
+Python also has `AsyncInvoiceAI` for `async`/`await` code.

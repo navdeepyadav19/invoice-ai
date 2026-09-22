@@ -1,0 +1,59 @@
+---
+title: "Errors & retries"
+description: "What the SDKs do when a request fails."
+icon: "rotate"
+---
+
+## Retries are automatic
+
+Network errors, rate limits (429) and server errors (5xx) are retried twice with backoff. Every `POST` gets an idempotency key, and retries reuse it, so a retried "create invoice" never creates two.
+
+Change it per client or per call:
+
+<CodeGroup>
+```ts TypeScript
+const invoiceai = new InvoiceAI({ maxRetries: 5, timeout: 20_000 })
+await invoiceai.invoices.finalize(id, { idempotencyKey: 'order-1234' })
+```
+```python Python
+client = InvoiceAI(max_retries=5, timeout=20.0)
+client.invoices.finalize(id, idempotency_key="order-1234")
+```
+</CodeGroup>
+
+## Catch errors by type
+
+<CodeGroup>
+```ts TypeScript
+import { InvalidStateError, ValidationError } from '@horizonpay/invoice-ai'
+
+try {
+  await invoiceai.invoices.void(id, { reason: 'Duplicate' })
+} catch (err) {
+  if (err instanceof InvalidStateError) console.log('Only open invoices can be voided')
+  else if (err instanceof ValidationError) console.log(err.fields)
+  else throw err
+}
+```
+```python Python
+from invoice_ai import InvalidStateError, ValidationError
+
+try:
+    client.invoices.void(id, reason="Duplicate")
+except InvalidStateError:
+    print("Only open invoices can be voided")
+except ValidationError as err:
+    print(err.fields)
+```
+</CodeGroup>
+
+| Error | When |
+|---|---|
+| `AuthenticationError` | Missing or invalid API key (401) |
+| `PermissionError` | Key lacks the scope (403). Python: `PermissionDeniedError` |
+| `NotFoundError` | No such object (404) |
+| `InvalidStateError` | Wrong state, e.g. editing a finalized invoice (409) |
+| `ValidationError` | Bad input. See `.fields` (422) |
+| `RateLimitError` | Too many requests, after retries (429) |
+
+Every error has `requestId`. Include it when you contact support.

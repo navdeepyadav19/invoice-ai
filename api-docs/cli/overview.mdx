@@ -1,0 +1,29 @@
+---
+title: "CLI"
+description: "Manage invoices from your terminal."
+icon: "terminal"
+---
+
+## Install and log in
+
+```bash
+npm install -g @horizonpay/invoice-ai-cli
+invoice-ai login
+```
+
+`login` opens your browser. Approve the request and the CLI saves a key to your OS keychain. In CI, set `INVOICE_AI_API_KEY` instead.
+
+## Everyday commands
+
+```bash
+invoice-ai whoami                          # who am I logged in as
+invoice-ai customers list                  # table in a terminal, JSON when piped
+invoice-ai invoices create                 # guided wizard
+invoice-ai invoices send in_…              # email it
+invoice-ai invoices pdf in_… --open        # download and open the PDF
+invoice-ai api GET /business               # call any endpoint
+```
+
+Add `--json` for scripts, `--yes` to skip confirmations, and `--profile` to switch accounts.
+
+See the [command reference](/cli/commands) for every command and flag.

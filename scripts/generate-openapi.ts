@@ -16,6 +16,8 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 
 import { buildOpenApiDocument, PRODUCTION_SERVER_URL } from '../lib/api/openapi'
+import { codeSamples } from './sdk-gen/code-samples'
+import { loadSpec, type Json } from './sdk-gen/spec'
 
 const OUT_FILE = resolve(import.meta.dirname, '../api-docs/openapi.json')
 
@@ -23,6 +25,19 @@ function main(): void {
   const document = buildOpenApiDocument(PRODUCTION_SERVER_URL)
 
   mkdirSync(dirname(OUT_FILE), { recursive: true })
+  writeFileSync(OUT_FILE, `${JSON.stringify(document, null, 2)}\n`, 'utf8')
+
+  // Second pass: TypeScript / Python / CLI snippets per operation, named by the
+  // same rules the SDK generators use (so they can't drift from the SDKs).
+  // Docs-only — the live /api/v1/openapi.json doesn't carry them.
+  const paths = document.paths as Record<string, Record<string, Json>>
+  for (const op of loadSpec(OUT_FILE).operations) {
+    const operation = paths[op.path][op.method.toLowerCase()]
+    const body = (operation.requestBody as Json | undefined)?.content as Json | undefined
+    const example = (body?.['application/json'] as Json | undefined)?.example as Json | undefined
+    operation['x-codeSamples'] = codeSamples(op, example)
+  }
+
   // Pretty and newline-terminated so diffs are reviewable. Key order follows
   // the source, which is deterministic — no timestamps or random values.
   writeFileSync(OUT_FILE, `${JSON.stringify(document, null, 2)}\n`, 'utf8')
