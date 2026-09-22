@@ -86,3 +86,53 @@ jobs:
       # build needs no secrets. If a future change makes it need one, this
       # job is where you'll find out.
       - run: pnpm build
+
+  # packages/sdk-ts (@horizonpay/invoice-ai). The resource classes and types are
+  # generated from api-docs/openapi.json and committed, like the API docs above:
+  # regenerate and fail on any diff, so a spec change can't ship without the
+  # SDK that matches it. Then build once and run the unit tests on every Node
+  # version the package supports.
+  sdk-ts:
+    name: TypeScript SDK (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [18, 20, 22]
+    steps:
+      - uses: actions/checkout@v7
+      # pnpm 11 itself needs Node 22+, so install, generate and build on the
+      # repo's Node first, then switch to the matrix version to test.
+      - uses: ./.github/actions/setup
+      - run: pnpm sdk:gen
+      - name: Fail if the generated SDK drifted
+        run: |
+          if ! git diff --exit-code -- packages/sdk-ts/src; then
+            echo "::error::The TypeScript SDK is stale. Run 'pnpm sdk:gen' and commit the result."
+            exit 1
+          fi
+          untracked=$(git ls-files --others --exclude-standard -- packages/sdk-ts/src)
+          if [ -n "$untracked" ]; then
+            echo "::error::Generated SDK files are not committed: $untracked"
+            exit 1
+          fi
+      - run: pnpm --filter @horizonpay/invoice-ai typecheck
+      - run: pnpm --filter @horizonpay/invoice-ai build
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Unit tests
+        working-directory: packages/sdk-ts
+        run: ./node_modules/.bin/vitest run
+      - name: Smoke-test the built package (CJS + ESM)
+        working-directory: packages/sdk-ts
+        run: |
+          node -e "const m = require('./dist/index.cjs'); if (typeof m.InvoiceAI !== 'function') process.exit(1)"
+          node --input-type=module -e "const m = await import('./dist/index.js'); if (typeof m.default !== 'function') process.exit(1)"
+      # Every SDK method against a Prism mock of the spec. Skips itself if
+      # Prism can't be downloaded, so it never blocks on a registry outage.
+      - name: Contract tests (Prism)
+        if: matrix.node == 22
+        working-directory: packages/sdk-ts
+        run: ./node_modules/.bin/vitest run --config vitest.contract.config.ts
