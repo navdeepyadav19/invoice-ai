@@ -136,3 +136,44 @@ jobs:
         if: matrix.node == 22
         working-directory: packages/sdk-ts
         run: ./node_modules/.bin/vitest run --config vitest.contract.config.ts
+
+  # packages/cli (@horizonpay/invoice-ai-cli, binary `invoice-ai`). It imports
+  # the built SDK, so build the SDK first, then the CLI. Unit and --help
+  # snapshot tests run on every supported Node; the built binary is smoke-tested
+  # and, on Node 22, run end to end against a Prism mock of the spec (skips
+  # itself if Prism can't be downloaded).
+  cli:
+    name: CLI (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [18, 20, 22]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - run: pnpm --filter @horizonpay/invoice-ai build
+      - run: pnpm --filter @horizonpay/invoice-ai-cli typecheck
+      - run: pnpm --filter @horizonpay/invoice-ai-cli build
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Unit and snapshot tests
+        working-directory: packages/cli
+        run: ./node_modules/.bin/vitest run
+      - name: Smoke-test the built binary
+        working-directory: packages/cli
+        env:
+          INVOICE_AI_NO_UPDATE_CHECK: '1'
+        run: |
+          node dist/index.js --help > /dev/null
+          node dist/index.js --version
+          node dist/index.js invoices --help > /dev/null
+          # No credentials must exit 3 (auth), not crash.
+          set +e; node dist/index.js customers list; code=$?; set -e
+          if [ "$code" -ne 3 ]; then echo "::error::expected exit 3 without credentials, got $code"; exit 1; fi
+      - name: End-to-end tests (Prism)
+        if: matrix.node == 22
+        working-directory: packages/cli
+        run: ./node_modules/.bin/vitest run --config vitest.e2e.config.ts
