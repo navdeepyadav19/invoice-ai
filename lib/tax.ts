@@ -6,6 +6,7 @@
  */
 
 import { amountInWords, mulMinor, toMinor } from './money'
+import { currencyDecimals, STORED_DECIMALS } from './currency'
 
 export interface TaxLineInput {
   description: string
@@ -52,13 +53,30 @@ function clampPercent(value: number): number {
   return Math.min(value, 100)
 }
 
-function computeLine(line: TaxLineInput): TaxLineResult {
+/**
+ * The engine counts in hundredths of a major unit for every currency (that is
+ * what numeric(14,2) stores), but a zero-decimal currency has no hundredths:
+ * 10% tax on ¥333 is ¥33, not ¥33.30. `step` is how many hundredths make one
+ * real minor unit — 100 for JPY, 1 for USD — and every amount is rounded to
+ * it, so the stored totals always add up in the currency's own units.
+ */
+function roundToStep(minor: number, step: number): number {
+  if (step === 1) return minor
+  const units = Math.round(Math.abs(minor) / step) * step
+  return minor < 0 ? -units : units
+}
+
+function stepFor(currency: string): number {
+  return 10 ** Math.max(0, STORED_DECIMALS - currencyDecimals(currency))
+}
+
+function computeLine(line: TaxLineInput, step = 1): TaxLineResult {
   const rateMinor = toMinor(line.rate)
-  const grossMinor = mulMinor(rateMinor, line.quantity)
+  const grossMinor = roundToStep(mulMinor(rateMinor, line.quantity), step)
   const discountPct = clampPercent(line.discountPercent)
-  const discountMinor = mulMinor(grossMinor, discountPct / 100)
+  const discountMinor = roundToStep(mulMinor(grossMinor, discountPct / 100), step)
   const taxableMinor = grossMinor - discountMinor
-  const taxMinor = mulMinor(taxableMinor, clampPercent(line.taxRate) / 100)
+  const taxMinor = roundToStep(mulMinor(taxableMinor, clampPercent(line.taxRate) / 100), step)
 
   return {
     ...line,
@@ -71,7 +89,8 @@ function computeLine(line: TaxLineInput): TaxLineResult {
 }
 
 export function computeInvoice(input: TaxInvoiceInput, currency = 'USD'): TaxInvoiceResult {
-  const lines = input.lines.map(computeLine)
+  const step = stepFor(currency)
+  const lines = input.lines.map((line) => computeLine(line, step))
   const sum = (pick: (l: TaxLineResult) => number) => lines.reduce((acc, l) => acc + pick(l), 0)
 
   const subtotalMinor = sum((l) => l.grossMinor)

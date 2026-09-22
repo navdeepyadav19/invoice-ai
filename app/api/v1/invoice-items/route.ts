@@ -33,7 +33,7 @@ export const GET = withApi({ scope: 'invoices:read' }, async (ctx, request) => {
   const { invoice, items } = await invoices.get(ctx, invoiceRef)
   const refs = await invoices.refsForInvoice(ctx, invoice, items)
 
-  return json({ data: items.map((item) => serializeLineItem(item, refs)) })
+  return json({ data: items.map((item) => serializeLineItem(item, invoice.currency, refs)) })
 })
 
 /**
@@ -46,15 +46,20 @@ export const POST = withApi(
   { scope: 'invoices:write', idempotent: 'required' },
   async (ctx, request) => {
     const wire = parseWire(invoiceItemWireSchema, (await readJson(request)) as unknown)
-    const { invoice, items } = await invoices.addItem(ctx, wire.invoice, {
-      description: wire.description,
-      quantity: wire.quantity,
-      unit: wire.unit,
-      rate: wire.unit_amount !== undefined ? wire.unit_amount / 100 : undefined,
-      discount_percent: wire.discount_percent,
-      tax_rate: wire.tax_rate,
-      price: wire.price,
-    })
+    const { invoice, items } = await invoices.addItem(
+      ctx,
+      wire.invoice,
+      {
+        description: wire.description,
+        quantity: wire.quantity,
+        unit: wire.unit,
+        discount_percent: wire.discount_percent,
+        tax_rate: wire.tax_rate,
+        price: wire.price,
+      },
+      // Minor units of the invoice's currency; the service knows which one.
+      { unitAmountMinor: wire.unit_amount },
+    )
     const refs = await invoices.refsForInvoice(ctx, invoice, items)
 
     return json({ data: serializeInvoice(invoice, items, refs) }, { status: 201 })

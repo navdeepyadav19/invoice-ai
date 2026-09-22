@@ -45,10 +45,11 @@ Every error body uses the [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) `ap
 
 | `code` | HTTP status | `title` | When it happens |
 |---|---|---|---|
-| `validation` | `422` | Validation failed | The body failed validation, isn't valid JSON, or a business rule rejected an input value. See `errors` for the fields. Also returned when an `Idempotency-Key` is reused with a different request. |
+| `validation` | `422` | Validation failed | The body or a query parameter failed validation, the body isn't valid JSON, or a business rule rejected an input value. An invalid `cursor` is reported here too. See `errors` for the fields. |
+| `idempotency_mismatch` | `422` | Idempotency-Key reused | An `Idempotency-Key` was reused with a different request. Use a new key for each distinct request. See [Idempotency](/idempotency). |
 | `unauthorized` | `401` | Unauthorized | The API key is missing, malformed, unknown, revoked or expired. Includes `WWW-Authenticate: Bearer realm="invoice-ai"`. See [Authentication](/authentication#authentication-errors). |
 | `forbidden` | `403` | Insufficient scope | The key is valid but doesn't have the scope this endpoint needs. Includes `WWW-Authenticate: Bearer`. |
-| `not_found` | `404` | Not found | No such resource, **or it belongs to another account**. We never return `403` for someone else's id, so ids can't be discovered by probing. |
+| `not_found` | `404` | Not found | No such resource, **or it belongs to another account**, or the id isn't a valid id at all. We never return `403` for someone else's id, so ids can't be discovered by probing. |
 | `invalid_state` | `409` | Invalid state for this operation | The resource exists but is in the wrong state, for example editing a finalized invoice or voiding a paid one. See [Invoice lifecycle](/invoice-lifecycle). |
 | `conflict` | `409` | Conflict | A uniqueness or concurrency clash, for example a request with the same `Idempotency-Key` that's still in progress. |
 | `idempotency_key_required` | `428` | Idempotency-Key required | This endpoint requires an `Idempotency-Key` header and the request didn't send one. See [Idempotency](/idempotency). |
@@ -129,7 +130,7 @@ if not res.ok:
 | Retry? | Codes |
 |---|---|
 | Yes, with backoff | `rate_limited` (wait for `Retry-After`), `conflict` from an in-flight idempotent request, `upstream_failed`, `internal_error` |
-| No. Fix the request first | `validation`, `unauthorized`, `forbidden`, `not_found`, `invalid_state`, `idempotency_key_required` |
+| No. Fix the request first | `validation`, `idempotency_mismatch`, `unauthorized`, `forbidden`, `not_found`, `invalid_state`, `idempotency_key_required` |
 
 When you retry a write, **send the same `Idempotency-Key`** so the retry can't do the work twice. A failed request (any status of `400` or higher) doesn't store a response, so a retry with the same key runs again.
 

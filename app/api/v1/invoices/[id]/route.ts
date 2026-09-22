@@ -22,15 +22,23 @@ export const GET = withApi<Params>({ scope: 'invoices:read' }, async (ctx, _requ
 /**
  * PATCH /api/v1/invoices/{id} — drafts only.
  *
- * Partial: any subset of the create fields. Once finalized, the document is
- * frozen — the customer may already have the PDF — and the service returns
- * 409 invalid_state rather than silently ignoring the write.
+ * Partial: any subset of the create fields, `customer` included. Omitted
+ * fields keep their stored values and the lines are only replaced when
+ * `items` is sent. Once finalized, the document is frozen — the customer may
+ * already have the PDF — and the service returns 409 invalid_state rather
+ * than silently ignoring the write.
  */
 export const PATCH = withApi<Params>({ scope: 'invoices:write' }, async (ctx, request, route) => {
   const { id } = await route.params
   const wire = parseWire(invoiceWireSchema, (await readJson(request)) as unknown)
   const base = await invoices.readDraftInput(ctx, id)
-  const { invoice, items } = await invoices.updateDraft(ctx, id, await invoices.wireToDraftInput(ctx, wire, base))
+  const { invoice, items } = await invoices.updateDraft(
+    ctx,
+    id,
+    await invoices.wireToDraftInput(ctx, wire, base.input),
+    // Link (never overwrite) the saved customer: the one sent, or the current one.
+    { customer: wire.customer ?? base.customer ?? undefined },
+  )
   const refs = await invoices.refsForInvoice(ctx, invoice, items)
 
   return json({ data: serializeInvoice(invoice, items, refs) })

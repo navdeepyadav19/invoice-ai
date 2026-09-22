@@ -1,5 +1,7 @@
 import { requireScope, type AuthContext } from '@/lib/auth/context'
 import { fromPostgres, notFound, ServiceError } from '@/lib/services/errors'
+import { afterFilter, clampLimit, parseCursor, toPage, type Page } from '@/lib/services/pagination'
+import { isUuid } from '@/lib/catalog/ids'
 import { assertSafeUrl } from '@/lib/webhooks/deliver'
 import { generateSecret } from '@/lib/webhooks/sign'
 import { WEBHOOK_EVENTS, type WebhookEvent } from '@/lib/webhooks/events'
@@ -29,16 +31,26 @@ export interface WebhookEndpointRow {
   created_at: string
 }
 
-export async function list(ctx: AuthContext) {
+export async function list(
+  ctx: AuthContext,
+  options: { cursor?: string | null; limit?: number } = {},
+): Promise<Page<WebhookEndpointRow>> {
   requireScope(ctx, 'webhooks:manage')
 
-  const { data, error } = await ctx.supabase
+  const limit = clampLimit(options.limit)
+  let q = ctx.supabase
     .from('webhook_endpoints')
     .select('*')
     .order('created_at', { ascending: false })
+    .order('id', { ascending: false })
+    .limit(limit + 1)
 
+  const after = parseCursor(options.cursor)
+  if (after) q = q.or(afterFilter(after))
+
+  const { data, error } = await q
   if (error) throw fromPostgres(error)
-  return (data ?? []) as unknown as WebhookEndpointRow[]
+  return toPage((data ?? []) as unknown as WebhookEndpointRow[], limit)
 }
 
 export async function create(
@@ -88,6 +100,7 @@ export async function create(
 
 export async function remove(ctx: AuthContext, id: string): Promise<void> {
   requireScope(ctx, 'webhooks:manage')
+  if (!isUuid(id)) throw notFound('Webhook endpoint not found.')
 
   const { data, error } = await ctx.supabase
     .from('webhook_endpoints')

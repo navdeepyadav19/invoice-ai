@@ -1,3 +1,5 @@
+import type { serializeInvoice } from '@/lib/api/serialize'
+
 /**
  * The event catalogue, in a module with no server-only imports.
  *
@@ -37,3 +39,20 @@ export const WEBHOOK_EVENT_LABELS: Record<WebhookEvent, string> = {
   'invoice.paid': 'An invoice was marked paid',
   'invoice.voided': 'An invoice was voided',
 }
+
+/**
+ * The body POSTed to a webhook endpoint (payload v2, migration 0014).
+ *
+ * Stripe-style envelope around the same `Invoice` the REST API returns —
+ * public ids, integer minor units, derived `overdue` — minus `lines`
+ * (GET /invoices/{id} has them). `id` is the event id; the `webhook-id`
+ * header is the delivery id, which is what to deduplicate on.
+ */
+export interface WebhookEventPayload {
+  id: string
+  type: WebhookEvent
+  created_at: string
+  data: { object: WebhookInvoiceObject }
+}
+
+export type WebhookInvoiceObject = Omit<ReturnType<typeof serializeInvoice>, 'lines'>

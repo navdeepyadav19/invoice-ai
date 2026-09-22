@@ -9,6 +9,9 @@ import {
   priceSchema,
   priceUpdateSchema,
   priceWirePartialToInput,
+  priceWireToInput,
+  invoiceWireSchema,
+  invoiceCreateWireSchema,
   priceWireSchema,
   priceWireUpdateSchema,
   productSchema,
@@ -204,7 +207,7 @@ describe('catalog updates (PATCH)', () => {
 
   it('a nickname-only wire PATCH maps to a nickname-only service update', () => {
     const wire = priceWireUpdateSchema.parse({ nickname: 'Monthly (EU)' })
-    const input = priceWirePartialToInput(wire)
+    const input = priceWirePartialToInput(wire, 'USD')
 
     expect(input).toEqual({ nickname: 'Monthly (EU)' })
     // The service only writes keys that are present, so a recurring price stays
@@ -217,7 +220,7 @@ describe('catalog updates (PATCH)', () => {
 
   it('an empty or null nickname clears it on update', () => {
     expect(priceUpdateSchema.parse({ nickname: '' })).toEqual({ nickname: null })
-    expect(priceWirePartialToInput(priceWireUpdateSchema.parse({ nickname: null }))).toEqual({
+    expect(priceWirePartialToInput(priceWireUpdateSchema.parse({ nickname: null }), 'USD')).toEqual({
       nickname: null,
     })
   })
@@ -238,6 +241,21 @@ describe('catalog updates (PATCH)', () => {
       active: true,
       tax_rate: 0,
     })
+  })
+
+  it('reads unit_amount in the price currency’s minor unit', () => {
+    expect(priceWireToInput(priceWireSchema.parse({ product: 'prod_x', unit_amount: 5000, currency: 'JPY' })).unit_amount).toBe(5000)
+    expect(priceWireToInput(priceWireSchema.parse({ product: 'prod_x', unit_amount: 2500, currency: 'USD' })).unit_amount).toBe(25)
+    // The stored currency applies when the PATCH doesn't send one…
+    expect(priceWirePartialToInput(priceWireUpdateSchema.parse({ unit_amount: 5000 }), 'JPY').unit_amount).toBe(5000)
+    // …and a currency sent alongside wins.
+    expect(priceWirePartialToInput(priceWireUpdateSchema.parse({ unit_amount: 5000, currency: 'usd' }), 'JPY').unit_amount).toBe(50)
+  })
+
+  it('an invoice PATCH body may omit customer and items; create may not omit customer', () => {
+    expect(invoiceWireSchema.safeParse({ description: 'Net 30' }).success).toBe(true)
+    expect(invoiceWireSchema.parse({ footer: 'Thanks' })).not.toHaveProperty('items')
+    expect(invoiceCreateWireSchema.safeParse({ items: [{ description: 'x', unit_amount: 100 }] }).success).toBe(false)
   })
 
   it('update schemas still validate what is sent', () => {

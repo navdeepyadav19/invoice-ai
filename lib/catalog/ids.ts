@@ -52,3 +52,12 @@ export function isInvoiceId(value: string): boolean {
 export function isInvoiceItemId(value: string): boolean {
   return /^ii_[A-Za-z0-9]{24}$/.test(value)
 }
+
+/**
+ * Every endpoint also accepts the internal UUID. Anything that is neither a
+ * public id nor a UUID can't name a row, so services answer it with a 404
+ * without querying — Postgres would otherwise reject the uuid cast (22P02).
+ */
+export function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)
+}

@@ -1,17 +1,17 @@
 import { requireScope, type AuthContext } from '@/lib/auth/context'
 import { fromPostgres, invalidState, notFound, ServiceError, upstreamFailed } from '@/lib/services/errors'
-import { decodeCursor, encodeCursor, type Page } from '@/lib/services/pagination'
+import { afterFilter, clampLimit, parseCursor, toPage, type Page } from '@/lib/services/pagination'
 import * as businesses from '@/lib/services/business'
 import { get as getClient, rowToInput as clientRowToInput } from '@/lib/services/clients'
 import { invoiceSchema, emptyClientInput, type InvoiceInput, type InvoiceWireInput } from '@/lib/validators'
 import { computeInvoice, type TaxLineInput } from '@/lib/tax'
-import { paiseToStored } from '@/lib/money-api'
+import { paiseToStored, wireMinorToMajor } from '@/lib/money-api'
 import { getManyWithProducts } from '@/lib/services/prices'
-import { isInvoiceId, isInvoiceItemId, nextCustomerId, nextInvoiceId, nextInvoiceItemId } from '@/lib/catalog/ids'
+import { isInvoiceId, isInvoiceItemId, isUuid, nextCustomerId, nextInvoiceId, nextInvoiceItemId } from '@/lib/catalog/ids'
 import { resolvePricedLines, type CatalogPrice, type ResolvedLine } from '@/lib/catalog/resolve'
 import { snapshotBusiness } from '@/lib/invoice-view'
 import { viewFromRows } from '@/lib/invoice-load'
-import { deriveStatus } from '@/lib/invoice-status'
+import { deriveStatus, todayUtc } from '@/lib/invoice-status'
 import { renderInvoicePdf, pdfFilename } from '@/lib/pdf'
 import { sendInvoiceEmail } from '@/lib/email'
 import { publicInvoiceUrl } from '@/lib/urls'
@@ -70,37 +70,27 @@ export async function list(ctx: AuthContext, options: ListInvoicesOptions = {}):
     .order('id', { ascending: false })
     .limit(limit + 1)
 
-  // `overdue` is derived, so it can't be a WHERE clause. Ask the database for
-  // issued invoices and narrow afterwards, otherwise filtering by overdue
-  // silently returns nothing.
-  if (options.status && options.status !== 'overdue') q = q.eq('status', options.status)
-  if (options.status === 'overdue') q = q.eq('status', 'open')
+  // `overdue` is never stored, but it is still a WHERE clause: open and due
+  // before today (UTC — the same day deriveStatus uses). Filtering in SQL, not
+  // after the fetch, is what keeps every page full and `next_cursor` honest;
+  // narrowing afterwards returned short pages and could stop early.
+  if (options.status === 'overdue') {
+    q = q.eq('status', 'open').lt('due_date', todayUtc())
+  } else if (options.status) {
+    q = q.eq('status', options.status)
+  }
 
   if (options.clientId) q = q.eq('client_id', options.clientId)
   if (options.from) q = q.gte('issue_date', options.from)
   if (options.to) q = q.lte('issue_date', options.to)
 
-  const after = decodeCursor(options.cursor)
-  if (after) {
-    q = q.or(`created_at.lt.${after.createdAt},and(created_at.eq.${after.createdAt},id.lt.${after.id})`)
-  }
+  const after = parseCursor(options.cursor)
+  if (after) q = q.or(afterFilter(after))
 
   const { data, error } = await q
   if (error) throw fromPostgres(error)
 
-  let rows = (data ?? []) as InvoiceRow[]
-  if (options.status === 'overdue') {
-    rows = rows.filter((row) => deriveStatus(row) === 'overdue')
-  }
-
-  const hasMore = rows.length > limit
-  const page = hasMore ? rows.slice(0, limit) : rows
-  const last = page.at(-1)
-
-  return {
-    data: page,
-    next_cursor: hasMore && last ? encodeCursor({ createdAt: last.created_at, id: last.id }) : null,
-  }
+  return toPage((data ?? []) as InvoiceRow[], limit)
 }
 
 export async function get(ctx: AuthContext, id: string): Promise<InvoiceWithItems> {
@@ -108,21 +98,32 @@ export async function get(ctx: AuthContext, id: string): Promise<InvoiceWithItem
   return load(ctx, id)
 }
 
-export async function events(ctx: AuthContext, id: string): Promise<InvoiceEventRow[]> {
+export async function events(
+  ctx: AuthContext,
+  id: string,
+  options: { cursor?: string | null; limit?: number } = {},
+): Promise<Page<InvoiceEventRow>> {
   requireScope(ctx, 'invoices:read')
 
   // Confirms the invoice is ours before returning its history. Without this,
   // an unknown id would return an empty array rather than a 404.
   const { invoice: eventInvoice } = await load(ctx, id)
+  const limit = clampLimit(options.limit)
 
-  const { data, error } = await ctx.supabase
+  let q = ctx.supabase
     .from('invoice_events')
     .select('*')
     .eq('invoice_id', eventInvoice.id)
     .order('created_at', { ascending: false })
+    .order('id', { ascending: false })
+    .limit(limit + 1)
 
+  const after = parseCursor(options.cursor)
+  if (after) q = q.or(afterFilter(after))
+
+  const { data, error } = await q
   if (error) throw fromPostgres(error)
-  return (data ?? []) as InvoiceEventRow[]
+  return toPage((data ?? []) as InvoiceEventRow[], limit)
 }
 
 export async function pdf(ctx: AuthContext, id: string): Promise<{ buffer: Buffer; filename: string }> {
@@ -300,7 +301,7 @@ export async function send(
   ctx: AuthContext,
   id: string,
   options: { to?: string } = {},
-): Promise<{ emailed: boolean; publicUrl: string; invoiceNumber: string }> {
+): Promise<{ emailed: boolean; emailedTo: string; publicUrl: string; invoiceNumber: string }> {
   requireScope(ctx, 'invoices:send')
 
   const existing = await load(ctx, id)
@@ -343,7 +344,7 @@ export async function send(
 
   await writeEvent(ctx, invoiceId, 'emailed', { to: recipient })
 
-  return { emailed: true, publicUrl, invoiceNumber }
+  return { emailed: true, emailedTo: recipient, publicUrl, invoiceNumber }
 }
 
 /**
@@ -448,6 +449,8 @@ export async function voidInvoice(ctx: AuthContext, id: string, options: { reaso
 // ---------------------------------------------------------------------------
 
 async function load(ctx: AuthContext, id: string): Promise<InvoiceWithItems> {
+  if (!isInvoiceId(id) && !isUuid(id)) throw notFound('Invoice not found.')
+
   const q = ctx.supabase.from('invoices').select('*')
   const { data: invoice, error } = isInvoiceId(id)
     ? await q.eq('public_id', id).maybeSingle()
@@ -661,14 +664,21 @@ export async function addItem(
   ctx: AuthContext,
   id: string,
   line: InvoiceInput['items'][number],
+  options: { unitAmountMinor?: number } = {},
 ): Promise<InvoiceWithItems> {
   requireScope(ctx, 'invoices:write')
   const { invoice, items } = await load(ctx, id)
   if (invoice.status !== 'draft') {
     throw invalidState('This invoice has been finalized and can no longer be edited.')
   }
+  // A wire `unit_amount` is in the invoice currency's minor unit, which only
+  // the stored invoice knows.
+  const added =
+    options.unitAmountMinor !== undefined
+      ? { ...line, rate: wireMinorToMajor(options.unitAmountMinor, invoice.currency, 'unit_amount') }
+      : line
   const input = await draftInputFor(ctx, invoice, items)
-  return writeDraft(ctx, { ...input, items: [...input.items, line] }, invoice.id)
+  return writeDraft(ctx, { ...input, items: [...input.items, added] }, invoice.id)
 }
 
 /**
@@ -682,6 +692,7 @@ export async function findItem(
   id: string,
 ): Promise<{ invoice: InvoiceRow; item: InvoiceItemRow } | null> {
   requireScope(ctx, 'invoices:read')
+  if (!isInvoiceItemId(id) && !isUuid(id)) return null
 
   const q = ctx.supabase.from('invoice_items').select('*')
   const { data, error } = isInvoiceItemId(id)
@@ -744,13 +755,18 @@ export async function removeItem(
  *
  * Exported for the PATCH route, which merges a partial wire payload over this.
  */
-export async function readDraftInput(ctx: AuthContext, id: string): Promise<InvoiceInput> {
+export async function readDraftInput(
+  ctx: AuthContext,
+  id: string,
+): Promise<{ input: InvoiceInput; customer: string | null }> {
   requireScope(ctx, 'invoices:write')
   const { invoice, items } = await load(ctx, id)
   if (invoice.status !== 'draft') {
     throw invalidState('This invoice has been finalized and can no longer be edited.')
   }
-  return draftInputFor(ctx, invoice, items)
+  // `customer` is the linked row, so a PATCH that leaves it out keeps billing
+  // the same customer without rewriting that customer's record.
+  return { input: await draftInputFor(ctx, invoice, items), customer: invoice.client_id }
 }
 
 /**
@@ -820,7 +836,11 @@ async function draftInputFor(
  * With `base` (the current draft) this is a PATCH merge; without it, a
  * create. Customer references resolve to full client snapshots, `description`
  * becomes notes, `footer` becomes terms, and `unit_amount` minor units become
- * major-unit rates.
+ * major-unit rates in the invoice currency (the one sent, the draft's, or the
+ * business default — the same order writeDraft resolves it in).
+ *
+ * PATCH semantics: every omitted field keeps its stored value, and the lines
+ * are only replaced when `items` is sent.
  */
 export async function wireToDraftInput(
   ctx: AuthContext,
@@ -840,6 +860,11 @@ export async function wireToDraftInput(
     dueDate = due.toISOString().slice(0, 10)
   }
 
+  const currency =
+    wire.currency ?? base?.currency ?? (wire.items?.some((item) => item.unit_amount !== undefined)
+      ? ((await businesses.getPrimary(ctx)).currency ?? 'USD')
+      : undefined)
+
   return {
     client,
     issue_date: issueDate,
@@ -849,11 +874,14 @@ export async function wireToDraftInput(
     notes: wire.description ?? base?.notes,
     terms: wire.footer ?? base?.terms,
     items:
-      wire.items?.map((item) => ({
+      wire.items?.map((item, index) => ({
         description: item.description,
         quantity: item.quantity,
         unit: item.unit,
-        rate: item.unit_amount !== undefined ? item.unit_amount / 100 : undefined,
+        rate:
+          item.unit_amount !== undefined
+            ? wireMinorToMajor(item.unit_amount, currency ?? 'USD', `items.${index}.unit_amount`)
+            : undefined,
         discount_percent: item.discount_percent,
         tax_rate: item.tax_rate,
         price: item.price,
@@ -924,7 +952,3 @@ async function writeEvent(
   }
 }
 
-function clampLimit(limit?: number): number {
-  if (!limit || Number.isNaN(limit)) return 25
-  return Math.min(Math.max(Math.trunc(limit), 1), 100)
-}

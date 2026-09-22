@@ -1,5 +1,6 @@
 import { json, readJson, withApi } from '@/lib/api/handler'
 import { DEFAULT_RULES } from '@/lib/api/rate-limit'
+import { serializeInvoice } from '@/lib/api/serialize'
 import * as invoices from '@/lib/services/invoices'
 
 type Params = { id: string }
@@ -8,6 +9,8 @@ type Params = { id: string }
  * POST /api/v1/invoices/{id}/send  { to? }
  *
  * Finalizes the invoice first if it has no number yet, then emails the PDF.
+ * Responds like every other action — `{ data: Invoice }` — plus `emailed_to`,
+ * the address the email actually went to.
  *
  * Rate-limited far harder than everything else (10/hour, not 120/minute):
  * each call costs money, lands in a third party's inbox, and is the first thing
@@ -26,15 +29,9 @@ export const POST = withApi<Params>(
     const body = (await readJson(request)) as { to?: string }
 
     const result = await invoices.send(ctx, id, { to: body?.to })
-    const { invoice } = await invoices.get(ctx, id)
+    const { invoice, items } = await invoices.get(ctx, id)
+    const refs = await invoices.refsForInvoice(ctx, invoice, items)
 
-    return json({
-      data: {
-        id: invoice.public_id,
-        invoice_number: result.invoiceNumber,
-        emailed: result.emailed,
-        public_url: result.publicUrl,
-      },
-    })
+    return json({ data: serializeInvoice(invoice, items, refs), emailed_to: result.emailedTo })
   },
 )

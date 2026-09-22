@@ -37,7 +37,7 @@ const UTC_DAY = new Intl.DateTimeFormat('en-CA', {
   day: '2-digit',
 })
 
-function todayUtc(now: Date): string {
+export function todayUtc(now: Date = new Date()): string {
   return UTC_DAY.format(now)
 }
 
