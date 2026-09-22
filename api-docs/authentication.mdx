@@ -1,0 +1,105 @@
+---
+title: "Authentication"
+description: "Authenticate with scoped API keys sent as Bearer tokens."
+icon: "key"
+---
+
+Every request to `/api/v1`, except `GET /openapi.json`, needs an API key in the `Authorization` header:
+
+```bash
+curl https://invoice.horizonpay.co/api/v1/invoices \
+  -H "Authorization: Bearer inv_live_ab12cd34_7Kf9QmXz2pR4vNt6LwYb8HsJ3dGc5eAu"
+```
+
+## Key format
+
+```text
+inv_live_ab12cd34_7Kf9QmXz2pR4vNt6LwYb8HsJ3dGc5eAu
+└──┬───┘ └──┬───┘ └───────────────┬──────────────┘
+   │        │                     └─ 32-character base62 secret. Never stored, shown once.
+   │        └─ 8-character key id, shown in Settings so you can tell keys apart.
+   └─ Fixed marker, so secret scanners and log scrubbers can recognise a leaked key.
+```
+
+We store only a peppered HMAC of the secret, so **a lost key can't be shown again**. Revoke it and create a new one.
+
+## Creating a key
+
+Keys are created in the web app at [**Settings → API keys**](https://invoice.horizonpay.co/settings/api-keys):
+
+1. **What is it for?** A required name, like "Zapier" or "billing cron".
+2. **Scopes.** Choose a preset or pick scopes individually:
+   - **Read only**: `business:read`, `clients:read`, `invoices:read`. This is the default.
+   - **Raise and send invoices**: read only plus `clients:write`, `invoices:write`, `invoices:finalize`, `invoices:send` and `payments:write`.
+   - **Custom**: any combination of the scopes below.
+3. **Expires after (days).** `0` means the key never expires.
+
+<Note>
+  You can't create, list or revoke keys through the API. That's deliberate: a leaked key can't mint more keys or hide its tracks. Guest (anonymous) accounts can't hold keys at all.
+</Note>
+
+## Scopes
+
+A key can call an endpoint only if it holds that endpoint's scope. Otherwise the request fails with `403` and `code: "forbidden"`. The error's `detail` names the missing scope, for example `This credential is missing the invoices:send scope.`
+
+| Scope | Allows | Endpoints |
+|---|---|---|
+| `business:read` | Read your business profile, tax ID and bank details | `GET /business` |
+| `clients:read` | List and read your customers | `GET /customers`, `GET /customers/{id}` |
+| `clients:write` | Create, update and archive customers | `POST /customers`, `PATCH /customers/{id}`, `DELETE /customers/{id}` |
+| `products:read` | List and read products and prices | `GET /products`, `GET /products/{id}`, `GET /prices`, `GET /prices/{id}` |
+| `products:write` | Create, update and archive products and prices | `POST`, `PATCH` and `DELETE` on `/products` and `/prices` |
+| `invoices:read` | List and read invoices, including PDFs | `GET /invoices`, `GET /invoices/{id}`, `GET /invoices/{id}/pdf`, `GET /invoices/{id}/events`, `GET /invoice-items`, `GET /invoice-items/{id}` |
+| `invoices:write` | Create, edit and delete **drafts** | `POST /invoices`, `PATCH /invoices/{id}`, `DELETE /invoices/{id}`, `POST /invoice-items`, `DELETE /invoice-items/{id}` |
+| `invoices:finalize` | Finalize invoices and void them | `POST /invoices/{id}/finalize`, `POST /invoices/{id}/void` |
+| `invoices:send` | Email invoices to your customers | `POST /invoices/{id}/send` |
+| `payments:write` | Mark invoices as paid | `POST /invoices/{id}/pay` |
+| `webhooks:manage` | Manage webhook endpoints | `GET /webhook-endpoints`, `POST /webhook-endpoints`, `DELETE /webhook-endpoints/{id}` |
+
+A few rules shape this list:
+
+- **Issuing is separate from editing.** `invoices:write` can't assign an invoice number. Editing a draft is reversible, but a number is permanent.
+- **Sending implies finalizing.** `POST /invoices/{id}/send` finalizes a draft before emailing it, and it needs only `invoices:send` to do that.
+- **Voiding shares `invoices:finalize`.** Finalizing and voiding both control your number series, so a key trusted with one is trusted with the other.
+
+Grant each integration only the scopes it needs. A reporting tool that only reads invoices shouldn't hold a key that can email your customers.
+
+## Authentication errors
+
+Authentication failures return `401` with `code: "unauthorized"` and a `WWW-Authenticate: Bearer realm="invoice-ai"` header. The `detail` explains why:
+
+| `detail` | Cause |
+|---|---|
+| ``Send your API key as `Authorization: Bearer inv_live_…`.`` | No `Authorization` header. |
+| `Authorization header must use the Bearer scheme.` | The header isn't `Bearer <token>`. |
+| `Unrecognised credential. Expected an Invoice-AI API key.` | The token doesn't start with `inv_live_`. |
+| `Invalid API key.` | The key is malformed, unknown or has the wrong secret. These cases share one message on purpose. |
+| `This API key has been revoked.` | The key was revoked in Settings. |
+| `This API key has expired.` | The key's expiry date has passed. |
+| `This API key has no usable scopes.` | None of the key's stored scopes are valid any more. |
+
+## Rotating and revoking keys
+
+Revocation takes effect on the very next request. Keys are checked on every call, and nothing is cached. To rotate a key without downtime:
+
+<Steps>
+  <Step title="Create the replacement">
+    Create a new key with the same scopes in Settings → API keys.
+  </Step>
+  <Step title="Deploy it">
+    Update your secret store or environment variable, and roll it out everywhere the old key is used.
+  </Step>
+  <Step title="Revoke the old key">
+    Check the old key's **last used** time in Settings to confirm nothing still uses it, then revoke it.
+  </Step>
+</Steps>
+
+Revoked keys stay in the list, marked revoked, so the audit trail can still name the key behind past requests.
+
+## Keep keys server-side
+
+<Warning>
+  An API key acts as your whole business within its scopes. **Never put a key in browser JavaScript, a mobile app, a public repository or a URL.** Call the API from your own backend, and keep the key in an environment variable or secrets manager.
+</Warning>
+
+If a key leaks, revoke it immediately in Settings. The `inv_live_` prefix is there so secret-scanning tools can spot leaked keys in code and logs.

@@ -1,0 +1,38 @@
+---
+title: "Changelog"
+description: "What's in the Invoice-AI API, and what's changed."
+icon: "clock-rotate-left"
+---
+
+<Update label="September 2026" description="v1">
+  ## REST API v1
+
+  The first public version of the Invoice-AI API, served at `https://invoice.horizonpay.co/api/v1`.
+
+  **Resources**
+
+  - **Business**: `GET /business` reads your business profile. It's read-only in v1.
+  - **Customers**: create, list (with `query` and `include_deleted`), read, update and archive (`cus_…` ids).
+  - **Products and prices**: a catalog of products (`prod_…`) and their one-time or recurring prices (`price_…`), with `unit_amount` in minor units. Recurring prices are data only in v1, and nothing bills automatically.
+  - **Invoices**: create drafts, from catalog prices or ad-hoc lines, then update, delete, finalize, send, pay and void them. You can also download the PDF and read the event history (`in_…` ids).
+  - **Invoice items**: add, list, read and remove single lines on a draft (`ii_…` ids).
+  - **Webhook endpoints**: register, list and delete HTTPS endpoints.
+
+  **Platform**
+
+  - Bearer API keys (`inv_live_…`) with 11 scopes, managed only in Settings → API keys.
+  - RFC 9457 `application/problem+json` errors with stable `code` values.
+  - `Idempotency-Key` support. It's required on invoice creation and on every lifecycle action, with `Idempotent-Replayed` on replays.
+  - Cursor pagination over `created_at` and `id`, with `limit` up to 100.
+  - Per-key rate limits: 120 requests per minute and 10 sends per hour, reported through `RateLimit-*` headers.
+  - Nine webhook event types, signed with Standard Webhooks HMAC-SHA256 and retried on a backoff schedule.
+  - A public OpenAPI 3.1 document at `/api/v1/openapi.json`, and a Postman collection generated from it.
+
+  **Known limitations**
+
+  - Webhook deliveries are currently sent once a day. See [Webhooks](/webhooks#responding-and-retries).
+  - Webhook payloads carry internal UUIDs and a `total` in major units. See [Payload](/webhooks#payload).
+  - `PATCH /invoices/{id}` currently requires `customer`.
+  - No business profile writes, credit notes, OAuth apps or API key management through the API.
+  - There are no official SDKs or CLI yet. Use the OpenAPI document to generate a client.
+</Update>

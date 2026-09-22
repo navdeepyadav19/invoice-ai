@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit",
     "db:types": "supabase gen types typescript --local > lib/database.types.generated.ts",
     "postman:gen": "tsx scripts/generate-postman.ts",
+    "openapi:gen": "tsx scripts/generate-openapi.ts",
     "api:setup": "tsx scripts/setup-api.ts",
     "api:key": "tsx scripts/create-api-key.ts"
   },

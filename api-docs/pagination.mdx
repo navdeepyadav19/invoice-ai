@@ -1,0 +1,100 @@
+---
+title: "Pagination"
+description: "Walk list endpoints with an opaque cursor that stays correct while new records are created."
+icon: "list"
+---
+
+List endpoints return results newest first and page through them with a **cursor**, not page numbers. A cursor marks a position ("everything older than this record"), so records created while you're paging can't shift rows across a page boundary and make you miss one.
+
+## Paginated endpoints
+
+| Endpoint | Filters |
+|---|---|
+| `GET /customers` | `query` (case-insensitive name match), `include_deleted` (`true` to include archived customers) |
+| `GET /products` | `query` (name match), `active` (`true` or `false`) |
+| `GET /prices` | `product` (`prod_…` or UUID), `active`, `currency` (for example `USD`), `type` (`one_time` or `recurring`) |
+| `GET /invoices` | `status` (`draft`, `open`, `paid`, `overdue` or `void`), `customer` (`cus_…` or UUID), `from` and `to` (inclusive `YYYY-MM-DD` bounds on the issue date) |
+
+These return complete lists in one response, with no cursor: `GET /webhook-endpoints`, `GET /invoice-items?invoice=…` and `GET /invoices/{id}/events`.
+
+## Parameters
+
+<ParamField query="limit" type="integer" default="25">
+  How many records to return, from `1` to `100`. Larger values are capped at `100`. A missing, zero or non-numeric value gives the default of `25`.
+</ParamField>
+
+<ParamField query="cursor" type="string">
+  The `next_cursor` from the previous page. Leave it out to get the first page.
+</ParamField>
+
+## Response
+
+```json
+{
+  "data": [
+    { "id": "in_3f9a1c2b4d5e6f708192a3b4", "object": "invoice", "status": "open" },
+    { "id": "in_8c7b6a5f4e3d2c1b0a9f8e7d", "object": "invoice", "status": "paid" }
+  ],
+  "next_cursor": "MjAyNi0wOS0xN1QwOToxMjo0NC4wMDBafDdmM2M..."
+}
+```
+
+<ResponseField name="data" type="array">
+  The records on this page, ordered by creation time, newest first. Records created at the same moment are ordered by id.
+</ResponseField>
+<ResponseField name="next_cursor" type="string | null">
+  Pass this back as `cursor` to get the next page. It's `null` on the last page.
+</ResponseField>
+
+## Fetching every page
+
+<CodeGroup>
+```bash curl
+curl "https://invoice.horizonpay.co/api/v1/invoices?status=open&limit=100" \
+  -H "Authorization: Bearer $INVOICE_AI_API_KEY"
+
+# then, with the next_cursor from that response:
+curl "https://invoice.horizonpay.co/api/v1/invoices?status=open&limit=100&cursor=MjAyNi0wOS0xN..." \
+  -H "Authorization: Bearer $INVOICE_AI_API_KEY"
+```
+
+```javascript JavaScript
+async function* listAll(path, params = {}) {
+  let cursor = null;
+  do {
+    const qs = new URLSearchParams({ ...params, limit: "100", ...(cursor && { cursor }) });
+    const page = await fetch(`${BASE}${path}?${qs}`, { headers }).then((r) => r.json());
+    yield* page.data;
+    cursor = page.next_cursor;
+  } while (cursor);
+}
+
+for await (const invoice of listAll("/invoices", { status: "open" })) {
+  console.log(invoice.number, invoice.amount_due);
+}
+```
+
+```python Python
+def list_all(path, **params):
+    cursor = None
+    while True:
+        query = {**params, "limit": 100, **({"cursor": cursor} if cursor else {})}
+        page = session.get(f"{BASE}{path}", params=query).json()
+        yield from page["data"]
+        cursor = page["next_cursor"]
+        if not cursor:
+            break
+
+for invoice in list_all("/invoices", status="open"):
+    print(invoice["number"], invoice["amount_due"])
+```
+</CodeGroup>
+
+## Things to know
+
+- **Treat cursors as opaque.** Don't build, parse or change them. Their encoding can change.
+- **Keep the same filters** on every page of a walk. A cursor is a position, not a saved query.
+- **Invalid cursors aren't rejected yet.** A cursor we can't decode is currently ignored, which gives you the first page again. Always pass back exactly the `next_cursor` you received.
+- **Don't paginate `status=overdue`.** Overdue isn't stored. It's worked out when an invoice is read (see [Invoice lifecycle](/invoice-lifecycle#overdue)). The API fetches one page of `open` invoices and then drops the ones that aren't past due, so a page can come back short, and `next_cursor` can be `null` even when older overdue invoices exist. To collect every overdue invoice, page through `status=open` and keep the ones whose `status` is `overdue`. Every item in that walk already has its status worked out.
+- **Unknown filter values are ignored.** An unrecognised `status` or `type` returns an unfiltered list rather than an error, and any `active` value other than `true` counts as `false`.
+- **Id filters must exist.** A `customer` or `product` filter that doesn't match one of your records returns `404`, not an empty page.

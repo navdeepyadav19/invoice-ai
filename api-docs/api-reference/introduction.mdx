@@ -1,0 +1,66 @@
+---
+title: "API reference"
+description: "Every Invoice-AI v1 endpoint, generated from the live OpenAPI document."
+icon: "code"
+---
+
+The endpoint pages in this section are generated from the same OpenAPI 3.1 document the API serves at [`/api/v1/openapi.json`](https://invoice.horizonpay.co/api/v1/openapi.json). That document is built from the validation schemas the server itself uses, so the reference and the behaviour come from one source.
+
+## Base URL
+
+```text
+https://invoice.horizonpay.co/api/v1
+```
+
+## Authentication
+
+Every endpoint needs an API key sent as a Bearer token:
+
+```bash
+Authorization: Bearer inv_live_...
+```
+
+In the playground on each endpoint page, paste your key into the **Authorization** field to send real requests against your account.
+
+<Warning>
+  The playground calls the live API. Writes create real records, and `send` emails real people. Use a short-lived key with only the scopes you need, and a test customer whose email address you control.
+</Warning>
+
+## Conventions at a glance
+
+| Topic | Rule | More |
+|---|---|---|
+| Envelope | A successful body is `{ "data": … }`, and lists add `next_cursor`. | [IDs and objects](/ids-and-objects) |
+| Money | Integer minor units: `150000` is 1,500.00. | [Money](/ids-and-objects#money) |
+| Ids | `cus_`, `prod_`, `price_`, `in_` and `ii_` prefixes. UUIDs are accepted too. | [Id prefixes](/ids-and-objects#id-prefixes) |
+| Errors | `application/problem+json`. Branch on `code`. | [Errors](/errors) |
+| Writes | Invoice creates and lifecycle actions require `Idempotency-Key`. | [Idempotency](/idempotency) |
+| Lists | Cursor pagination, with `limit` up to 100. | [Pagination](/pagination) |
+| Limits | 120 requests per minute per key, and 10 sends per hour. | [Rate limits](/rate-limits) |
+
+## Resources
+
+<CardGroup cols={2}>
+  <Card title="Business" icon="building">
+    Read your business profile. `GET` only.
+  </Card>
+  <Card title="Customers" icon="users">
+    Create, list, update and archive the people you bill.
+  </Card>
+  <Card title="Products and prices" icon="tags">
+    Your catalog: what you sell, and how much it costs in each currency.
+  </Card>
+  <Card title="Invoices" icon="file-invoice">
+    Drafts, finalize, send, pay, void, PDFs and event history.
+  </Card>
+  <Card title="Invoice items" icon="list-ol">
+    Add and remove single lines on a draft.
+  </Card>
+  <Card title="Webhook endpoints" icon="webhook">
+    Register HTTPS endpoints for signed event notifications.
+  </Card>
+</CardGroup>
+
+## Versioning
+
+The major version is in the path (`/v1`). Additive changes, such as new endpoints, new optional fields or new response fields, can ship within v1, so ignore fields you don't recognise. Breaking changes will ship under a new major version. See the [changelog](/changelog).
