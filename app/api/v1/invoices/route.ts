@@ -12,7 +12,7 @@ const STATUSES: InvoiceStatus[] = ['draft', 'open', 'paid', 'overdue', 'void']
  * GET /api/v1/invoices?status=&customer=&from=&to=&cursor=&limit=
  *
  * `status=overdue` works even though no row is ever stored as overdue — the
- * service asks for open invoices and applies deriveStatus() afterwards.
+ * service filters for open invoices whose due_date is before today (UTC).
  * `customer` accepts a `cus_…` id or UUID.
  */
 export const GET = withApi({ scope: 'invoices:read' }, async (ctx, request) => {
@@ -59,7 +59,10 @@ export const POST = withApi(
   { scope: 'invoices:write', idempotent: 'required' },
   async (ctx, request) => {
     const wire = parseWire(invoiceCreateWireSchema, (await readJson(request)) as unknown)
-    const { invoice, items } = await invoices.createDraft(ctx, await invoices.wireToDraftInput(ctx, wire))
+    // `customer` links the saved row; without it the draft would get a copy.
+    const { invoice, items } = await invoices.createDraft(ctx, await invoices.wireToDraftInput(ctx, wire), {
+      customer: wire.customer,
+    })
     const refs = await invoices.refsForInvoice(ctx, invoice, items)
 
     return json({ data: serializeInvoice(invoice, items, refs) }, { status: 201 })

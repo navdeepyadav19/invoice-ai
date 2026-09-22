@@ -70,3 +70,17 @@ describe('buildTaxSummary', () => {
     expect(result.taxSummary[1].taxableMinor).toBe(150000)
   })
 })
+
+describe('zero-decimal currencies', () => {
+  /** 10% of ¥333 is ¥33.3, and there is no such thing as 0.3 yen. */
+  it('rounds every JPY amount to whole yen', () => {
+    const result = computeInvoice({ lines: [line({ rate: 333, taxRate: 10 })] }, 'JPY')
+    expect(result.taxTotalMinor).toBe(3300) // engine hundredths: ¥33
+    expect(result.totalMinor).toBe(36600)
+  })
+
+  it('leaves two-decimal currencies exact to the cent', () => {
+    const result = computeInvoice({ lines: [line({ rate: 333, taxRate: 10 })] }, 'USD')
+    expect(result.taxTotalMinor).toBe(3330)
+  })
+})

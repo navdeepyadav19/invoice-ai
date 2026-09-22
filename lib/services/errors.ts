@@ -23,6 +23,8 @@ export type ServiceErrorCode =
   | 'invalid_state'
   /** A uniqueness or concurrency clash (a duplicate idempotency key). */
   | 'conflict'
+  /** An Idempotency-Key reused with a different request body. */
+  | 'idempotency_mismatch'
   /** Authenticated, but this credential lacks the scope. */
   | 'forbidden'
   /** Something we depend on failed: Resend, OpenAI, or another provider. */
@@ -93,6 +95,11 @@ export function fromPostgres(error: { code?: string; message?: string } | null):
     // 23514 check_violation — e.g. an invoice prefix over the length limit.
     case '23514':
       return new ServiceError('validation', message)
+    // 22P02 invalid_text_representation — a malformed uuid reached a query.
+    // Services check id shapes first, so this is the backstop: an id that
+    // can't exist is a 404 like any other unknown id, never a 502.
+    case '22P02':
+      return notFound()
     default:
       return upstreamFailed(message)
   }

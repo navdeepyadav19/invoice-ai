@@ -1,8 +1,8 @@
 import { requireScope, type AuthContext } from '@/lib/auth/context'
 import { fromPostgres, invalidState, notFound, ServiceError } from '@/lib/services/errors'
 import { clientSchema, type ClientInput } from '@/lib/validators'
-import { decodeCursor, encodeCursor, type Page } from '@/lib/services/pagination'
-import { isCustomerId, nextCustomerId } from '@/lib/catalog/ids'
+import { afterFilter, clampLimit, parseCursor, toPage, type Page } from '@/lib/services/pagination'
+import { isCustomerId, isUuid, nextCustomerId } from '@/lib/catalog/ids'
 import type { ClientRow } from '@/lib/database.types'
 
 /**
@@ -47,12 +47,8 @@ export async function list(ctx: AuthContext, options: ListClientsOptions = {}): 
     q = q.ilike('name', `%${term}%`)
   }
 
-  const after = decodeCursor(options.cursor)
-  if (after) {
-    q = q.or(
-      `created_at.lt.${after.createdAt},and(created_at.eq.${after.createdAt},id.lt.${after.id})`,
-    )
-  }
+  const after = parseCursor(options.cursor)
+  if (after) q = q.or(afterFilter(after))
 
   const { data, error } = await q
   if (error) throw fromPostgres(error)
@@ -62,6 +58,8 @@ export async function list(ctx: AuthContext, options: ListClientsOptions = {}): 
 
 export async function get(ctx: AuthContext, id: string): Promise<ClientRow> {
   requireScope(ctx, 'clients:read')
+
+  if (!isCustomerId(id) && !isUuid(id)) throw notFound('Client not found.')
 
   const q = ctx.supabase.from('clients').select('*')
   const { data, error } = isCustomerId(id)
@@ -210,22 +208,6 @@ export async function findOrCreateByName(ctx: AuthContext, input: ClientInput): 
 }
 
 // ---------------------------------------------------------------------------
-
-function clampLimit(limit?: number): number {
-  if (!limit || Number.isNaN(limit)) return 25
-  return Math.min(Math.max(Math.trunc(limit), 1), 100)
-}
-
-function toPage<T extends { created_at: string; id: string }>(rows: T[], limit: number): Page<T> {
-  const hasMore = rows.length > limit
-  const data = hasMore ? rows.slice(0, limit) : rows
-  const last = data.at(-1)
-
-  return {
-    data,
-    next_cursor: hasMore && last ? encodeCursor({ createdAt: last.created_at, id: last.id }) : null,
-  }
-}
 
 function emptyToNull<T extends Record<string, unknown>>(value: T): T {
   // The zod schemas accept '' for optional fields because an HTML form submits

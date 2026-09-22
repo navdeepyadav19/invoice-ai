@@ -1,6 +1,7 @@
 import { z } from 'zod'
 
 import { isCountryCode } from './locale/countries'
+import { wireMinorToMajor } from './money-api'
 import { UNITS } from './units'
 
 const optionalTrimmed = z
@@ -338,7 +339,7 @@ const recurringWireSchema = z.object({
 const priceWireFields = {
   product: z.string().trim().min(1, 'Pick a product'),
   nickname: optionalTrimmed,
-  /** Minor units, like Stripe: 5000 is $50.00. */
+  /** Minor units of `currency`, like Stripe: 5000 is $50.00, or ¥5,000. */
   unit_amount: z.coerce.number().int('Use whole minor units').min(0, 'Amount cannot be negative'),
   currency: currencyField,
   type: z.enum(['one_time', 'recurring']),
@@ -367,7 +368,7 @@ export function priceWireToInput(input: PriceWireInput): PriceInput {
   return {
     product: input.product,
     nickname: input.nickname,
-    unit_amount: input.unit_amount / 100,
+    unit_amount: wireMinorToMajor(input.unit_amount, input.currency, 'unit_amount'),
     currency: input.currency,
     type: input.type,
     recurring_interval: input.recurring?.interval,
@@ -377,11 +378,17 @@ export function priceWireToInput(input: PriceWireInput): PriceInput {
   }
 }
 
-export function priceWirePartialToInput(input: PriceWireUpdateInput): PriceUpdateInput {
+/**
+ * `currency` is the price's currency after the update — the one sent, or the
+ * stored one — so `unit_amount` is read in the right minor unit.
+ */
+export function priceWirePartialToInput(input: PriceWireUpdateInput, currency: string): PriceUpdateInput {
   const out: PriceUpdateInput = {}
   // null clears the nickname, like Stripe's `nickname: ""`.
   if (input.nickname !== undefined) out.nickname = input.nickname
-  if (input.unit_amount !== undefined) out.unit_amount = input.unit_amount / 100
+  if (input.unit_amount !== undefined) {
+    out.unit_amount = wireMinorToMajor(input.unit_amount, input.currency ?? currency, 'unit_amount')
+  }
   if (input.currency !== undefined) out.currency = input.currency
   if (input.type !== undefined) out.type = input.type
   if (input.recurring !== undefined) {
@@ -404,9 +411,14 @@ const invoiceLineWireSchema = z.object({
   tax_rate: z.coerce.number().min(0).max(100).optional(),
 })
 
+/**
+ * The invoice body. Every field is optional here because PATCH is a partial
+ * update: omitted fields keep their stored value, and omitted `items` keep the
+ * lines. Create adds its own requirement (`customer`) on top.
+ */
 export const invoiceWireSchema = z.object({
-  /** An existing customer: `cus_…` or UUID. Required, like Stripe. */
-  customer: z.string().trim().min(1, 'Pick a customer'),
+  /** An existing customer: `cus_…` or UUID. Required on create, like Stripe. */
+  customer: z.string().trim().min(1, 'Pick a customer').optional(),
   currency: z.string().trim().toUpperCase().length(3).regex(/^[A-Z]{3}$/, 'Pick a currency').optional(),
   collection_method: z.enum(['charge_automatically', 'send_invoice']).optional(),
   due_date: z.union([z.iso.date(), z.literal('')]).optional(),

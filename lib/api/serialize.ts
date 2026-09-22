@@ -1,4 +1,4 @@
-import { invoiceTotalsToPaise, lineItemAmountsToPaise, storedToPaise } from '@/lib/money-api'
+import { invoiceTotalsToMinor, lineItemAmountsToMinor, storedToMinor } from '@/lib/money-api'
 import { deriveStatus } from '@/lib/invoice-status'
 import type {
   BusinessRow,
@@ -21,7 +21,8 @@ import type {
  *
  * Two conversions happen at this boundary and nowhere else:
  *
- *   money   numeric(14,2) major units  →  integer minor units
+ *   money   numeric(14,2) major units  →  integer minor units of the
+ *           row's currency (lib/currency.ts: ¥5000 → 5000, $25.00 → 2500)
  *   status  the stored column          →  deriveStatus(), so `overdue` appears
  */
 
@@ -101,7 +102,7 @@ export function serializePrice(row: PriceRow, productPublicId?: string | null) {
     object: 'price' as const,
     product: productPublicId ?? null,
     nickname: row.nickname,
-    unit_amount: storedToPaise(row.unit_amount),
+    unit_amount: storedToMinor(row.unit_amount, row.currency),
     currency: row.currency,
     billing_scheme: 'per_unit' as const,
     type: row.type,
@@ -114,8 +115,9 @@ export function serializePrice(row: PriceRow, productPublicId?: string | null) {
   }
 }
 
-export function serializeLineItem(row: InvoiceItemRow, maps: CatalogMaps = {}) {
-  const amounts = lineItemAmountsToPaise(row)
+/** `currency` is the parent invoice's — a line has none of its own. */
+export function serializeLineItem(row: InvoiceItemRow, currency: string, maps: CatalogMaps = {}) {
+  const amounts = lineItemAmountsToMinor(row, currency)
   return {
     id: row.public_id,
     object: 'invoiceitem' as const,
@@ -124,16 +126,16 @@ export function serializeLineItem(row: InvoiceItemRow, maps: CatalogMaps = {}) {
     description: row.description,
     quantity: Number(row.quantity),
     unit: row.unit,
-    unit_amount: Math.round(Number(row.rate) * 100),
-    amount: amounts.line_total_paise,
+    unit_amount: amounts.unit_amount,
+    amount: amounts.line_total,
     discount_percent: Number(row.discount_percent),
     tax_rate: Number(row.tax_rate ?? row.gst_rate ?? 0),
-    tax_amount: amounts.tax_amount_paise,
+    tax_amount: amounts.tax_amount,
   }
 }
 
 export function serializeInvoice(row: InvoiceRow, items?: InvoiceItemRow[], maps: CatalogMaps = {}) {
-  const totals = invoiceTotalsToPaise(row)
+  const totals = invoiceTotalsToMinor(row)
   const status = deriveStatus(row)
 
   return {
@@ -152,13 +154,13 @@ export function serializeInvoice(row: InvoiceRow, items?: InvoiceItemRow[], maps
     due_date: row.due_date,
     description: row.notes,
     footer: row.terms,
-    subtotal: totals.subtotal_paise,
-    discount: totals.discount_total_paise,
-    taxable: totals.taxable_total_paise,
-    tax: totals.tax_total_paise,
-    total: totals.total_paise,
+    subtotal: totals.subtotal,
+    discount: totals.discount_total,
+    taxable: totals.taxable_total,
+    tax: totals.tax_total,
+    total: totals.total,
     // What is still owed. Drafts, paid and void invoices owe nothing.
-    amount_due: status === 'open' || status === 'overdue' ? totals.total_paise : 0,
+    amount_due: status === 'open' || status === 'overdue' ? totals.total : 0,
     amount_in_words: row.amount_in_words,
     public_url_token: row.public_token,
     finalized_at: row.sent_at,
@@ -167,7 +169,7 @@ export function serializeInvoice(row: InvoiceRow, items?: InvoiceItemRow[], maps
     void_reason: row.cancel_reason,
     created: row.created_at,
     updated: row.updated_at,
-    ...(items ? { lines: { data: items.map((item) => serializeLineItem(item, maps)) } } : {}),
+    ...(items ? { lines: { data: items.map((item) => serializeLineItem(item, row.currency, maps)) } } : {}),
   }
 }
 

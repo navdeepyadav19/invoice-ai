@@ -40,19 +40,19 @@ Required endpoints are the ones that spend an invoice number, send an email, rec
 | First time we see this key | The request runs normally. If it succeeds (status below `400`), we store the response. |
 | Same key, same body, first request finished | The stored status and body are **replayed**, with the header `Idempotent-Replayed: true`. Nothing runs again. |
 | Same key, first request still in progress | `409` with `code: "conflict"`: *"A request with this Idempotency-Key is still in flight. Retry in a moment."* |
-| Same key, **different** request | `422` with `code: "validation"` and an `errors` entry for the path `Idempotency-Key`. |
+| Same key, **different** request | `422` with `code: "idempotency_mismatch"` and an `errors` entry for the path `Idempotency-Key`. |
 | Same key, first request failed | Failed responses (status `400` or higher) aren't stored, and the key is released, so a retry with the same key runs again. |
 
 A "different request" means a different HTTP method, path or raw body. We hash all three, so reusing a key on a different endpoint, or with a body that differs by a single byte, is a mismatch.
 
 ```json 422 key reused with a different body
 {
-  "type": "https://invoice.horizonpay.co/problems/validation",
-  "title": "Validation failed",
+  "type": "https://invoice.horizonpay.co/problems/idempotency-mismatch",
+  "title": "Idempotency-Key reused",
   "status": 422,
   "detail": "This Idempotency-Key was already used with a different request body.",
   "instance": "req_…",
-  "code": "validation",
+  "code": "idempotency_mismatch",
   "errors": [
     {
       "path": "Idempotency-Key",

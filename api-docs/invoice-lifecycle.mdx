@@ -77,7 +77,7 @@ If the invoice already has a number, finalize returns it unchanged and never ass
 
 - It emails the customer's stored `email`, unless you pass `{ "to": "someone@example.com" }`. With neither, it returns `422` with an error on `to`.
 - A draft is **finalized first**, so "create and email" is a single call. `invoices:send` is the only scope this needs.
-- The response is `{ "data": { "id", "invoice_number", "emailed": true, "public_url" } }`.
+- The response is the invoice, like every other action, plus the address it went to: `{ "data": Invoice, "emailed_to": "ap@acme.example" }`.
 - If the email provider fails **after** the invoice is finalized, you get `502 upstream_failed`. The invoice keeps its number, since a number already spent can't be taken back, and an `invoice.email_failed` event is recorded. Retry the send once the problem is fixed.
 
 ## Paying
@@ -105,11 +105,10 @@ Only `open` invoices can be voided. Use `DELETE` for a draft. A paid invoice can
 
 ## Editing drafts
 
-`PATCH /invoices/{id}` accepts the same fields as create: `customer`, `currency`, `collection_method`, `due_date`, `description`, `footer` and `items`. Fields you leave out keep their current values, with two exceptions:
+`PATCH /invoices/{id}` is a partial update. Send any of `customer`, `currency`, `collection_method`, `due_date`, `description`, `footer` and `items`. Fields you leave out keep their current values.
 
 <Warning>
-  - `customer` is currently **required on every `PATCH`**, not just on create. Send the invoice's current customer id if you aren't changing it.
-  - `items`, when present, **replaces every line** on the draft. To change one line, use `POST /invoice-items` and `DELETE /invoice-items/{id}`, which return the whole recalculated invoice.
+  `items`, when present, **replaces every line** on the draft. Leave it out to keep the lines. To change one line, use `POST /invoice-items` and `DELETE /invoice-items/{id}`, which return the whole recalculated invoice.
 </Warning>
 
 `days_until_due` only applies on create. On a `PATCH`, set `due_date` directly.
@@ -118,10 +117,10 @@ Only `open` invoices can be voided. Use `DELETE` for a draft. A paid invoice can
 
 `overdue` is never stored, so no job flips invoices to overdue in the background. An `open` invoice is reported as `overdue` once the **UTC** calendar day after its `due_date` begins. An invoice due on the 20th becomes overdue at 00:00 UTC on the 21st. An invoice with no `due_date` is never overdue, and a paid invoice stays `paid` however late it was.
 
-For the same reason there's no `invoice.overdue` webhook. To find overdue invoices, list `status=open` and check each `status`. See the note in [Pagination](/pagination#things-to-know).
+For the same reason there's no `invoice.overdue` webhook. To find overdue invoices, list `GET /invoices?status=overdue`.
 
 ## History
 
-`GET /invoices/{id}/events` returns the invoice's full history, newest first. Each event is `{ id, type, meta, created_at }`. Event types match the [webhook events](/webhooks#events): `invoice.created`, `invoice.updated`, `invoice.finalized`, `invoice.emailed`, `invoice.email_failed`, `invoice.viewed`, `invoice.downloaded`, `invoice.paid` and `invoice.voided`.
+`GET /invoices/{id}/events` returns the invoice's history, newest first, [cursor-paginated](/pagination). Each event is `{ id, type, meta, created_at }`. Event types match the [webhook events](/webhooks#events): `invoice.created`, `invoice.updated`, `invoice.finalized`, `invoice.emailed`, `invoice.email_failed`, `invoice.viewed`, `invoice.downloaded`, `invoice.paid` and `invoice.voided`.
 
 `invoice.viewed` and `invoice.downloaded` are recorded when your customer opens the public invoice link or downloads its PDF. They're how you can tell a customer actually looked at the invoice.

@@ -21,7 +21,10 @@ export const PATCH = withApi<Params>({ scope: 'products:write' }, async (ctx, re
   const { id } = await route.params
   const wire = parseWire(priceWireUpdateSchema, (await readJson(request)) as unknown)
 
-  const price = await prices.update(ctx, id, priceWirePartialToInput(wire))
+  // `unit_amount` is in the price's minor unit, so an amount-only PATCH needs
+  // the stored currency to read it (¥5000 is 5000, $50.00 is 5000 too).
+  const currency = wire.currency ?? (wire.unit_amount !== undefined ? (await prices.get(ctx, id)).currency : 'USD')
+  const price = await prices.update(ctx, id, priceWirePartialToInput(wire, currency))
   const productNames = await mapPublicIds(ctx, [price.product_id])
 
   return json({ data: serializePrice(price, productNames.get(price.product_id) ?? null) })

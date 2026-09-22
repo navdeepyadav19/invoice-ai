@@ -1,13 +1,13 @@
 import { requireScope, type AuthContext } from '@/lib/auth/context'
 import { fromPostgres, notFound, ServiceError } from '@/lib/services/errors'
-import { decodeCursor, encodeCursor, type Page } from '@/lib/services/pagination'
+import { afterFilter, clampLimit, parseCursor, toPage, type Page } from '@/lib/services/pagination'
 import {
   priceSchema,
   priceUpdateSchema,
   type PriceInput,
   type PriceUpdateInput,
 } from '@/lib/validators'
-import { nextPriceId, isPriceId, isProductId } from '@/lib/catalog/ids'
+import { nextPriceId, isPriceId, isUuid, isProductId } from '@/lib/catalog/ids'
 import { get as getProduct } from '@/lib/services/products'
 import type { PriceRow } from '@/lib/database.types'
 
@@ -51,10 +51,8 @@ export async function list(ctx: AuthContext, options: ListPricesOptions = {}): P
   if (options.currency) q = q.eq('currency', options.currency.toUpperCase())
   if (options.type) q = q.eq('type', options.type)
 
-  const after = decodeCursor(options.cursor)
-  if (after) {
-    q = q.or(`created_at.lt.${after.createdAt},and(created_at.eq.${after.createdAt},id.lt.${after.id})`)
-  }
+  const after = parseCursor(options.cursor)
+  if (after) q = q.or(afterFilter(after))
 
   const { data, error } = await q
   if (error) throw fromPostgres(error)
@@ -96,6 +94,8 @@ export async function listForProducts(
 export async function get(ctx: AuthContext, id: string): Promise<PriceRow> {
   requireScope(ctx, 'products:read')
 
+  if (!isPriceId(id) && !isUuid(id)) throw notFound('Price not found.')
+
   const q = ctx.supabase.from('prices').select('*')
   const { data, error } = isPriceId(id)
     ? await q.eq('public_id', id).maybeSingle()
@@ -114,7 +114,10 @@ export async function getManyWithProducts(
 ): Promise<Array<PriceRow & { product_name: string }>> {
   requireScope(ctx, 'invoices:write')
 
-  const unique = [...new Set(ids)]
+  // A ref that is neither `price_…` nor a UUID can't match a row; dropping it
+  // here lets the caller report "Unknown price." on that line instead of the
+  // whole query failing on a uuid cast.
+  const unique = [...new Set(ids)].filter((id) => isPriceId(id) || isUuid(id))
   if (unique.length === 0) return []
 
   const orFilter = unique
@@ -269,22 +272,6 @@ async function setActive(ctx: AuthContext, id: string, active: boolean): Promise
 
 export function isUuidOrPublicId(value: string): boolean {
   return isPriceId(value) || isProductId(value)
-}
-
-function clampLimit(limit?: number): number {
-  if (!limit || Number.isNaN(limit)) return 25
-  return Math.min(Math.max(Math.trunc(limit), 1), 100)
-}
-
-function toPage<T extends { created_at: string; id: string }>(rows: T[], limit: number): Page<T> {
-  const hasMore = rows.length > limit
-  const data = hasMore ? rows.slice(0, limit) : rows
-  const last = data.at(-1)
-
-  return {
-    data,
-    next_cursor: hasMore && last ? encodeCursor({ createdAt: last.created_at, id: last.id }) : null,
-  }
 }
 
 function validationError(error: { issues: { path: PropertyKey[]; message: string }[] }): ServiceError {
