@@ -28,6 +28,11 @@ const PUBLIC_PREFIXES = [
   // withApi returns 401 problem+json for anything unauthenticated, and RLS is
   // the real boundary either way.
   '/api/v1/',
+  // The CLI device flow (/api/cli/device, /token, /session). The first two are
+  // unauthenticated by design — the CLI has no credential yet — and /session
+  // authenticates with an API key header, same reasoning as /api/v1 above.
+  // The browser half, /cli/authorize, is NOT here: it needs a session.
+  '/api/cli/',
   // OAuth discovery documents, served unauthenticated by definition.
   '/.well-known/',
 ]
@@ -78,7 +83,10 @@ export async function updateSession(request: NextRequest) {
   if (!user && !isPublicPath(request.nextUrl.pathname)) {
     const redirectUrl = request.nextUrl.clone()
     redirectUrl.pathname = '/login'
-    redirectUrl.searchParams.set('next', request.nextUrl.pathname)
+    // Keep the query string in `next`: /cli/authorize?code=WXYZ-2345 must come
+    // back with its code after sign-in, or the CLI login dead-ends.
+    redirectUrl.search = ''
+    redirectUrl.searchParams.set('next', request.nextUrl.pathname + request.nextUrl.search)
     return NextResponse.redirect(redirectUrl)
   }
 
