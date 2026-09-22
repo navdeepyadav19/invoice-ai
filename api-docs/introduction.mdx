@@ -1,74 +1,29 @@
 ---
 title: "Introduction"
-description: "Create customers, catalog prices and invoices over HTTP, then finalize, email and reconcile them from your own systems."
+description: "Create and send invoices from your own code."
 icon: "book-open"
 ---
 
-The Invoice-AI API is a JSON REST API for the invoicing workspace you already use at [invoice.horizonpay.co](https://invoice.horizonpay.co). Anything your integration creates shows up in the web app, and anything you do in the web app is visible to the API.
+The Invoice-AI API lets your code do what you do in the [Invoice-AI app](https://invoice.horizonpay.co): add customers, create invoices, email them and mark them paid.
 
-Resource and field names follow Stripe conventions (`customers`, `prices`, `unit_amount`, `cus_…` ids), so if you've integrated Stripe Billing before, most of this will feel familiar. The API keeps a few conventions of its own:
-
-- Every successful response wraps its payload in a `data` envelope.
-- Errors are [RFC 9457 problem details](/errors).
-- Lists use an opaque [`next_cursor`](/pagination), not page numbers.
-- Money is always in [integer minor units](/ids-and-objects#money).
-
-## Base URL
-
-```text
-https://invoice.horizonpay.co/api/v1
+```bash
+curl https://invoice.horizonpay.co/api/v1/business \
+  -H "Authorization: Bearer inv_live_…"
 ```
 
-All endpoints use HTTPS and accept and return JSON. The one exception is `GET /invoices/{id}/pdf`, which returns `application/pdf`. The OpenAPI 3.1 document is public at [`/api/v1/openapi.json`](https://invoice.horizonpay.co/api/v1/openapi.json), so you can generate a client without signing up first.
+## Three things to know
 
-## Core objects
+1. **Base URL:** `https://invoice.horizonpay.co/api/v1`
+2. **Auth:** send your API key as a Bearer token. Create one in [Settings → API keys](https://invoice.horizonpay.co/settings/api-keys).
+3. **Money** is in the smallest unit, so `2500` means $25.00.
 
-| Object | Id prefix | What it is |
-|---|---|---|
-| Business | UUID | Your own business profile: legal name, tax id, address, bank details and default currency. Read-only through the API. |
-| Customer | `cus_` | Someone you bill. Deleting a customer archives it, because issued invoices still have to name who they billed. |
-| Product | `prod_` | Something you sell. |
-| Price | `price_` | One way to charge for a product: an amount in a currency, either one-time or recurring. |
-| Invoice | `in_` | A bill for a customer. It starts as a `draft`, gets a permanent number when it's finalized, and ends up `paid` or `void`. |
-| Invoice item | `ii_` | One line on an invoice. It can reference a price or carry its own amount. |
-| Webhook endpoint | UUID | An HTTPS URL that receives signed event notifications. |
-
-## How a typical integration works
-
-<Steps>
-  <Step title="Authenticate">
-    Create a scoped API key in **Settings → API keys**, then send it as `Authorization: Bearer inv_live_…`.
-  </Step>
-  <Step title="Model what you sell">
-    Create customers, products and prices. You can also create invoices from ad-hoc lines without a catalog.
-  </Step>
-  <Step title="Bill">
-    Create a draft invoice, finalize it to assign its number, then email it to the customer.
-  </Step>
-  <Step title="Reconcile">
-    Mark invoices paid when you receive money, and subscribe to webhooks so your other systems hear about views, payments and voids.
-  </Step>
-</Steps>
-
-## Next steps
+## Start here
 
 <CardGroup cols={2}>
   <Card title="Quickstart" icon="bolt" href="/quickstart">
-    Go from API key to an emailed invoice in about five minutes.
-  </Card>
-  <Card title="Authentication" icon="key" href="/authentication">
-    Key format, scopes, rotation and revocation.
-  </Card>
-  <Card title="Invoice lifecycle" icon="diagram-project" href="/invoice-lifecycle">
-    Draft, open, paid and void, and what each state allows.
-  </Card>
-  <Card title="Webhooks" icon="webhook" href="/webhooks">
-    Signed Standard Webhooks events and how to verify them.
+    Send your first invoice in 5 minutes.
   </Card>
   <Card title="API reference" icon="code" href="/api-reference/introduction">
-    Every endpoint, with an interactive playground.
-  </Card>
-  <Card title="Postman" icon="paper-plane" href="/postman">
-    Run the full lifecycle from a ready-made collection.
+    Every endpoint. Try them in the browser.
   </Card>
 </CardGroup>
