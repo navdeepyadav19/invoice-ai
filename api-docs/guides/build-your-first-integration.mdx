@@ -1,0 +1,109 @@
+---
+title: "Build your first integration"
+description: "A small Next.js app that lists your invoices and reacts when one is paid."
+icon: "hammer"
+---
+
+You'll build two files in a Next.js App Router project, using only the TypeScript SDK:
+
+1. A page that lists your latest invoices.
+2. A webhook route that verifies `invoice.paid` events.
+
+## Set up
+
+```bash
+npx create-next-app@latest my-invoices --ts --app
+cd my-invoices
+npm install @horizonpay/invoice-ai
+```
+
+Add your keys to `.env.local`. Create the API key in [Settings → API keys](https://invoice.horizonpay.co/settings/api-keys) with the `invoices:read` scope. You'll add the webhook secret in step 3.
+
+```bash .env.local
+INVOICE_AI_API_KEY=inv_live_...
+INVOICE_AI_WEBHOOK_SECRET=whsec_...
+```
+
+<Warning>
+  Only use the SDK in server code, such as server components and route handlers. Never import it into a `"use client"` file, or your key ships to the browser.
+</Warning>
+
+## 1. List invoices
+
+`app/page.tsx` is a server component, so the key stays on the server. `connection()` makes the page render on each request, not once at build time.
+
+```tsx app/page.tsx
+import { Suspense } from 'react'
+import { connection } from 'next/server'
+import InvoiceAI, { formatMoney } from '@horizonpay/invoice-ai'
+
+const invoiceai = new InvoiceAI() // reads INVOICE_AI_API_KEY
+
+async function Invoices() {
+  await connection()
+  const page = await invoiceai.invoices.list({ limit: 20 })
+
+  return (
+    <ul>
+      {page.data.map((inv) => (
+        <li key={inv.id}>
+          {inv.number ?? 'Draft'} · {inv.status} · {formatMoney(inv.total, inv.currency)}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+export default function Home() {
+  return (
+    <main>
+      <h1>Invoices</h1>
+      <Suspense fallback={<p>Loading…</p>}>
+        <Invoices />
+      </Suspense>
+    </main>
+  )
+}
+```
+
+Run `npm run dev` and open `http://localhost:3000`.
+
+## 2. Handle `invoice.paid`
+
+The route reads the **raw** body with `req.text()`, and the SDK checks the signature before you trust the event.
+
+```ts app/api/webhooks/route.ts
+import { Webhooks, WebhookVerificationError } from '@horizonpay/invoice-ai'
+
+const webhooks = new Webhooks(process.env.INVOICE_AI_WEBHOOK_SECRET)
+
+export async function POST(req: Request) {
+  let event
+  try {
+    event = await webhooks.constructEvent(await req.text(), req.headers)
+  } catch (err) {
+    if (err instanceof WebhookVerificationError) return new Response('invalid signature', { status: 400 })
+    throw err
+  }
+
+  if (event.type === 'invoice.paid') {
+    const invoice = event.data.object
+    console.log(`${invoice.number} was paid`) // update your database here
+  }
+  return new Response(null, { status: 204 })
+}
+```
+
+## 3. Test it locally
+
+For local testing, any `whsec_` + base64 value works as a secret, such as `whsec_dGVzdC1zZWNyZXQ=`. Put it in `.env.local`, restart the dev server, and send a signed sample event with the [CLI](/cli/overview):
+
+```bash
+invoice-ai webhooks test http://localhost:3000/api/webhooks --secret whsec_dGVzdC1zZWNyZXQ= --event invoice.paid
+```
+
+When you deploy, register your public HTTPS URL with `invoice-ai webhooks create --url https://…/api/webhooks` or [`POST /webhook-endpoints`](/webhooks#register-an-endpoint). Then replace the local secret with the one it returns.
+
+<Note>
+  Deliveries may repeat, so deduplicate on `event.id`. Webhooks currently go out [once a day](/webhooks#responding-and-retries), so for anything urgent, read the invoice with the API.
+</Note>

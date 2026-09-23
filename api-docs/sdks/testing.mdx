@@ -1,0 +1,78 @@
+---
+title: "Testing your integration"
+description: "Run your code without touching real invoices: fake responses, a mock server, and signed test webhooks."
+icon: "flask"
+---
+
+There's no sandbox account yet, so every real call changes real data. Use one of these three options for tests.
+
+## Fake responses
+
+Pass your own `fetch` (TypeScript) or `httpx` client (Python) and return whatever you like. No network is used.
+
+<CodeGroup>
+```ts TypeScript
+import InvoiceAI from '@horizonpay/invoice-ai'
+
+const fakeFetch: typeof fetch = async () =>
+  new Response(JSON.stringify({ data: [{ id: 'in_123', status: 'open' }], next_cursor: null }), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  })
+
+const invoiceai = new InvoiceAI({ apiKey: 'inv_live_test', fetch: fakeFetch })
+const page = await invoiceai.invoices.list()
+// page.data[0].id === 'in_123'
+```
+```python Python
+import httpx
+from invoice_ai import InvoiceAI
+
+def handler(request: httpx.Request) -> httpx.Response:
+    return httpx.Response(200, json={"data": [{"id": "in_123", "status": "open"}], "next_cursor": None})
+
+client = InvoiceAI(api_key="inv_live_test", http_client=httpx.Client(transport=httpx.MockTransport(handler)))
+page = client.invoices.list()
+```
+</CodeGroup>
+
+The API key only has to look like a key (`inv_live_…`). It's never checked, because no request leaves your machine.
+
+## Mock server
+
+Point the SDK at a local mock built from the OpenAPI spec. Set `baseURL` (`base_url`), or set `INVOICE_AI_BASE_URL` so you don't have to change any code:
+
+```bash
+npx @stoplight/prism-cli mock https://invoice.horizonpay.co/api/v1/openapi.json
+export INVOICE_AI_BASE_URL=http://127.0.0.1:4010
+```
+
+Prism answers with example responses, and it rejects requests that don't match the spec.
+
+## Sign a test webhook
+
+Sign a payload with your test secret, then call your handler with the headers you get back.
+
+<CodeGroup>
+```ts TypeScript
+import { Webhooks } from '@horizonpay/invoice-ai'
+
+const secret = 'whsec_dGVzdC1zZWNyZXQ='
+const body = JSON.stringify({ id: 'evt_1', type: 'invoice.paid', created_at: new Date().toISOString(), data: { object: { id: 'in_123', number: 'INV-0001' } } })
+const headers = await new Webhooks(secret).sign(body)
+
+const res = await POST(new Request('http://localhost/api/webhooks', { method: 'POST', body, headers }))
+```
+```python Python
+import json
+from invoice_ai import sign_payload
+
+secret = "whsec_dGVzdC1zZWNyZXQ="
+body = json.dumps({"id": "evt_1", "type": "invoice.paid", "created_at": "2026-09-23T10:00:00Z", "data": {"object": {"id": "in_123", "number": "INV-0001"}}})
+headers = sign_payload(body, secret)
+
+response = test_client.post("/webhooks", content=body, headers=headers)
+```
+</CodeGroup>
+
+To exercise a running server, use the CLI: `invoice-ai webhooks test http://localhost:3000/api/webhooks --secret whsec_…`.

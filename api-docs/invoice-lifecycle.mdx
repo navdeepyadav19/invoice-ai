@@ -69,11 +69,11 @@ There's no way out of `paid` or `void`. Voiding a paid invoice would need a cred
 3. Takes the next number in your business's series. It's your invoice prefix and a zero-padded counter, like `INV-0042`, and you set both in the web app.
 4. Sets `status` to `open` and `finalized_at` to now, and records an `invoice.finalized` event.
 
-If the invoice already has a number, finalize returns it unchanged and never assigns a second one. Together with the required [`Idempotency-Key`](/idempotency), this means a retry can't leave a gap in your series.
+If the invoice already has a number, finalize returns it unchanged and never assigns a second one. Together with the required [`Idempotency-Key`](/errors#idempotency), this means a retry can't leave a gap in your series.
 
 ## Sending
 
-`POST /invoices/{id}/send` (scope `invoices:send`, `Idempotency-Key` required, [10 per hour](/rate-limits)) emails the invoice PDF and a link to view it online.
+`POST /invoices/{id}/send` (scope `invoices:send`, `Idempotency-Key` required, [10 per hour](/errors#rate-limits)) emails the invoice PDF and a link to view it online.
 
 - It emails the customer's stored `email`, unless you pass `{ "to": "someone@example.com" }`. With neither, it returns `422` with an error on `to`.
 - A draft is **finalized first**, so "create and email" is a single call. `invoices:send` is the only scope this needs.

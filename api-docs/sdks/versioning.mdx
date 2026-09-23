@@ -1,0 +1,33 @@
+---
+title: "Versioning"
+description: "How SDK versions relate to the API version, and what to expect while the SDKs are in beta."
+icon: "code-branch"
+---
+
+## SDK versions
+
+The TypeScript SDK, the Python SDK and the CLI follow [semantic versioning](https://semver.org), and they're released together with the same version number.
+
+<Warning>
+  The SDKs are **0.x (beta)**. A minor release (0.1 → 0.2) may include breaking changes, so pin the minor version until 1.0: `"@horizonpay/invoice-ai": "~0.1.0"` or `horizonpay-invoice-ai~=0.1.0`.
+</Warning>
+
+## API version
+
+Every SDK request sends an `Invoice-AI-Version` header with the API version the SDK was built from (currently `1.0.0`). Check it in code:
+
+<CodeGroup>
+```ts TypeScript
+import { API_VERSION, VERSION } from '@horizonpay/invoice-ai'
+```
+```python Python
+from invoice_ai import API_VERSION, __version__
+```
+</CodeGroup>
+
+The API's major version is in the URL (`/api/v1`). Changes within v1 are additive, such as new endpoints and new optional fields, so older SDK versions keep working.
+
+## What changed
+
+- SDK and CLI releases: [GitHub releases](https://github.com/navdeepyadav19/invoice-ai-sdk/releases)
+- API changes: the [API changelog](/changelog)

@@ -7,9 +7,10 @@ Source for the developer docs site at **docs.horizonpay.co**, built with
 api-docs/
 ├── docs.json                 # site config: theme, colors, navbar, navigation, API playground
 ├── openapi.json              # GENERATED — the API reference is built from this. Never hand-edit.
-├── introduction.mdx …        # "Get started" tab pages
+├── introduction.mdx …        # "Docs" tab pages (guides/ holds tutorials)
+├── sdks/ cli/                # "SDKs" and "CLI" tabs
 ├── api-reference/            # "API reference" tab overview page
-├── changelog.mdx
+├── changelog.mdx postman.mdx # linked from the footer, not the sidebar
 ├── logo/ favicon.svg         # branding
 └── .mintignore               # keeps this README out of the published site
 ```
@@ -27,6 +28,7 @@ Before pushing, check the build and links:
 cd api-docs
 npx mint validate       # strict build check, fails on warnings or errors
 npx mint broken-links   # internal link check
+npx mint a11y           # contrast and alt-text check
 ```
 
 ## The OpenAPI document is generated
