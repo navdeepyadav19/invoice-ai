@@ -134,7 +134,7 @@ webhook-signature: v1,K5s2fXy0hQ3m9vB8nT1cR7wLpA4eZ6uJ2kD0gH5iO8s=
   When the event happened, as an ISO 8601 timestamp.
 </ResponseField>
 <ResponseField name="data.object" type="Invoice">
-  The invoice as it was **when the event was recorded**, in the same shape `GET /invoices` returns: `in_…` and `cus_…` ids, amounts in [minor units](/ids-and-objects#money), and `status` including `overdue`. It has no `lines`; call `GET /invoices/{id}` for those.
+  The invoice as it was **when the event was recorded**, in the same shape `GET /invoices` returns: `in_…` and `cus_…` ids, amounts in [minor units](/objects-and-money#money), and `status` including `overdue`. It has no `lines`; call `GET /invoices/{id}` for those.
 </ResponseField>
 
 ## Verifying signatures

@@ -167,7 +167,7 @@ This walkthrough takes one invoice through its whole life: customer → product 
   </Step>
 
   <Step title="Create a draft invoice">
-    Creating an invoice **requires an `Idempotency-Key` header**. Generate a fresh one for each new invoice, and reuse it only when you retry that same request. See [Idempotency](/idempotency).
+    Creating an invoice **requires an `Idempotency-Key` header**. Generate a fresh one for each new invoice, and reuse it only when you retry that same request. See [Idempotency](/errors#idempotency).
 
     <CodeGroup>
     ```bash curl
@@ -302,16 +302,16 @@ This walkthrough takes one invoice through its whole life: customer → product 
 ## What's next
 
 <CardGroup cols={2}>
+  <Card title="Build your first integration" icon="hammer" href="/guides/build-your-first-integration">
+    A small Next.js app that lists invoices and handles `invoice.paid`.
+  </Card>
   <Card title="Handle errors" icon="triangle-exclamation" href="/errors">
-    Branch on the stable `code` field in every error.
+    Branch on the stable `code` field, and retry safely.
   </Card>
   <Card title="Listen for events" icon="webhook" href="/webhooks">
     Get notified when a customer views or downloads an invoice, or when it's paid.
   </Card>
   <Card title="Invoice lifecycle" icon="diagram-project" href="/invoice-lifecycle">
     See which calls each state allows.
-  </Card>
-  <Card title="Run it in Postman" icon="paper-plane" href="/postman">
-    Run the same flow, and every other endpoint, from a collection.
   </Card>
 </CardGroup>

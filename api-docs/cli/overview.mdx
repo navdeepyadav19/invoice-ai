@@ -1,17 +1,19 @@
 ---
-title: "CLI"
+title: "Install & login"
 description: "Manage invoices from your terminal."
 icon: "terminal"
 ---
 
 ## Install and log in
 
+Requires **Node 20+**.
+
 ```bash
 npm install -g @horizonpay/invoice-ai-cli
 invoice-ai login
 ```
 
-`login` opens your browser. Approve the request and the CLI saves a key to your OS keychain. In CI, set `INVOICE_AI_API_KEY` instead.
+`login` opens your browser. Approve the request, and the CLI saves a key to your OS keychain. In CI, set `INVOICE_AI_API_KEY` instead. See [Scripting & CI](/cli/scripting-and-ci).
 
 ## Everyday commands
 

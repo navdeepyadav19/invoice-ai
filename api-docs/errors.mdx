@@ -1,12 +1,10 @@
 ---
-title: "Errors"
-description: "Every error is an RFC 9457 problem details object with a stable machine-readable code."
+title: "Errors & retries"
+description: "What a failed call looks like, which failures to retry, and how Idempotency-Key and rate limits keep retries safe."
 icon: "triangle-exclamation"
 ---
 
-The API uses conventional HTTP status codes: `2xx` for success, `4xx` for problems with the request, and `5xx` for problems on our side or with a provider we depend on.
-
-Every error body uses the [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) `application/problem+json` format. It's the same shape on every endpoint:
+Every error is an [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) `application/problem+json` body with the same shape:
 
 ```json
 {
@@ -19,121 +17,68 @@ Every error body uses the [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) `ap
 }
 ```
 
-<ResponseField name="type" type="string">
-  A URL that identifies the problem type. It's `https://invoice.horizonpay.co/problems/` followed by `code` with underscores turned into hyphens.
-</ResponseField>
-<ResponseField name="title" type="string">
-  A short summary of the problem type. It's the same for every error with a given `code`.
-</ResponseField>
-<ResponseField name="status" type="integer">
-  The HTTP status code, repeated in the body.
-</ResponseField>
-<ResponseField name="detail" type="string">
-  A human-readable explanation of this particular error. The wording can change, so don't parse it.
-</ResponseField>
-<ResponseField name="instance" type="string">
-  The request id. It matches the `X-Request-Id` response header. Quote it if you contact support.
-</ResponseField>
-<ResponseField name="code" type="string">
-  The stable, machine-readable error code. **Branch on this field**, not on `detail` or `title`.
-</ResponseField>
-<ResponseField name="errors" type="array">
-  Only present when there are field-level problems, usually on `422`. Each entry is `{ "path": string, "message": string }`, where `path` is a dot-separated field path such as `items.0.unit_amount`.
-</ResponseField>
+- **Branch on `code`.** The wording of `detail` can change.
+- `instance` is the request id, the same as the `X-Request-Id` header. Quote it to support. You can also send your own `X-Request-Id` (up to 200 characters) and we'll echo it back.
+- A `422` also has `errors`: a list of `{ "path", "message" }`, such as `{ "path": "items.0.unit_amount", "message": "Use whole minor units" }`.
 
 ## Error codes
 
-| `code` | HTTP status | `title` | When it happens |
+| `code` | Status | Retry? | Meaning |
 |---|---|---|---|
-| `validation` | `422` | Validation failed | The body or a query parameter failed validation, the body isn't valid JSON, or a business rule rejected an input value. An invalid `cursor` is reported here too. See `errors` for the fields. |
-| `idempotency_mismatch` | `422` | Idempotency-Key reused | An `Idempotency-Key` was reused with a different request. Use a new key for each distinct request. See [Idempotency](/idempotency). |
-| `unauthorized` | `401` | Unauthorized | The API key is missing, malformed, unknown, revoked or expired. Includes `WWW-Authenticate: Bearer realm="invoice-ai"`. See [Authentication](/authentication#authentication-errors). |
-| `forbidden` | `403` | Insufficient scope | The key is valid but doesn't have the scope this endpoint needs. Includes `WWW-Authenticate: Bearer`. |
-| `not_found` | `404` | Not found | No such resource, **or it belongs to another account**, or the id isn't a valid id at all. We never return `403` for someone else's id, so ids can't be discovered by probing. |
-| `invalid_state` | `409` | Invalid state for this operation | The resource exists but is in the wrong state, for example editing a finalized invoice or voiding a paid one. See [Invoice lifecycle](/invoice-lifecycle). |
-| `conflict` | `409` | Conflict | A uniqueness or concurrency clash, for example a request with the same `Idempotency-Key` that's still in progress. |
-| `idempotency_key_required` | `428` | Idempotency-Key required | This endpoint requires an `Idempotency-Key` header and the request didn't send one. See [Idempotency](/idempotency). |
-| `rate_limited` | `429` | Too many requests | You've gone over a rate limit. Includes `Retry-After`. See [Rate limits](/rate-limits). |
-| `internal_error` | `500` | Internal server error | Something unexpected went wrong on our side. The detail is always generic. Quote the `instance` id. |
-| `upstream_failed` | `502` | Upstream service failed | A service we depend on failed, such as the email provider or the database. For example, a finalized invoice whose email couldn't be sent. |
+| `validation` | `422` | No | A field or query parameter is invalid, including an invalid `cursor`. See `errors`. |
+| `idempotency_mismatch` | `422` | No | An `Idempotency-Key` was reused with a different request. |
+| `unauthorized` | `401` | No | The key is missing, malformed, unknown, revoked or expired. See [Authentication](/authentication#authentication-errors). |
+| `forbidden` | `403` | No | The key lacks the scope this endpoint needs. `detail` names it. |
+| `not_found` | `404` | No | No such resource, it belongs to another account, or the id is malformed. |
+| `invalid_state` | `409` | No | The resource is in the wrong state, such as editing a finalized invoice. See [Invoice lifecycle](/invoice-lifecycle). |
+| `conflict` | `409` | Yes | It clashed with another request, such as one with the same `Idempotency-Key` that's still running. |
+| `idempotency_key_required` | `428` | No | This endpoint needs an `Idempotency-Key` header. |
+| `rate_limited` | `429` | Yes, after `Retry-After` | You went over a [rate limit](#rate-limits). |
+| `internal_error` | `500` | Yes | Something went wrong on our side. |
+| `upstream_failed` | `502` | Yes | A service we depend on failed, such as the email provider. |
+
+Network errors and timeouts are also worth retrying. When you retry a write, **reuse the same `Idempotency-Key`**.
+
+## Idempotency
+
+Say you finalize an invoice, we assign `INV-0042`, and the response is lost. A plain retry would assign `INV-0043` and leave a gap in your number series. To prevent that, send an `Idempotency-Key` header. A retry with the **same key and the same body** gets the original response back, and the work doesn't run twice.
+
+```bash
+curl -X POST https://invoice.horizonpay.co/api/v1/invoices/in_.../finalize \
+  -H "Authorization: Bearer $INVOICE_AI_API_KEY" \
+  -H "Idempotency-Key: 8e0f4b1c-6f55-4c37-9d0b-2a7f5f0c9e21"
+```
+
+**Required** on `POST /invoices`, `POST /invoice-items` and the lifecycle actions `finalize`, `send`, `pay` and `void`. **Optional** on the other `POST`s. `GET`, `PATCH` and `DELETE` ignore it.
+
+| Situation | Result |
+|---|---|
+| Required, but not sent | `428 idempotency_key_required`. Nothing runs. |
+| Same key and body, first request finished | The stored response is replayed with `Idempotent-Replayed: true`. |
+| Same key, first request still running | `409 conflict`. Retry in a moment. |
+| Same key, different method, path or body | `422 idempotency_mismatch`. |
+| Same key, first request failed (`4xx`/`5xx`) | Failures aren't stored, so the retry runs again. |
+
+- Create the key **once per operation, before your retry loop**. A UUID v4 works well.
+- Keys can be up to 255 characters. They're shared across all your API keys and kept for 24 hours.
+
+<Tip>
+  The [SDKs](/sdks/errors-and-retries) do all of this for you. Every `POST` gets a key, and retries reuse it.
+</Tip>
+
+## Rate limits
+
+Limits apply **per API key**, in fixed windows:
+
+| Bucket | Applies to | Limit |
+|---|---|---|
+| `request` | Every endpoint except `send` | 120 per 60 seconds |
+| `send` | `POST /invoices/{id}/send` | 10 per hour |
+
+Every authenticated response carries `RateLimit-Limit`, `RateLimit-Remaining` and `RateLimit-Reset`. `RateLimit-Reset` is a Unix timestamp in seconds. Over the limit, you get `429 rate_limited` with a `Retry-After` header in seconds. Wait that long, then retry.
+
+To stay under the limit, use `limit=100` on lists, and use [webhooks](/webhooks) instead of polling.
 
 <Note>
-  `409` has two codes. `invalid_state` means the operation can never succeed in the resource's current state. `conflict` means the request clashed with another one, and retrying later may work.
+  Limits are currently counted per server instance, so under load you may get more than the documented numbers. Design for 120 per minute and 10 sends per hour anyway.
 </Note>
-
-## Validation errors
-
-A `422` names each field that failed:
-
-```json
-{
-  "type": "https://invoice.horizonpay.co/problems/validation",
-  "title": "Validation failed",
-  "status": 422,
-  "detail": "Some fields need attention.",
-  "instance": "req_9a1b2c3d4e5f60718293a4b5c6d7e8f9",
-  "code": "validation",
-  "errors": [
-    { "path": "customer", "message": "Invalid input: expected string, received undefined" },
-    { "path": "items.0.unit_amount", "message": "Use whole minor units" }
-  ]
-}
-```
-
-## Handling errors
-
-<CodeGroup>
-```javascript JavaScript
-const res = await fetch(url, init);
-
-if (!res.ok) {
-  const problem = await res.json(); // application/problem+json
-
-  switch (problem.code) {
-    case "validation":
-      // Show problem.errors[].path / .message next to your form fields
-      break;
-    case "rate_limited":
-      await sleep(Number(res.headers.get("retry-after")) * 1000);
-      break; // then retry
-    case "upstream_failed":
-    case "internal_error":
-      // Transient. Retry with backoff, reusing the same Idempotency-Key
-      break;
-    default:
-      throw new Error(`${problem.code}: ${problem.detail} (${problem.instance})`);
-  }
-}
-```
-
-```python Python
-res = session.post(url, json=body, headers=headers)
-
-if not res.ok:
-    problem = res.json()  # application/problem+json
-    code = problem["code"]
-
-    if code == "validation":
-        for err in problem.get("errors", []):
-            print(err["path"], err["message"])
-    elif code == "rate_limited":
-        time.sleep(int(res.headers["Retry-After"]))  # then retry
-    elif code in ("upstream_failed", "internal_error"):
-        pass  # transient: retry with backoff, reusing the same Idempotency-Key
-    else:
-        raise RuntimeError(f"{code}: {problem['detail']} ({problem['instance']})")
-```
-</CodeGroup>
-
-## Which errors are worth retrying
-
-| Retry? | Codes |
-|---|---|
-| Yes, with backoff | `rate_limited` (wait for `Retry-After`), `conflict` from an in-flight idempotent request, `upstream_failed`, `internal_error` |
-| No. Fix the request first | `validation`, `idempotency_mismatch`, `unauthorized`, `forbidden`, `not_found`, `invalid_state`, `idempotency_key_required` |
-
-When you retry a write, **send the same `Idempotency-Key`** so the retry can't do the work twice. A failed request (any status of `400` or higher) doesn't store a response, so a retry with the same key runs again.
-
-## Request ids
-
-Every response from an authenticated endpoint, success or error, carries an `X-Request-Id` header. You can send your own `X-Request-Id` (up to 200 characters) and we'll use and echo it. That makes it easy to connect your logs with ours. Otherwise we generate one of the form `req_<32 hex characters>`.
