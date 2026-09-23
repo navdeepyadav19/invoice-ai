@@ -19,6 +19,10 @@
       {
         "label": "Dashboard",
         "href": "https://invoice.horizonpay.co/dashboard"
+      },
+      {
+        "type": "github",
+        "href": "https://github.com/navdeepyadav19/invoice-ai-sdk"
       }
     ],
     "primary": {
@@ -30,8 +34,8 @@
   "navigation": {
     "tabs": [
       {
-        "tab": "Get started",
-        "icon": "rocket",
+        "tab": "Docs",
+        "icon": "book-open",
         "groups": [
           {
             "group": "Get started",
@@ -44,30 +48,17 @@
             "group": "Core concepts",
             "pages": [
               "authentication",
+              "objects-and-money",
+              "invoice-lifecycle",
               "errors",
-              "idempotency",
               "pagination",
-              "rate-limits",
-              "ids-and-objects",
-              "invoice-lifecycle"
-            ]
-          },
-          {
-            "group": "Webhooks",
-            "pages": [
               "webhooks"
             ]
           },
           {
-            "group": "Tools",
+            "group": "Guides",
             "pages": [
-              "postman"
-            ]
-          },
-          {
-            "group": "Resources",
-            "pages": [
-              "changelog"
+              "guides/build-your-first-integration"
             ]
           }
         ]
@@ -97,7 +88,9 @@
             "pages": [
               "sdks/overview",
               "sdks/errors-and-retries",
-              "sdks/webhooks"
+              "sdks/webhooks",
+              "sdks/testing",
+              "sdks/versioning"
             ]
           }
         ]
@@ -110,6 +103,7 @@
             "group": "CLI",
             "pages": [
               "cli/overview",
+              "cli/scripting-and-ci",
               "cli/commands"
             ]
           }
@@ -124,9 +118,7 @@
     },
     "examples": {
       "languages": [
-        "curl",
-        "javascript",
-        "python"
+        "curl"
       ],
       "defaults": "required"
     },
@@ -139,9 +131,42 @@
   },
   "footer": {
     "socials": {
-      "github": "https://github.com/navdeepyadav19/invoice-ai"
-    }
+      "github": "https://github.com/navdeepyadav19/invoice-ai-sdk"
+    },
+    "links": [
+      {
+        "header": "Resources",
+        "items": [
+          {
+            "label": "Changelog",
+            "href": "/changelog"
+          },
+          {
+            "label": "Postman collection",
+            "href": "/postman"
+          },
+          {
+            "label": "GitHub",
+            "href": "https://github.com/navdeepyadav19/invoice-ai-sdk"
+          }
+        ]
+      }
+    ]
   },
+  "redirects": [
+    {
+      "source": "/idempotency",
+      "destination": "/errors"
+    },
+    {
+      "source": "/rate-limits",
+      "destination": "/errors"
+    },
+    {
+      "source": "/ids-and-objects",
+      "destination": "/objects-and-money"
+    }
+  ],
   "seo": {
     "metatags": {
       "canonical": "https://docs.horizonpay.co"

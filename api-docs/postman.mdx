@@ -62,7 +62,7 @@ The folders are a lifecycle, not an index. Each request uses ids captured by the
 
 <Note>
   - The collection sets a fresh `Idempotency-Key` on every request automatically.
-  - A run sends **one real invoice email**, to Resend's test inbox `delivered@resend.dev`. It counts toward the [10 sends per hour](/rate-limits) limit.
+  - A run sends **one real invoice email**, to Resend's test inbox `delivered@resend.dev`. It counts toward the [10 sends per hour](/errors#rate-limits) limit.
   - A run creates real, numbered invoices in your account. Finalized numbers can't be reused, so run it against an account where that's acceptable.
   - Running a single request on its own only works once the ids it needs have been filled in by earlier requests, or by you.
 </Note>

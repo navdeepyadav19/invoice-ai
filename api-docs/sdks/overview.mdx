@@ -1,12 +1,14 @@
 ---
-title: "SDKs"
+title: "Install & first call"
 description: "Official TypeScript and Python libraries."
 icon: "cube"
 ---
 
-The SDKs wrap the API so you write `invoices.create(...)` instead of HTTP calls. They also handle retries, idempotency keys, pagination and errors for you.
+The SDKs wrap the API, so you call `invoices.create(...)` instead of writing HTTP requests. They also handle retries, idempotency keys, pagination and errors for you.
 
 ## Install
+
+Requires **Node 20+** or **Python 3.10+**.
 
 <CodeGroup>
 ```bash TypeScript
@@ -24,6 +26,7 @@ Set `INVOICE_AI_API_KEY` in your environment, then:
 <CodeGroup>
 ```ts TypeScript
 import InvoiceAI from '@horizonpay/invoice-ai'
+// CommonJS: const { InvoiceAI } = require('@horizonpay/invoice-ai')
 
 const invoiceai = new InvoiceAI()
 
@@ -33,8 +36,7 @@ const invoice = await invoiceai.invoices.create({
   currency: 'USD',
   items: [{ description: 'Consulting', quantity: 1, unit_amount: 250000 }],
 })
-await invoiceai.invoices.finalize(invoice.id)
-await invoiceai.invoices.send(invoice.id)
+await invoiceai.invoices.send(invoice.id) // finalizes, then emails
 ```
 ```python Python
 from invoice_ai import InvoiceAI
@@ -47,8 +49,7 @@ invoice = client.invoices.create(
     currency="USD",
     items=[{"description": "Consulting", "quantity": 1, "unit_amount": 250000}],
 )
-client.invoices.finalize(invoice.id)
-client.invoices.send(invoice.id)
+client.invoices.send(invoice.id)  # finalizes, then emails
 ```
 </CodeGroup>
 
@@ -56,7 +57,7 @@ Every endpoint in the [API reference](/api-reference/introduction) shows its Typ
 
 ## Lists
 
-Loop over a list and the SDK fetches the next pages for you.
+Loop over a list, and the SDK fetches the next pages for you.
 
 <CodeGroup>
 ```ts TypeScript
@@ -70,4 +71,17 @@ for invoice in client.invoices.list(status="open"):
 ```
 </CodeGroup>
 
-Python also has `AsyncInvoiceAI` for `async`/`await` code.
+For `async`/`await` code, Python also has `AsyncInvoiceAI`.
+
+## Client options
+
+| TypeScript | Python | Default |
+|---|---|---|
+| `apiKey` | `api_key` | `INVOICE_AI_API_KEY` |
+| `baseURL` | `base_url` | `INVOICE_AI_BASE_URL`, then `https://invoice.horizonpay.co/api/v1` |
+| `timeout` (**milliseconds**) | `timeout` (**seconds**) | `60000` / `60.0`, per attempt |
+| `maxRetries` | `max_retries` | `2` |
+| `logLevel` | `log_level` | `INVOICE_AI_LOG`, then `warn`. Set `debug` to log every request (secrets redacted). |
+| `fetch` | `http_client` | Global `fetch` / a new `httpx.Client` |
+
+`timeout`, `maxRetries` (`max_retries`) and `idempotencyKey` (`idempotency_key`) can also be set per call. See [Errors & retries](/sdks/errors-and-retries).

@@ -6,17 +6,23 @@ icon: "rotate"
 
 ## Retries are automatic
 
-Network errors, rate limits (429) and server errors (5xx) are retried twice with backoff. Every `POST` gets an idempotency key, and retries reuse it, so a retried "create invoice" never creates two.
+Failed calls are retried up to **2 times**, with exponential backoff from 0.5s up to 8s. The SDK retries on:
 
-Change it per client or per call:
+- network errors and timeouts
+- `408`, `409 conflict` and any `5xx`
+- `429`, after waiting for `Retry-After`
+
+Every `POST` gets an `Idempotency-Key`, and retries reuse it, so a retried "create invoice" never creates two. `PATCH` and `DELETE` have no key, so they're only retried when the request never reached the server, or on `429`.
+
+Change this per client or per call:
 
 <CodeGroup>
 ```ts TypeScript
-const invoiceai = new InvoiceAI({ maxRetries: 5, timeout: 20_000 })
+const invoiceai = new InvoiceAI({ maxRetries: 5, timeout: 20_000 }) // ms
 await invoiceai.invoices.finalize(id, { idempotencyKey: 'order-1234' })
 ```
 ```python Python
-client = InvoiceAI(max_retries=5, timeout=20.0)
+client = InvoiceAI(max_retries=5, timeout=20.0)  # seconds
 client.invoices.finalize(id, idempotency_key="order-1234")
 ```
 </CodeGroup>
@@ -49,11 +55,15 @@ except ValidationError as err:
 
 | Error | When |
 |---|---|
-| `AuthenticationError` | Missing or invalid API key (401) |
-| `PermissionError` | Key lacks the scope (403). Python: `PermissionDeniedError` |
-| `NotFoundError` | No such object (404) |
-| `InvalidStateError` | Wrong state, e.g. editing a finalized invoice (409) |
-| `ValidationError` | Bad input. See `.fields` (422) |
-| `RateLimitError` | Too many requests, after retries (429) |
+| `AuthenticationError` | Missing or invalid API key (`401`) |
+| `PermissionError` | The key lacks the scope (`403`). Python calls it `PermissionDeniedError`, with `PermissionError` as an alias. |
+| `NotFoundError` | No such object (`404`) |
+| `InvalidStateError` | Wrong state, such as editing a finalized invoice (`409`) |
+| `ConflictError` | Clashed with a concurrent request (`409`) |
+| `ValidationError` | Bad input. See `.fields` (`422`) |
+| `RateLimitError` | Too many requests, even after retries (`429`) |
+| `APIConnectionError` | No response: network failure or timeout (`APITimeoutError`) |
 
-Every error has `requestId`. Include it when you contact support.
+All of them extend `InvoiceAIError`. API errors carry `status`, `code`, `detail` and the request id (`requestId` in TypeScript, `request_id` in Python). Include the request id when you contact support.
+
+See [Errors & retries](/errors) for every error code.

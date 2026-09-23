@@ -1,0 +1,58 @@
+---
+title: "Objects & money"
+description: "Response envelope, id prefixes, minor-unit amounts, currencies and dates."
+icon: "fingerprint"
+---
+
+## Response envelope
+
+A successful response puts its payload under `data`: one object, or an array for a list. Lists add [`next_cursor`](/pagination).
+
+```json
+{ "data": { "id": "cus_9f8e7d6c5b4a39281706f5e4", "object": "customer", "name": "Globex Corporation" } }
+```
+
+`DELETE /invoices/{id}` and `DELETE /webhook-endpoints/{id}` return `204` with no body. Other `DELETE`s archive the resource and return it.
+
+## Ids
+
+| Resource | Id | `object` |
+|---|---|---|
+| Customer | `cus_…` | `customer` |
+| Product | `prod_…` | `product` |
+| Price | `price_…` | `price` |
+| Invoice | `in_…` | `invoice` |
+| Invoice item | `ii_…` | `invoiceitem` |
+| Webhook endpoint | UUID | none |
+
+Prefixed resources also accept their internal UUID. Treat ids as opaque strings. A malformed id returns `404`.
+
+## Money
+
+Every amount is an **integer in the currency's minor unit**. There are no decimals.
+
+| You mean | Send |
+|---|---|
+| $1,500.00 | `150000` |
+| €0.99 | `99` |
+| ¥5,000 (no minor unit) | `5000` |
+| 1.500 KWD (three decimals) | `1500` |
+
+- A fraction such as `1500.5` is rejected with `422` (`"Use whole minor units"`).
+- Amounts are stored with at most two decimals, so a three-decimal amount must be a multiple of `10`.
+- Totals (`subtotal`, `discount`, `tax`, `total`, `amount_due`, …) are calculated by the server.
+- `amount_due` equals `total` while an invoice is `open` or `overdue`. Otherwise it's `0`.
+- `tax_rate` and `discount_percent` are percentages from `0` to `100`, such as `18` or `7.5`.
+
+## Currencies and dates
+
+- Currencies are ISO 4217 codes. `usd` is accepted and stored as `USD`. An invoice without `currency` uses your business's default currency.
+- A priced line must be in the same currency as its invoice.
+- Dates (`issue_date`, `due_date`) are `YYYY-MM-DD`. Timestamps are ISO 8601 in UTC.
+- On create, pass `due_date` or `days_until_due` (0 to 365).
+
+## Archiving
+
+Customers, products and prices are never hard-deleted, because issued invoices refer to them. `DELETE /customers/{id}` returns the customer with `"deleted": true`, and it's hidden from lists unless you pass `include_deleted=true`. `DELETE /products/{id}` and `DELETE /prices/{id}` return the object with `"active": false`.
+
+Draft invoices really are deleted. See [Invoice lifecycle](/invoice-lifecycle).

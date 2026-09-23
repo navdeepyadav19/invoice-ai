@@ -4,6 +4,14 @@ description: "What's in the Invoice-AI API, and what's changed."
 icon: "clock-rotate-left"
 ---
 
+<Update label="September 2026" description="SDKs & CLI 0.1.0 (beta)">
+  ## TypeScript SDK, Python SDK and CLI
+
+  - `@horizonpay/invoice-ai` (npm) and `horizonpay-invoice-ai` (PyPI): typed clients with automatic retries, idempotency keys, pagination and webhook verification. See [SDKs](/sdks/overview).
+  - `@horizonpay/invoice-ai-cli`: the `invoice-ai` command with browser login. See [CLI](/cli/overview).
+  - 0.x is a beta: the API may still change before 1.0. See [Versioning](/sdks/versioning).
+</Update>
+
 <Update label="September 2026" description="v1">
   ## REST API v1
 
@@ -41,5 +49,4 @@ icon: "clock-rotate-left"
 
   - Webhook deliveries are currently sent once a day. See [Webhooks](/webhooks#responding-and-retries).
   - No business profile writes, credit notes, OAuth apps or API key management through the API.
-  - There are no official SDKs or CLI yet. Use the OpenAPI document to generate a client.
 </Update>

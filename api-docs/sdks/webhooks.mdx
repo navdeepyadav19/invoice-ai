@@ -1,16 +1,22 @@
 ---
 title: "Verify webhooks"
-description: "Check a webhook really came from Invoice-AI."
+description: "Check that a webhook really came from Invoice-AI."
 icon: "shield-check"
 ---
 
-Pass the **raw** request body, the headers and your endpoint's `whsec_…` secret. You get a typed event back, or an error if the signature is wrong or too old.
+Pass the **raw** request body, the headers and your endpoint's `whsec_…` secret. You get a typed event back, or a `WebhookVerificationError` if the signature is wrong or more than 5 minutes old.
+
+<Warning>
+  Use the raw body, before any JSON parsing. A body that's parsed and re-serialized won't match the signature.
+</Warning>
+
+## TypeScript
 
 <CodeGroup>
-```ts TypeScript
+```ts Next.js (app/api/webhooks/route.ts)
 import { Webhooks } from '@horizonpay/invoice-ai'
 
-const webhooks = new Webhooks(process.env.INVOICE_AI_WEBHOOK_SECRET!)
+const webhooks = new Webhooks(process.env.INVOICE_AI_WEBHOOK_SECRET)
 
 export async function POST(req: Request) {
   const event = await webhooks.constructEvent(await req.text(), req.headers)
@@ -20,18 +26,67 @@ export async function POST(req: Request) {
   return new Response(null, { status: 204 })
 }
 ```
-```python Python
+```ts Express
+import express from 'express'
+import { Webhooks } from '@horizonpay/invoice-ai'
+
+const webhooks = new Webhooks(process.env.INVOICE_AI_WEBHOOK_SECRET)
+const app = express()
+
+// express.raw keeps the body as a Buffer. Don't use express.json() on this route.
+app.post('/webhooks', express.raw({ type: 'application/json' }), async (req, res) => {
+  try {
+    const event = await webhooks.constructEvent(req.body, req.headers)
+    if (event.type === 'invoice.paid') console.log('Paid:', event.data.object.number)
+    res.sendStatus(204)
+  } catch {
+    res.sendStatus(400)
+  }
+})
+```
+</CodeGroup>
+
+## Python
+
+<CodeGroup>
+```python FastAPI
+import os
+
+from fastapi import FastAPI, HTTPException, Request
+from invoice_ai import Webhook, WebhookVerificationError
+
+app = FastAPI()
+webhook = Webhook(os.environ["INVOICE_AI_WEBHOOK_SECRET"])
+
+
+@app.post("/webhooks", status_code=204)
+async def invoice_ai_webhook(request: Request):
+    body = await request.body()  # raw bytes
+    try:
+        event = webhook.verify(body, request.headers)
+    except WebhookVerificationError:
+        raise HTTPException(status_code=400)
+    if event.type == "invoice.paid":
+        print("Paid:", event.data.object.number)
+```
+```python Any framework
 import os
 
 from invoice_ai import Webhook
 
 webhook = Webhook(os.environ["INVOICE_AI_WEBHOOK_SECRET"])
 
-def handle(body: bytes, headers: dict):
-    event = webhook.verify(body, headers)
+def handle(body: bytes, headers) -> None:
+    event = webhook.verify(body, headers)  # raises WebhookVerificationError
     if event.type == "invoice.paid":
         print("Paid:", event.data.object.number)
 ```
 </CodeGroup>
 
-See [Webhooks](/webhooks) for the event list.
+## Good to know
+
+- Respond with any `2xx` within 10 seconds, and do slow work afterwards.
+- Deliveries can repeat, so deduplicate on `event.id`.
+- You can test your handler without a real delivery. See [Testing](/sdks/testing#sign-a-test-webhook).
+
+See [Webhooks](/webhooks) for the event list and retry schedule.
