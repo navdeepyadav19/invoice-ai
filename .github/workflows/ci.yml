@@ -91,7 +91,7 @@ jobs:
   # generated from api-docs/openapi.json and committed, like the API docs above:
   # regenerate and fail on any diff, so a spec change can't ship without the
   # SDK that matches it. Then build once and run the unit tests on every Node
-  # version the package supports.
+  # version the package supports (the maintained LTS lines: 20, 22, 24).
   sdk-ts:
     name: TypeScript SDK (Node ${{ matrix.node }})
     runs-on: ubuntu-latest
@@ -99,11 +99,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: [18, 20, 22]
+        node: [20, 22, 24]
     steps:
       - uses: actions/checkout@v7
       # pnpm 11 itself needs Node 22+, so install, generate and build on the
-      # repo's Node first, then switch to the matrix version to test.
+      # repo's Node (24) first, then switch to the matrix version to test.
       - uses: ./.github/actions/setup
       - run: pnpm sdk:gen
       - name: Fail if the generated SDK drifted
@@ -149,7 +149,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: [18, 20, 22]
+        node: [20, 22, 24]
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
@@ -190,7 +190,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ['3.9', '3.10', '3.11', '3.12', '3.13']
+        python: ['3.10', '3.11', '3.12', '3.13']
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v10.2.0
@@ -232,3 +232,43 @@ jobs:
         if: matrix.python == '3.13'
         working-directory: packages/sdk-python
         run: uv run pytest -m contract
+
+  # The three packages ship as one release at one version. Fail if the TS SDK,
+  # its VERSION constant, the CLI, its CLI_VERSION constant and the Python SDK
+  # (_version.py, and pyproject.toml unless its version is dynamic) disagree.
+  versions:
+    name: Package versions in sync
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - run: node scripts/ci/check-versions.mjs
+
+  # Install what we would publish, the way a user would: pnpm pack the SDK and
+  # the CLI (pnpm rewrites the CLI's workspace: dependency on the SDK to a real
+  # range; fail if it didn't), npm install both tarballs into a blank project,
+  # then ESM default + named import, CJS require, `npx invoice-ai --help` and
+  # `--version`, publint and @arethetypeswrong/cli. For Python: uv build, twine
+  # check, and install the wheel and the sdist into fresh venvs and import them.
+  # The logic lives in scripts/ci/pack-smoke.sh so it runs the same locally.
+  packages-install:
+    name: Package install smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          python-version: '3.13'
+          enable-cache: true
+          cache-dependency-glob: packages/sdk-python/uv.lock
+      - name: npm packages (SDK + CLI)
+        run: scripts/ci/pack-smoke.sh node
+      - name: Python package
+        env:
+          PACK_SMOKE_PYTHON: '3.13'
+        run: scripts/ci/pack-smoke.sh python
