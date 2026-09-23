@@ -13,7 +13,7 @@ Every command accepts the global options shown under `invoice-ai` below (`--json
 Usage: invoice-ai [options] [command]
 
 Invoice-AI from your terminal. Log in once, then manage customers, products,
-prices, invoices and webhooks.
+prices, invoices, invoice items and webhooks.
 
 Options:
   -v, --version                  print the CLI version
@@ -42,6 +42,8 @@ Commands:
   prices                         Manage prices (what a product costs, per
                                  currency)
   invoices                       Create, send and manage invoices
+  invoice-items                  Add, inspect and remove the lines of a draft
+                                 invoice
   webhooks                       Manage webhook endpoints and test your receiver
   api [options] <method> <path>  Call any API endpoint directly and print the
                                  JSON response
@@ -316,14 +318,15 @@ Usage: invoice-ai prices [options] [command]
 Manage prices (what a product costs, per currency)
 
 Options:
-  -h, --help            show help
+  -h, --help             show help
 
 
 Commands:
-  list [options]        List prices
-  get <id>              Show one price
-  create [options]      Create a price for a product
-  archive <id>          Archive a price (it can no longer be added to invoices)
+  list [options]         List prices
+  get <id>               Show one price
+  create [options]       Create a price for a product
+  update [options] <id>  Update a price (nickname, default tax rate)
+  archive <id>           Archive a price (it can no longer be added to invoices)
 ```
 
 ## invoice-ai prices list
@@ -379,6 +382,29 @@ Options:
 
 Example:
   $ invoice-ai prices create --product prod_123 --amount 25.00 --currency USD
+```
+
+## invoice-ai prices update
+
+```text
+Usage: invoice-ai prices update [options] <id>
+
+Update a price (nickname, default tax rate)
+
+Options:
+  --nickname <text>     label shown in the dashboard ("" clears it)
+  --tax-rate <percent>  default tax percentage for new lines billed from this
+                        price
+  -d, --data <json>     request body as JSON, @file.json or @- for stdin (flags
+                        override its fields)
+  -h, --help            show help
+
+
+Amount, currency and interval changes go through --data. The product can't change;
+create a new price instead.
+
+Example:
+  $ invoice-ai prices update price_123 --nickname "Annual" --tax-rate 18
 ```
 
 ## invoice-ai prices archive
@@ -595,6 +621,96 @@ Options:
   --limit <n>           results per page (1-100)
   --cursor <cursor>     start after this cursor (from a previous page)
   --all                 fetch every page, not just the first
+  -h, --help            show help
+```
+
+## invoice-ai invoice-items
+
+```text
+Usage: invoice-ai invoice-items [options] [command]
+
+Add, inspect and remove the lines of a draft invoice
+
+Options:
+  -h, --help             show help
+
+
+Commands:
+  list [options]         List an invoice's lines, in order
+  get <id>               Show one line (ii_…)
+  create [options]       Add a line to a draft: from a --price, or ad hoc with
+                         --description and an amount
+  delete [options] <id>  Remove a line from a draft (a draft keeps at least one
+                         line)
+```
+
+## invoice-ai invoice-items list
+
+```text
+Usage: invoice-ai invoice-items list [options]
+
+List an invoice's lines, in order
+
+Options:
+  --invoice <id>        the invoice (in_…), required
+  -h, --help            show help
+```
+
+## invoice-ai invoice-items get
+
+```text
+Usage: invoice-ai invoice-items get [options] <id>
+
+Show one line (ii_…)
+
+Options:
+  -h, --help            show help
+```
+
+## invoice-ai invoice-items create
+
+```text
+Usage: invoice-ai invoice-items create [options]
+
+Add a line to a draft: from a --price, or ad hoc with --description and an
+amount
+
+Options:
+  --invoice <id>         the draft to add to (in_…), required
+  --price <id>           bill from this catalog price (fills description, amount
+                         and tax rate)
+  --description <text>   what you are billing for (required without --price)
+  --qty <n>              quantity, may be fractional (default 1)
+  --unit <unit>          unit of measure (default NOS) (choices: "NOS", "PCS",
+                         "KGS", "GMS", "LTR", "MTR", "SQF", "SQM", "HRS", "DAY",
+                         "MON", "BOX", "SET", "OTH")
+  --amount <decimal>     unit amount in major units, e.g. 25.00 (uses the
+                         invoice currency)
+  --unit-amount <minor>  unit amount in minor units, e.g. 2500 for $25.00
+  --currency <code>      currency for --amount (defaults to the invoice
+                         currency)
+  --discount <percent>   discount percentage applied before tax
+  --tax-rate <percent>   tax percentage added on top (defaults to the price
+                         rate, or 0)
+  -d, --data <json>      request body as JSON, @file.json or @- for stdin (flags
+                         override its fields)
+  -h, --help             show help
+
+
+Examples:
+  $ invoice-ai invoice-items create --invoice in_123 --price price_abc --qty 3
+  $ invoice-ai invoice-items create --invoice in_123 --description "Rush fee" --amount 50
+```
+
+## invoice-ai invoice-items delete
+
+```text
+Usage: invoice-ai invoice-items delete [options] <id>
+
+Remove a line from a draft (a draft keeps at least one line)
+
+Options:
+  --invoice <id>        the invoice the line belongs to (speeds up the lookup)
   -h, --help            show help
 ```
 
