@@ -118,7 +118,7 @@ importers:
   packages/cli:
     dependencies:
       '@horizonpay/invoice-ai':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../sdk-ts
       '@napi-rs/keyring':
         specifier: ^2.1.0
