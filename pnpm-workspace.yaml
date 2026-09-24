@@ -1,6 +1,3 @@
-packages:
-  - 'packages/*'
-
 allowBuilds:
   # tsx (used by `pnpm postman:gen`) runs on esbuild, which needs its postinstall
   # to place the platform binary. Without this, the script fails at install time.
