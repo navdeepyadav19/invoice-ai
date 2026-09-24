@@ -13,8 +13,6 @@
     "db:types": "supabase gen types typescript --local > lib/database.types.generated.ts",
     "postman:gen": "tsx scripts/generate-postman.ts",
     "openapi:gen": "tsx scripts/generate-openapi.ts",
-    "cli:docs": "pnpm --filter @horizonpay/invoice-ai build && pnpm --filter @horizonpay/invoice-ai-cli build && pnpm --filter @horizonpay/invoice-ai-cli run docs",
-    "sdk:gen": "pnpm --filter @horizonpay/invoice-ai run gen:schema && tsx scripts/sdk-gen/ts.ts && tsx scripts/sdk-gen/python.ts",
     "api:setup": "tsx scripts/setup-api.ts",
     "api:key": "tsx scripts/create-api-key.ts"
   },

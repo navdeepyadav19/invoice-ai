@@ -1,0 +1,106 @@
+# Keeps the SDK repo (navdeepyadav19/invoice-ai-sdk) in step with this API.
+#
+#   push-spec:     api-docs/openapi.json or lib/currency.ts changed on main
+#                  → copy them to invoice-ai-sdk/spec/, regenerate both SDKs,
+#                    open (or update) a PR there. The SDK repo's CI gates it.
+#   pull-cli-docs: daily / on demand → copy the SDK repo's generated
+#                  docs/cli-commands.mdx into api-docs/cli/commands.mdx here.
+#
+# Auth: SDK_REPO_TOKEN is a fine-grained token scoped to invoice-ai-sdk only
+# (Contents + Pull requests: read & write). Nothing else in this repo can use it.
+name: Sync SDK repo
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - api-docs/openapi.json
+      - lib/currency.ts
+  schedule:
+    - cron: '41 4 * * *' # 04:41 UTC daily (CLI docs)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-sdk
+  cancel-in-progress: false
+
+jobs:
+  push-spec:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: api
+      - uses: actions/checkout@v7
+        with:
+          repository: navdeepyadav19/invoice-ai-sdk
+          token: ${{ secrets.SDK_REPO_TOKEN }}
+          path: sdk
+      - name: Copy the contract
+        id: spec
+        run: |
+          cp api/api-docs/openapi.json sdk/spec/openapi.json
+          cp api/lib/currency.ts sdk/spec/currency.ts
+          echo "version=$(node -p "require('./sdk/spec/openapi.json').info.version")" >> "$GITHUB_OUTPUT"
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: sdk/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: sdk/pnpm-lock.yaml
+      - uses: astral-sh/setup-uv@v10.2.0
+      - name: Regenerate both SDKs
+        working-directory: sdk
+        run: |
+          pnpm install --frozen-lockfile
+          (cd packages/sdk-python && uv sync --locked)
+          pnpm sdk:gen
+      - name: Open or update the PR in invoice-ai-sdk
+        uses: peter-evans/create-pull-request@v8
+        with:
+          path: sdk
+          token: ${{ secrets.SDK_REPO_TOKEN }}
+          branch: sync/spec
+          delete-branch: true
+          commit-message: 'chore(spec): sync API spec ${{ steps.spec.outputs.version }}'
+          title: 'Sync API spec (${{ steps.spec.outputs.version }})'
+          body: |
+            Automated from navdeepyadav19/invoice-ai@${{ github.sha }}.
+
+            Copies `api-docs/openapi.json` and `lib/currency.ts` into `spec/` and regenerates both SDKs (`pnpm sdk:gen`).
+            If this changes the public SDK surface, add a changeset (`pnpm changeset`) before merging.
+
+  pull-cli-docs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: Fetch the CLI command reference from invoice-ai-sdk
+        run: |
+          src=$(mktemp)
+          curl -fsSL https://raw.githubusercontent.com/navdeepyadav19/invoice-ai-sdk/main/docs/cli-commands.mdx -o "$src"
+          # Keep this repo's "synced from" header instead of the generator's.
+          node -e '
+            const fs = require("fs")
+            const [src, dst] = process.argv.slice(1)
+            const header = /\{\/\*[^]*?\*\/\}/
+            const ours = fs.readFileSync(dst, "utf8").match(header)?.[0] ?? ""
+            fs.writeFileSync(dst, fs.readFileSync(src, "utf8").replace(header, ours))
+          ' "$src" api-docs/cli/commands.mdx
+      - uses: peter-evans/create-pull-request@v8
+        with:
+          branch: sync/cli-docs
+          delete-branch: true
+          commit-message: 'docs(cli): sync command reference from invoice-ai-sdk'
+          title: 'docs: sync CLI command reference'
+          body: Automated copy of `docs/cli-commands.mdx` from navdeepyadav19/invoice-ai-sdk.
