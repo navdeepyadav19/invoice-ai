@@ -1,0 +1,48 @@
+# Pulls the CLI command reference generated in navdeepyadav19/invoice-ai-sdk
+# (docs/cli-commands.mdx) into api-docs/cli/commands.mdx, daily and on demand.
+#
+# The other direction needs nothing here: invoice-ai-sdk's own "Sync spec"
+# workflow pulls api-docs/openapi.json and lib/currency.ts from this (public)
+# repo every 6 hours and opens a PR there. No cross-repo tokens exist.
+name: Sync CLI docs
+
+on:
+  schedule:
+    - cron: '41 4 * * *' # 04:41 UTC daily
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-cli-docs
+  cancel-in-progress: false
+
+jobs:
+  pull-cli-docs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: Fetch the CLI command reference from invoice-ai-sdk
+        run: |
+          src=$(mktemp)
+          curl -fsSL https://raw.githubusercontent.com/navdeepyadav19/invoice-ai-sdk/main/docs/cli-commands.mdx -o "$src"
+          # Keep this repo's "synced from" header instead of the generator's.
+          node -e '
+            const fs = require("fs")
+            const [src, dst] = process.argv.slice(1)
+            const header = /\{\/\*[^]*?\*\/\}/
+            const ours = fs.readFileSync(dst, "utf8").match(header)?.[0] ?? ""
+            fs.writeFileSync(dst, fs.readFileSync(src, "utf8").replace(header, ours))
+          ' "$src" api-docs/cli/commands.mdx
+      - uses: peter-evans/create-pull-request@v8
+        with:
+          branch: sync/cli-docs
+          delete-branch: true
+          commit-message: 'docs(cli): sync command reference from invoice-ai-sdk'
+          title: 'docs: sync CLI command reference'
+          body: Automated copy of `docs/cli-commands.mdx` from navdeepyadav19/invoice-ai-sdk.
