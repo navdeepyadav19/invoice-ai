@@ -4,7 +4,7 @@ import type { serializeInvoice } from '@/lib/api/serialize'
  * The event catalogue, in a module with no server-only imports.
  *
  * This lives apart from lib/services/webhooks.ts on purpose: that file reaches
- * AuthContext → the Supabase server client → `next/headers`, so a client
+ * AuthContext → the database pool and Neon Auth → `next/headers`, so a client
  * component importing the list from there drags the whole server tree into the
  * browser bundle and the build fails. A plain constant has no such dependency.
  */

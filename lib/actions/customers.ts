@@ -8,7 +8,7 @@ import { toClientRecord } from '@/lib/customers'
 import { countryName } from '@/lib/locale/countries'
 import { requireUser } from '@/lib/queries'
 import * as clients from '@/lib/services/clients'
-import { fromPostgres, isServiceError } from '@/lib/services/errors'
+import { isServiceError, q } from '@/lib/services/errors'
 import { toFieldErrors, withValues, type StepState } from '@/lib/form-state'
 import { clientSchema } from '@/lib/validators'
 import type { ClientRow } from '@/lib/database.types'
@@ -16,7 +16,7 @@ import type { ClientRow } from '@/lib/database.types'
 /**
  * Customers (the `clients` table, public ids `cus_…`) from the web UI.
  *
- * Every write goes through the RLS-scoped session client, so tenant isolation
+ * Every write goes through the RLS-scoped session database handle, so tenant isolation
  * is Postgres's job, not ours. Failures come back as StepState with the
  * submission echoed, so a rejected form keeps what was typed.
  */
@@ -112,12 +112,7 @@ export async function updateCustomerAction(
 
     // Written as a full record rather than via clients.update(), whose
     // PATCH semantics would ignore a field the user just emptied.
-    const { error } = await ctx.supabase
-      .from('clients')
-      .update(toClientRecord(parsed.data))
-      .eq('id', existing.id)
-
-    if (error) throw fromPostgres(error)
+    await q(ctx.db.updateTable('clients').set(toClientRecord(parsed.data)).where('id', '=', existing.id).execute())
 
     revalidatePath('/customers')
     revalidatePath(`/customers/${existing.public_id}`)

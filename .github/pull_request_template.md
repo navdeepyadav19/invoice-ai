@@ -12,5 +12,5 @@
 - [ ] Preview deployment opened and the change works there
 - [ ] New logic has unit tests (`lib/**/*.test.ts`)
 - [ ] No secrets or `.env` values committed
-- [ ] Database changes ship as a new file in `supabase/migrations/`, never an edit to an old one
+- [ ] Database changes ship as a new file in `db/migrations/` (applied with `pnpm db:migrate`), never an edit to an old one
 - [ ] GST math still reconciles: taxable + tax + round-off = total

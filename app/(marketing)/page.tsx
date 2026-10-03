@@ -1,15 +1,13 @@
 import Link from 'next/link'
-import { Download, FileText, Link2, ShieldCheck } from 'lucide-react'
+import { ArrowRight, Download, FileText, Link2, ShieldCheck } from 'lucide-react'
 
-import { GuestCta } from '@/components/marketing/guest-cta'
 import { InvoiceThumbnail } from '@/components/marketing/invoice-thumbnail'
 import { Wordmark } from '@/components/brand'
 import { Button } from '@/components/ui/button'
-import { getUser } from '@/lib/supabase/server'
+import { getCurrentUser } from '@/lib/queries'
 
 export default async function LandingPage() {
-  const user = await getUser()
-  const isSignedIn = Boolean(user) && !user?.is_anonymous
+  const isSignedIn = Boolean(await getCurrentUser())
 
   return (
     <div className="flex min-h-svh flex-col">
@@ -55,15 +53,17 @@ export default async function LandingPage() {
               spreadsheet. Fill in the details, we handle the tax split, the numbering and the PDF.
             </p>
 
-            <GuestCta />
+            <PrimaryCta isSignedIn={isSignedIn} />
 
-            <p className="text-sm text-muted-foreground">
-              No card, no signup to start.{' '}
-              <Link href="/signup" className="font-medium text-foreground underline underline-offset-4">
-                Create an account
-              </Link>{' '}
-              when you want to keep your invoices.
-            </p>
+            {!isSignedIn && (
+              <p className="text-sm text-muted-foreground">
+                No card needed. Already have an account?{' '}
+                <Link href="/login" className="font-medium text-foreground underline underline-offset-4">
+                  Sign in
+                </Link>
+                .
+              </p>
+            )}
           </div>
 
           <div className="relative">
@@ -101,10 +101,10 @@ export default async function LandingPage() {
               Raise your first invoice now
             </h2>
             <p className="mx-auto mt-3 max-w-lg text-muted-foreground">
-              Start as a guest. If you sign up later, everything you&rsquo;ve made comes with you.
+              Create an account, add your business once, and send an invoice in the same sitting.
             </p>
             <div className="mt-7 flex justify-center">
-              <GuestCta compact />
+              <PrimaryCta isSignedIn={isSignedIn} />
             </div>
           </div>
         </section>
@@ -120,6 +120,20 @@ export default async function LandingPage() {
         </div>
       </footer>
     </div>
+  )
+}
+
+/** Signed-out visitors go to sign-up; signed-in ones straight to the builder. */
+function PrimaryCta({ isSignedIn }: { isSignedIn: boolean }) {
+  return (
+    <Button
+      size="lg"
+      nativeButton={false}
+      render={<Link href={isSignedIn ? '/invoices/new' : '/signup'} />}
+    >
+      {isSignedIn ? 'Create an invoice' : 'Create your account'}
+      <ArrowRight className="size-4" />
+    </Button>
   )
 }
 

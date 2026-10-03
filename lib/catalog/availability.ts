@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { createClient } from '@/lib/supabase/server'
+import { userDb } from '@/lib/db'
 import { getCurrentUser } from '@/lib/queries'
 
 export interface PickerAvailability {
@@ -11,25 +11,32 @@ export interface PickerAvailability {
 /**
  * Should the builder offer the saved-customer and catalog pickers?
  *
- * Guests never see them: their data is deleted after 30 days and the saved
- * customer / catalog pages are account features, the same line the settings
- * pages draw. For everyone else a picker only appears when there is something
- * to pick — an empty dropdown on every new invoice is noise.
+ * A picker only appears when there is something to pick — an empty dropdown
+ * on every new invoice is noise.
  *
- * Two HEAD counts under RLS; a failure just hides the picker.
+ * Two counts, run as the signed-in user (RLS scopes them); a failure just
+ * hides the picker.
  */
 export async function pickerAvailability(): Promise<PickerAvailability> {
   const user = await getCurrentUser()
-  if (!user || user.is_anonymous) return { customers: false, prices: false }
+  if (!user) return { customers: false, prices: false }
 
-  const supabase = await createClient()
-  const [clients, prices] = await Promise.all([
-    supabase.from('clients').select('id', { count: 'exact', head: true }).is('archived_at', null),
-    supabase.from('prices').select('id', { count: 'exact', head: true }).eq('active', true),
+  const db = userDb(user.id)
+  const [clients, prices] = await Promise.allSettled([
+    db
+      .selectFrom('clients')
+      .select((eb) => eb.fn.countAll<number>().as('n'))
+      .where('archived_at', 'is', null)
+      .executeTakeFirstOrThrow(),
+    db
+      .selectFrom('prices')
+      .select((eb) => eb.fn.countAll<number>().as('n'))
+      .where('active', '=', true)
+      .executeTakeFirstOrThrow(),
   ])
 
   return {
-    customers: !clients.error && (clients.count ?? 0) > 0,
-    prices: !prices.error && (prices.count ?? 0) > 0,
+    customers: clients.status === 'fulfilled' && Number(clients.value.n) > 0,
+    prices: prices.status === 'fulfilled' && Number(prices.value.n) > 0,
   }
 }

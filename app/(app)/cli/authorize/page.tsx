@@ -1,5 +1,4 @@
 import type { Metadata } from 'next'
-import Link from 'next/link'
 
 import { CliAuthorizeForm } from '@/components/cli/cli-authorize-form'
 import { PageContainer, PageHeader } from '@/components/app/page-header'
@@ -9,7 +8,6 @@ import { apiSetupStatus } from '@/lib/api/setup-status'
 import { contextFromSession } from '@/lib/auth/context'
 import { formatUserCode, normaliseUserCode } from '@/lib/cli-auth/device'
 import { lookupCliLogin } from '@/lib/cli-auth/lookup'
-import { getCurrentUser } from '@/lib/queries'
 
 export const metadata: Metadata = { title: 'Authorize the CLI' }
 
@@ -21,7 +19,6 @@ export const metadata: Metadata = { title: 'Authorize the CLI' }
  * here with the code intact. The (app) layout has already required a session.
  */
 export default async function CliAuthorizePage({ searchParams }: PageProps<'/cli/authorize'>) {
-  const user = await getCurrentUser()
   const setup = apiSetupStatus()
   const params = await searchParams
 
@@ -32,29 +29,13 @@ export default async function CliAuthorizePage({ searchParams }: PageProps<'/cli
     />
   )
 
-  if (user?.is_anonymous) {
-    return (
-      <PageContainer size="narrow" className="space-y-6">
-        {header}
-        <p className="rounded-lg border bg-muted/40 p-4 text-sm text-muted-foreground">
-          Guest accounts can&rsquo;t sign in the CLI — guest data is cleared after 30 days, which
-          would leave its key pointing at nothing.{' '}
-          <Link href="/claim" className="font-medium text-primary underline underline-offset-4">
-            Add an email and password
-          </Link>{' '}
-          first, then run <code className="text-xs">invoice-ai login</code> again.
-        </p>
-      </PageContainer>
-    )
-  }
-
   const raw = typeof params.code === 'string' ? params.code : ''
   const code = normaliseUserCode(raw)
   let initial: CliAuthorizeState = { step: 'enter', values: raw ? { user_code: raw } : undefined }
 
   if (code) {
     const ctx = await contextFromSession()
-    const request = await lookupCliLogin(ctx.supabase, code).catch(() => null)
+    const request = await lookupCliLogin(ctx.db, code).catch(() => null)
 
     initial = request
       ? { step: 'confirm', userCode: formatUserCode(code), request }

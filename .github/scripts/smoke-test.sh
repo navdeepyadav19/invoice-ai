@@ -15,7 +15,7 @@ CHECKS=(
   "/login 200"
   "/signup 200"
   # An unknown share token must be a clean 404. A 500 here means the server
-  # rendered but couldn't reach Supabase, which is the classic bad-env-var deploy.
+  # rendered but couldn't reach the database, which is the classic bad-env-var deploy.
   "/i/00000000-0000-0000-0000-000000000000 404"
 )
 

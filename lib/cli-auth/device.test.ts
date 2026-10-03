@@ -169,7 +169,7 @@ describe('lifecycle', () => {
     expect(canTransition('approved', 'pending')).toBe(false)
   })
 
-  it('consumed can only be released back to approved (failed mint)', () => {
+  it('consumed can only be released back to approved (failed key insert)', () => {
     expect(TRANSITIONS.consumed).toEqual(['approved'])
   })
 

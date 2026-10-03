@@ -1,53 +1,55 @@
 import { NextResponse, type NextRequest } from 'next/server'
-import type { EmailOtpType } from '@supabase/supabase-js'
 
-import { createClient } from '@/lib/supabase/server'
+import { userDb } from '@/lib/db'
+import { syncOauthEmailVerification } from '@/lib/db/rpc'
+import { ensureProfile, getCurrentUser } from '@/lib/queries'
 
 /**
- * Where every email link and OAuth redirect lands.
+ * Where Google sign-in lands.
  *
- * Supabase sends two shapes depending on the flow and on how old the project's
- * email templates are:
- *   - PKCE / OAuth      -> ?code=...
- *   - email confirmation -> ?token_hash=...&type=signup|recovery|magiclink
- * Handling both means neither an OAuth login nor an emailed confirmation link
- * dead-ends, which is otherwise a confusing failure to diagnose.
+ * Neon Auth sends the browser back here with ?neon_auth_session_verifier=…;
+ * proxy.ts trades that for a session cookie and redirects to this same URL
+ * without it. So by the time this handler runs there is either a session, or
+ * the sign-in failed (Better Auth adds ?error=… when it uses this URL as the
+ * error callback, e.g. a cancelled consent screen).
  */
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = request.nextUrl
 
-  const code = searchParams.get('code')
-  const tokenHash = searchParams.get('token_hash')
-  const type = searchParams.get('type') as EmailOtpType | null
-
   // Only ever redirect to a path on this origin — an open redirect here would
-  // let someone email a "confirm your account" link that lands on their site.
+  // let someone craft a sign-in link that lands on their site.
   const rawNext = searchParams.get('next') ?? '/dashboard'
   const next = rawNext.startsWith('/') && !rawNext.startsWith('//') ? rawNext : '/dashboard'
 
-  const supabase = await createClient()
-
-  if (code) {
-    const { error } = await supabase.auth.exchangeCodeForSession(code)
-    if (error) return failure(origin, error.message)
-
-    // Google has already verified the address, so a Google sign-in counts as a
-    // verified email in our own tracking (profiles.email_verified_at). The
-    // function checks auth.identities itself — it trusts nothing we pass — and
-    // is a no-op for any other provider. A failure here must never block login.
-    const { error: syncError } = await supabase.rpc('sync_oauth_email_verification')
-    if (syncError) console.error('[auth/callback] oauth verification sync failed', syncError.message)
-
-    return NextResponse.redirect(`${origin}${next}`)
+  const oauthError = searchParams.get('error')
+  if (oauthError) {
+    console.error('[auth/callback] oauth error', oauthError, searchParams.get('error_description'))
+    return failure(origin, 'Google sign-in didn’t complete. Try again.')
   }
 
-  if (tokenHash && type) {
-    const { error } = await supabase.auth.verifyOtp({ type, token_hash: tokenHash })
-    if (!error) return NextResponse.redirect(`${origin}${next}`)
-    return failure(origin, error.message)
+  const user = await getCurrentUser()
+  if (!user) return failure(origin, 'We couldn’t sign you in with Google. Try again.')
+
+  // A first Google sign-in is a brand-new user with no profile row yet.
+  try {
+    await ensureProfile(user)
+  } catch (err) {
+    // getProfile() self-heals on the next read; never block login on this.
+    console.error('[auth/callback] could not create profile', err instanceof Error ? err.message : err)
   }
 
-  return failure(origin, 'That link is invalid or has already been used.')
+  // Google has already verified the address, so a Google sign-in counts as a
+  // verified email in our own tracking (profiles.email_verified_at). The
+  // function checks Neon Auth's account records itself — it trusts nothing we
+  // pass — and is a no-op for any other provider. A failure must never block
+  // login.
+  try {
+    await syncOauthEmailVerification(userDb(user.id))
+  } catch (err) {
+    console.error('[auth/callback] oauth verification sync failed', err instanceof Error ? err.message : err)
+  }
+
+  return NextResponse.redirect(`${origin}${next}`)
 }
 
 function failure(origin: string, message: string) {

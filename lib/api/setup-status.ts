@@ -6,7 +6,7 @@ import 'server-only'
  * Without this check the failure is silent and baffling: the settings page
  * happily creates a key, shows it once, tells you to copy it — and then every
  * single request with it returns 401, because the server has no pepper to hash
- * against or no signing key to mint a token with. The user has no way to tell
+ * against or no database to look the key up in. The user has no way to tell
  * a misconfigured deployment from a wrong key.
  *
  * So the UI asks first, and says so plainly before anyone wastes an afternoon.
@@ -27,13 +27,10 @@ export function apiSetupStatus(): SetupStatus {
     })
   }
 
-  const hasKey =
-    process.env.SUPABASE_JWT_PRIVATE_KEY_JWK || process.env.SUPABASE_JWT_PRIVATE_KEY
-
-  if (!hasKey || !process.env.SUPABASE_JWT_KID) {
+  if (!process.env.DATABASE_URL) {
     missing.push({
-      name: 'SUPABASE_JWT_PRIVATE_KEY_JWK + SUPABASE_JWT_KID',
-      why: 'Used to mint the short-lived token each API request runs under, so row-level security still applies.',
+      name: 'DATABASE_URL',
+      why: 'Keys are stored in, and every API request runs against, this database.',
     })
   }
 
@@ -50,11 +47,11 @@ export interface WebhookSetupStatus {
  * rows just pile up in the outbox. Worth saying out loud on the webhooks page.
  */
 export function webhookSetupStatus(): WebhookSetupStatus {
-  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+  if (!process.env.DATABASE_URL) {
     return {
       ready: false,
       reason:
-        'SUPABASE_SERVICE_ROLE_KEY is not set, so the delivery worker cannot read the queue. Events are being recorded but nothing is being sent.',
+        'DATABASE_URL is not set, so the delivery worker cannot read the queue. Events are being recorded but nothing is being sent.',
     }
   }
 

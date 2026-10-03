@@ -3,15 +3,14 @@ import { redirect } from 'next/navigation'
 import { Suspense } from 'react'
 
 import { AppShell } from '@/components/app/app-shell'
-import { GuestBanner } from '@/components/app/guest-banner'
 import { VerifiedToast, VerifyEmailBanner } from '@/components/app/verify-email-banner'
 import { isEmailUnverified } from '@/lib/email-verification'
 import { SIDEBAR_COLLAPSED_COOKIE } from '@/lib/nav'
 import { getProfile, needsOnboarding, requireUser } from '@/lib/queries'
 
 /**
- * The gate. Everything under (app) needs a session, and a permanent user needs
- * to have finished onboarding — otherwise they land in the builder with no
+ * The gate. Everything under (app) needs a session, and the user needs to have
+ * finished onboarding — otherwise they land in the builder with no
  * business details and nothing works.
  *
  * Onboarding deliberately lives outside this group, in (setup), so this
@@ -21,9 +20,8 @@ export default async function AppLayout({ children }: LayoutProps<'/'>) {
   const user = await requireUser()
   const profile = await getProfile()
 
-  if (needsOnboarding(user, profile)) redirect('/onboarding')
+  if (needsOnboarding(profile)) redirect('/onboarding')
 
-  const isGuest = Boolean(user.is_anonymous)
   // Unverified is a nudge, never a gate: signup lets people straight in.
   const unverified = isEmailUnverified(user, profile)
 
@@ -33,14 +31,9 @@ export default async function AppLayout({ children }: LayoutProps<'/'>) {
 
   return (
     <AppShell
-      user={{ email: user.email ?? null, isGuest, emailUnverified: unverified }}
+      user={{ email: user.email || null, emailUnverified: unverified }}
       defaultCollapsed={sidebarCollapsed}
-      banners={
-        <>
-          {isGuest && <GuestBanner />}
-          {unverified && user.email && <VerifyEmailBanner email={user.email} />}
-        </>
-      }
+      banners={unverified && user.email ? <VerifyEmailBanner email={user.email} /> : null}
     >
       <Suspense fallback={null}>
         <VerifiedToast />

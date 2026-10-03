@@ -18,7 +18,7 @@ import { parseScopes, type Scope } from '@/lib/auth/scopes'
  * HTTP logic for POST /api/cli/device and POST /api/cli/token.
  *
  * The database and the rate limiter arrive as arguments so the whole request →
- * response path can be tested without Supabase or Next (handlers.test.ts). The
+ * response path can be tested without a database or Next (handlers.test.ts). The
  * real implementations are wired in lib/cli-auth/store.ts and the route files.
  */
 
@@ -67,7 +67,7 @@ export interface HandlerDeps {
   siteUrl: string
   /**
    * False when the deployment cannot issue API keys at all (no pepper or no
-   * signing key — see lib/api/setup-status.ts). Checked before anything is
+   * database — see lib/api/setup-status.ts). Checked before anything is
    * created or consumed, so a misconfigured server never burns an approval.
    */
   ready: () => boolean
@@ -185,7 +185,7 @@ export async function handleTokenRequest(request: Request, deps: HandlerDeps): P
   if (polled.outcome !== 'approved') return errorResponse(polled.outcome)
 
   // This request won the row: it is now `consumed`, and no other poll can reach
-  // this point for the same code. Mint the key as the approving user.
+  // this point for the same code. Create the key as the approving user.
   const scopes = parseScopes(polled.scopes ?? [])
   if (!polled.ownerId || !scopes.length) {
     deps.log?.('[cli] approved device code without owner or scopes')
@@ -199,7 +199,7 @@ export async function handleTokenRequest(request: Request, deps: HandlerDeps): P
     // Cannot even act as the owner, so the claim cannot be released either;
     // the CLI will see invalid_grant next and must start again. `ready()`
     // makes this unreachable in practice.
-    deps.log?.('[cli] could not act as owner to mint a CLI key', cause)
+    deps.log?.('[cli] could not act as owner to create a CLI key', cause)
     return errorResponse('server_error')
   }
 
@@ -212,7 +212,7 @@ export async function handleTokenRequest(request: Request, deps: HandlerDeps): P
 
   if (!created.ok) {
     deps.log?.('[cli] key insert failed: %s', created.error)
-    // Put the row back to `approved` so the CLI's next poll retries the mint
+    // Put the row back to `approved` so the CLI's next poll retries the key insert
     // rather than being told the code is spent.
     await owner.release(deviceCodeHash).catch(() => undefined)
     return errorResponse('server_error')

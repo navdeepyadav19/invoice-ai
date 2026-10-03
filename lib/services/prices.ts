@@ -1,6 +1,6 @@
 import { requireScope, type AuthContext } from '@/lib/auth/context'
-import { fromPostgres, notFound, ServiceError } from '@/lib/services/errors'
-import { afterFilter, clampLimit, parseCursor, toPage, type Page } from '@/lib/services/pagination'
+import { notFound, q, ServiceError } from '@/lib/services/errors'
+import { afterPosition, clampLimit, parseCursor, toPage, type Page } from '@/lib/services/pagination'
 import {
   priceSchema,
   priceUpdateSchema,
@@ -34,30 +34,29 @@ export async function list(ctx: AuthContext, options: ListPricesOptions = {}): P
 
   const limit = clampLimit(options.limit)
 
-  let q = ctx.supabase
-    .from('prices')
-    .select('*')
-    .order('created_at', { ascending: false })
-    .order('id', { ascending: false })
+  let query = ctx.db
+    .selectFrom('prices')
+    .selectAll()
+    .orderBy('created_at', 'desc')
+    .orderBy('id', 'desc')
     .limit(limit + 1)
 
   if (options.product) {
     // Accept UUID or prod_…; resolve first so a wrong id is a 404, not an
     // empty page that looks like "no prices yet".
     const product = await getProduct(ctx, options.product)
-    q = q.eq('product_id', product.id)
+    query = query.where('product_id', '=', product.id)
   }
-  if (options.active !== undefined) q = q.eq('active', options.active)
-  if (options.currency) q = q.eq('currency', options.currency.toUpperCase())
-  if (options.type) q = q.eq('type', options.type)
+  if (options.active !== undefined) query = query.where('active', '=', options.active)
+  if (options.currency) query = query.where('currency', '=', options.currency.toUpperCase())
+  if (options.type) query = query.where('type', '=', options.type)
 
   const after = parseCursor(options.cursor)
-  if (after) q = q.or(afterFilter(after))
+  if (after) query = query.where(afterPosition(after))
 
-  const { data, error } = await q
-  if (error) throw fromPostgres(error)
+  const data = await q(query.execute())
 
-  return toPage((data ?? []) as PriceRow[], limit)
+  return toPage(data as PriceRow[], limit)
 }
 
 /**
@@ -77,17 +76,15 @@ export async function listForProducts(
   const unique = [...new Set(productIds)]
   if (unique.length === 0) return []
 
-  let q = ctx.supabase
-    .from('prices')
-    .select('*')
-    .in('product_id', unique)
-    .order('created_at', { ascending: false })
+  let query = ctx.db
+    .selectFrom('prices')
+    .selectAll()
+    .where('product_id', 'in', unique)
+    .orderBy('created_at', 'desc')
 
-  if (options.active !== undefined) q = q.eq('active', options.active)
+  if (options.active !== undefined) query = query.where('active', '=', options.active)
 
-  const { data, error } = await q
-  if (error) throw fromPostgres(error)
-  return (data ?? []) as PriceRow[]
+  return (await q(query.execute())) as PriceRow[]
 }
 
 /** Find by UUID or `price_…` public ID. */
@@ -96,12 +93,14 @@ export async function get(ctx: AuthContext, id: string): Promise<PriceRow> {
 
   if (!isPriceId(id) && !isUuid(id)) throw notFound('Price not found.')
 
-  const q = ctx.supabase.from('prices').select('*')
-  const { data, error } = isPriceId(id)
-    ? await q.eq('public_id', id).maybeSingle()
-    : await q.eq('id', id).maybeSingle()
+  const data = await q(
+    ctx.db
+      .selectFrom('prices')
+      .selectAll()
+      .where(isPriceId(id) ? 'public_id' : 'id', '=', id)
+      .executeTakeFirst(),
+  )
 
-  if (error) throw fromPostgres(error)
   if (!data) throw notFound('Price not found.')
 
   return data as PriceRow
@@ -120,22 +119,25 @@ export async function getManyWithProducts(
   const unique = [...new Set(ids)].filter((id) => isPriceId(id) || isUuid(id))
   if (unique.length === 0) return []
 
-  const orFilter = unique
-    .map((id) => (isPriceId(id) ? `public_id.eq.${id}` : `id.eq.${id}`))
-    .join(',')
+  const publicIds = unique.filter(isPriceId)
+  const uuids = unique.filter((id) => !isPriceId(id))
 
-  const { data, error } = await ctx.supabase
-    .from('prices')
-    .select('*, products!inner(name)')
-    .or(orFilter)
+  const data = await q(
+    ctx.db
+      .selectFrom('prices')
+      .innerJoin('products', 'products.id', 'prices.product_id')
+      .selectAll('prices')
+      .select('products.name as product_name')
+      .where((eb) =>
+        eb.or([
+          ...(publicIds.length > 0 ? [eb('prices.public_id', 'in', publicIds)] : []),
+          ...(uuids.length > 0 ? [eb('prices.id', 'in', uuids)] : []),
+        ]),
+      )
+      .execute(),
+  )
 
-  if (error) throw fromPostgres(error)
-
-  type JoinedPrice = PriceRow & { products: { name: string } | Array<{ name: string }> }
-  return ((data ?? []) as unknown as JoinedPrice[]).map((row) => {
-    const product = Array.isArray(row.products) ? row.products[0] : row.products
-    return { ...row, product_name: product?.name ?? '' }
-  })
+  return data as Array<PriceRow & { product_name: string }>
 }
 
 export async function create(ctx: AuthContext, input: PriceInput): Promise<PriceRow> {
@@ -146,25 +148,26 @@ export async function create(ctx: AuthContext, input: PriceInput): Promise<Price
 
   const product = await getProduct(ctx, parsed.data.product)
 
-  const { data, error } = await ctx.supabase
-    .from('prices')
-    .insert({
-      owner_id: ctx.userId,
-      public_id: nextPriceId(),
-      product_id: product.id,
-      nickname: parsed.data.nickname ?? null,
-      unit_amount: parsed.data.unit_amount,
-      currency: parsed.data.currency,
-      type: parsed.data.type,
-      recurring_interval: parsed.data.recurring_interval ?? null,
-      interval_count: parsed.data.interval_count,
-      tax_rate: parsed.data.tax_rate,
-      active: parsed.data.active,
-    })
-    .select('*')
-    .single()
+  const data = await q(
+    ctx.db
+      .insertInto('prices')
+      .values({
+        owner_id: ctx.userId,
+        public_id: nextPriceId(),
+        product_id: product.id,
+        nickname: parsed.data.nickname ?? null,
+        unit_amount: parsed.data.unit_amount,
+        currency: parsed.data.currency,
+        type: parsed.data.type,
+        recurring_interval: parsed.data.recurring_interval ?? null,
+        interval_count: parsed.data.interval_count,
+        tax_rate: parsed.data.tax_rate,
+        active: parsed.data.active,
+      })
+      .returningAll()
+      .executeTakeFirstOrThrow(),
+  )
 
-  if (error) throw fromPostgres(error)
   return data as PriceRow
 }
 
@@ -213,31 +216,32 @@ export async function update(
   // CHECK (recurring needs interval, one-off forbids it) rejects the row.
   const clearInterval = parsed.data.type === 'one_time'
 
-  const { data, error } = await ctx.supabase
-    .from('prices')
-    .update({
-      ...(parsed.data.nickname !== undefined ? { nickname: parsed.data.nickname ?? null } : {}),
-      ...(parsed.data.unit_amount !== undefined ? { unit_amount: parsed.data.unit_amount } : {}),
-      ...(parsed.data.currency !== undefined ? { currency: parsed.data.currency } : {}),
-      ...(parsed.data.type !== undefined ? { type: parsed.data.type } : {}),
-      ...(clearInterval
-        ? { recurring_interval: null, interval_count: 1 }
-        : {
-            ...(parsed.data.recurring_interval !== undefined
-              ? { recurring_interval: parsed.data.recurring_interval ?? null }
-              : {}),
-            ...(parsed.data.interval_count !== undefined
-              ? { interval_count: parsed.data.interval_count }
-              : {}),
-          }),
-      ...(parsed.data.tax_rate !== undefined ? { tax_rate: parsed.data.tax_rate } : {}),
-      ...(parsed.data.active !== undefined ? { active: parsed.data.active } : {}),
-    })
-    .eq('id', existing.id)
-    .select('*')
-    .maybeSingle()
+  const data = await q(
+    ctx.db
+      .updateTable('prices')
+      .set({
+        ...(parsed.data.nickname !== undefined ? { nickname: parsed.data.nickname ?? null } : {}),
+        ...(parsed.data.unit_amount !== undefined ? { unit_amount: parsed.data.unit_amount } : {}),
+        ...(parsed.data.currency !== undefined ? { currency: parsed.data.currency } : {}),
+        ...(parsed.data.type !== undefined ? { type: parsed.data.type } : {}),
+        ...(clearInterval
+          ? { recurring_interval: null, interval_count: 1 }
+          : {
+              ...(parsed.data.recurring_interval !== undefined
+                ? { recurring_interval: parsed.data.recurring_interval ?? null }
+                : {}),
+              ...(parsed.data.interval_count !== undefined
+                ? { interval_count: parsed.data.interval_count }
+                : {}),
+            }),
+        ...(parsed.data.tax_rate !== undefined ? { tax_rate: parsed.data.tax_rate } : {}),
+        ...(parsed.data.active !== undefined ? { active: parsed.data.active } : {}),
+      })
+      .where('id', '=', existing.id)
+      .returningAll()
+      .executeTakeFirst(),
+  )
 
-  if (error) throw fromPostgres(error)
   if (!data) throw notFound('Price not found.')
 
   return data as PriceRow
@@ -257,14 +261,15 @@ async function setActive(ctx: AuthContext, id: string, active: boolean): Promise
   const existing = await get(ctx, id)
   if (existing.active === active) return existing
 
-  const { data, error } = await ctx.supabase
-    .from('prices')
-    .update({ active })
-    .eq('id', existing.id)
-    .select('*')
-    .maybeSingle()
+  const data = await q(
+    ctx.db
+      .updateTable('prices')
+      .set({ active })
+      .where('id', '=', existing.id)
+      .returningAll()
+      .executeTakeFirst(),
+  )
 
-  if (error) throw fromPostgres(error)
   if (!data) throw notFound('Price not found.')
 
   return data as PriceRow

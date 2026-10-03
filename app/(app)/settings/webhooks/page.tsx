@@ -4,18 +4,13 @@ import { AlertTriangle } from 'lucide-react'
 import { WebhooksManager } from '@/components/settings/webhooks-manager'
 import { listRecentDeliveries, listWebhookEndpoints } from '@/lib/actions/webhooks'
 import { webhookSetupStatus } from '@/lib/api/setup-status'
-import { getCurrentUser } from '@/lib/queries'
 
 export const metadata: Metadata = { title: 'Webhooks' }
 
 export default async function WebhooksPage() {
-  const user = await getCurrentUser()
-  const isGuest = Boolean(user?.is_anonymous)
   const setup = webhookSetupStatus()
 
-  const [endpoints, deliveries] = isGuest
-    ? [[], []]
-    : await Promise.all([listWebhookEndpoints(), listRecentDeliveries()])
+  const [endpoints, deliveries] = await Promise.all([listWebhookEndpoints(), listRecentDeliveries()])
 
   return (
     <div className="space-y-8">
@@ -43,13 +38,7 @@ export default async function WebhooksPage() {
         </div>
       ) : null}
 
-      {isGuest ? (
-        <p className="rounded-lg border bg-muted/40 p-4 text-sm text-muted-foreground">
-          Guest accounts can&rsquo;t register webhooks. Add an email and password first.
-        </p>
-      ) : (
-        <WebhooksManager endpoints={endpoints} deliveries={deliveries} />
-      )}
+      <WebhooksManager endpoints={endpoints} deliveries={deliveries} />
 
       <section className="space-y-3 border-t pt-8">
         <h3 className="text-sm font-medium">What we send</h3>

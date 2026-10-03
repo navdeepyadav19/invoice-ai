@@ -6,7 +6,7 @@ import type { ClientInput } from '@/lib/validators'
  * Pure helpers behind the /customers pages.
  *
  * Kept out of the 'use server' action module (which may only export async
- * functions) and free of Supabase, so they can be unit-tested directly.
+ * functions) and free of database access, so they can be unit-tested directly.
  */
 
 type SearchParams = Record<string, string | string[] | undefined>

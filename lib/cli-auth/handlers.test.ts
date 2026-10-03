@@ -14,7 +14,7 @@ import {
  * Route-level tests for /api/cli/device and /api/cli/token with an in-memory
  * store. The single-use guarantee itself lives in SQL (a row lock in
  * cli_device_poll); these check that the HTTP layer honours what the store
- * says and never mints without an `approved` outcome.
+ * says and never creates a key without an `approved` outcome.
  */
 
 const SITE = 'https://invoice.example'
@@ -156,7 +156,7 @@ describe('POST /api/cli/token', () => {
     expect(d.store.poll).not.toHaveBeenCalled()
   })
 
-  it('mints the key as the owner on approval and returns it once', async () => {
+  it('creates the key as the owner on approval and returns it once', async () => {
     const session = owner()
     const poll = vi.fn(async (): Promise<PollResult> => ({
       outcome: 'approved',
@@ -250,7 +250,7 @@ describe('POST /api/cli/token', () => {
     expect(d.store.poll).not.toHaveBeenCalled()
   })
 
-  it('does not consume an approval when the deployment cannot mint keys', async () => {
+  it('does not consume an approval when the deployment cannot create keys', async () => {
     const d = deps({}, { ready: () => false })
     const res = await handleTokenRequest(post('/api/cli/token', { device_code: deviceCode }), d)
     expect(res.status).toBe(500)

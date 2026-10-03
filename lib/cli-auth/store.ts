@@ -1,56 +1,43 @@
 import 'server-only'
 
-import { createClient as createSupabaseClient } from '@supabase/supabase-js'
-
 import { createApiKeyForOwner } from '@/lib/auth/create-api-key'
-import { mintUserToken } from '@/lib/auth/mint'
 import { checkRateLimit } from '@/lib/api/rate-limit'
 import { apiSetupStatus } from '@/lib/api/setup-status'
 import type { DeviceStore, HandlerDeps, OwnerSession, PollResult } from '@/lib/cli-auth/handlers'
-import { createTokenClient } from '@/lib/supabase/for-token'
-import { siteUrl, supabasePublishableKey, supabaseUrl } from '@/lib/supabase/env'
-import type { Database } from '@/lib/database.types'
+import type { PollOutcome } from '@/lib/cli-auth/device'
+import { anonDb, userDb } from '@/lib/db'
+import { cliDeviceAttachKey, cliDevicePoll, cliDeviceRelease, cliDeviceStart } from '@/lib/db/rpc'
+import { siteUrl } from '@/lib/env'
 
 /**
  * The real DeviceStore: the cli_device_* functions from migration 0013.
  *
- * There is no service-role client anywhere in this app, and this does not add
+ * There is no owner connection anywhere in this flow, and this does not add
  * one. The unauthenticated steps (start, poll) call SECURITY DEFINER functions
  * as anon — possession of the device code is the credential, exactly like
- * api_key_by_prefix. Everything after approval runs AS the approving user via a
- * minted 60-second token, so the key insert is checked by the same `own api
- * keys` RLS policy as the Settings page.
+ * api_key_by_prefix. Everything after approval runs AS the approving user
+ * (userDb), so the key insert is checked by the same `own api keys` RLS policy
+ * as the Settings page.
  */
-
-function anonClient() {
-  return createSupabaseClient<Database>(supabaseUrl(), supabasePublishableKey(), {
-    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
-  })
-}
 
 export const deviceStore: DeviceStore = {
   async start(input) {
-    const { data, error } = await anonClient().rpc('cli_device_start', {
-      p_device_code_hash: input.deviceCodeHash,
-      p_user_code: input.userCode,
-      p_client_name: input.clientName,
-      p_client_os: input.clientOs,
+    const outcome = await cliDeviceStart(anonDb(), {
+      deviceCodeHash: input.deviceCodeHash,
+      userCode: input.userCode,
+      clientName: input.clientName,
+      // The column is nullable; the SQL function stores a null as-is.
+      clientOs: input.clientOs as string,
     })
-    if (error) throw new Error(`cli_device_start failed: ${error.message}`)
-    return data
+    return outcome as Awaited<ReturnType<DeviceStore['start']>>
   },
 
   async poll(deviceCodeHash): Promise<PollResult> {
-    const { data, error } = await anonClient().rpc('cli_device_poll', {
-      p_device_code_hash: deviceCodeHash,
-    })
-    if (error) throw new Error(`cli_device_poll failed: ${error.message}`)
-
-    const row = Array.isArray(data) ? data[0] : data
+    const row = await cliDevicePoll(anonDb(), deviceCodeHash)
     if (!row) return { outcome: 'invalid_grant', ownerId: null, scopes: null, clientName: null }
 
     return {
-      outcome: row.outcome,
+      outcome: row.outcome as PollOutcome,
       ownerId: row.owner_id,
       scopes: row.scopes,
       clientName: row.client_name,
@@ -58,45 +45,36 @@ export const deviceStore: DeviceStore = {
   },
 
   async asOwner(ownerId): Promise<OwnerSession> {
-    // Re-minted per call: tokens live 60 seconds and this whole exchange takes
-    // a handful of round trips.
-    const supabase = createTokenClient(() => mintUserToken({ userId: ownerId }))
+    const db = userDb(ownerId)
 
     return {
       async createKey({ name, scopes }) {
-        return createApiKeyForOwner(supabase, { ownerId, name, scopes, expiresAt: null })
+        return createApiKeyForOwner(db, { ownerId, name, scopes, expiresAt: null })
       },
 
       async attachKey(deviceCodeHash, keyId) {
-        const { error } = await supabase.rpc('cli_device_attach_key', {
-          p_device_code_hash: deviceCodeHash,
-          p_api_key_id: keyId,
-        })
-        if (error) throw new Error(error.message)
+        await cliDeviceAttachKey(db, deviceCodeHash, keyId)
       },
 
       async release(deviceCodeHash) {
-        const { error } = await supabase.rpc('cli_device_release', {
-          p_device_code_hash: deviceCodeHash,
-        })
-        if (error) throw new Error(error.message)
+        await cliDeviceRelease(db, deviceCodeHash)
       },
 
       async account() {
         const [profile, business] = await Promise.all([
-          supabase.from('profiles').select('email').eq('id', ownerId).maybeSingle(),
-          supabase
-            .from('businesses')
-            .select('legal_name, trade_name')
-            .eq('owner_id', ownerId)
-            .order('created_at', { ascending: true })
+          db.selectFrom('profiles').select('email').where('id', '=', ownerId).executeTakeFirst(),
+          db
+            .selectFrom('businesses')
+            .select(['legal_name', 'trade_name'])
+            .where('owner_id', '=', ownerId)
+            .orderBy('created_at', 'asc')
             .limit(1)
-            .maybeSingle(),
+            .executeTakeFirst(),
         ])
 
         return {
-          email: profile.data?.email ?? null,
-          business_name: business.data?.trade_name || business.data?.legal_name || null,
+          email: profile?.email ?? null,
+          business_name: business?.trade_name || business?.legal_name || null,
         }
       },
     }

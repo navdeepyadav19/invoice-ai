@@ -3,10 +3,10 @@
 import { redirect } from 'next/navigation'
 import { z } from 'zod'
 
-import { createClient } from '@/lib/supabase/server'
-import { siteUrl } from '@/lib/supabase/env'
-import { mergePendingGuestData } from '@/lib/actions/claim'
+import { getAuth } from '@/lib/auth/server'
 import { friendlyAuthError } from '@/lib/auth-messages'
+import { userDb } from '@/lib/db'
+import { createEmailVerification } from '@/lib/db/rpc'
 import { sendVerificationEmail } from '@/lib/email'
 import {
   generateVerificationToken,
@@ -14,8 +14,9 @@ import {
   verificationUrl,
   type CreateVerificationResult,
 } from '@/lib/email-verification'
+import { siteUrl } from '@/lib/env'
 import { echoValues, withValues, type AuthFormState } from '@/lib/form-state'
-import { getCurrentUser } from '@/lib/queries'
+import { ensureProfile, getCurrentUser, type AppUser } from '@/lib/queries'
 
 const credentialsSchema = z.object({
   email: z.email('Enter a valid email address'),
@@ -26,19 +27,21 @@ function firstIssue(error: z.ZodError): string {
   return error.issues[0]?.message ?? 'Check the details you entered'
 }
 
+/** Only ever a path on this origin: '//evil.com' also starts with '/'. */
+function safeNext(raw: FormDataEntryValue | null, fallback: string): string {
+  const next = typeof raw === 'string' ? raw : ''
+  return next.startsWith('/') && !next.startsWith('//') ? next : fallback
+}
+
 /**
  * Email + password signup.
  *
- * "Confirm email" is OFF in Supabase, so signUp() returns a live session and
- * the user goes straight to onboarding. Verification is tracked by the app
- * instead (profiles.email_verified_at, migration 0012): we email our own link
- * and show an "unverified" banner until it's clicked. Sending that email must
- * never block signup — if Resend is down or unconfigured, we log and move on;
- * the banner lets them ask again.
- *
- * If the project still has confirmations ON, signUp() returns no session. We
- * then fall back to the old check-email screen so nothing breaks before the
- * dashboard toggle is flipped.
+ * Neon Auth's own email verification is OFF, so signUp.email() returns a live
+ * session and the user goes straight to onboarding. Verification is tracked by
+ * the app instead (profiles.email_verified_at, migration 0012): we email our
+ * own link and show an "unverified" banner until it's clicked. Sending that
+ * email must never block signup — if Resend is down or unconfigured, we log
+ * and move on; the banner lets them ask again.
  *
  * On failure the typed name and email are echoed back (never the password) so
  * React's post-action form reset doesn't wipe them.
@@ -56,27 +59,37 @@ export async function signUpAction(
 
   if (!parsed.success) return { error: firstIssue(parsed.error), values }
 
-  const supabase = await createClient()
   const fullName = String(formData.get('full_name') ?? '').trim()
 
-  const { data, error } = await supabase.auth.signUp({
+  const { data, error } = await getAuth().signUp.email({
     email: parsed.data.email,
     password: parsed.data.password,
-    options: {
-      emailRedirectTo: `${siteUrl()}/auth/callback?next=/onboarding`,
-      data: fullName ? { full_name: fullName } : undefined,
-    },
+    // Better Auth requires a name; an empty one is allowed and the profile
+    // stores null for it.
+    name: fullName,
   })
 
-  if (error) return { error: friendlyAuthError(error.message), values }
+  if (error || !data?.user) return { error: friendlyAuthError(error), values }
 
-  if (!data.session) {
-    redirect(`/signup/check-email?email=${encodeURIComponent(parsed.data.email)}`)
+  // Use the user from the response rather than getCurrentUser(): the session
+  // cookie was only just written and that lookup is request-cached.
+  const user: AppUser = {
+    id: data.user.id,
+    email: data.user.email,
+    name: data.user.name || null,
+    emailVerified: Boolean(data.user.emailVerified),
   }
 
-  // Same client that holds the brand-new session in memory — a fresh one would
-  // depend on the cookies just written being readable within this request.
-  const sent = await issueVerificationEmail(supabase, parsed.data.email, fullName || null)
+  // Users live in Neon Auth's schema, so nothing creates our profile row for
+  // us — and create_email_verification() reads the address from it.
+  try {
+    await ensureProfile(user)
+  } catch (err) {
+    // getProfile() self-heals on the next read, so this is not fatal.
+    console.error('[signup] could not create profile', err instanceof Error ? err.message : err)
+  }
+
+  const sent = await issueVerificationEmail(user)
   if (sent !== 'created') {
     console.error(`[signup] verification email not sent for new user: ${sent}`)
   }
@@ -85,34 +98,26 @@ export async function signUpAction(
 }
 
 type IssueResult = CreateVerificationResult | 'failed'
-type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>
 
 /**
- * Mints a verification token for the signed-in user and emails the link.
+ * Mints a verification token for the user and emails the link.
  *
  * Only the SHA-256 of the token reaches the database; the raw token goes into
  * the email and nowhere else. The 60-second rate limit lives in the database
  * function so two tabs can't race past it. Never throws.
  */
-async function issueVerificationEmail(
-  supabase: SupabaseServerClient,
-  email: string,
-  name: string | null,
-): Promise<IssueResult> {
+async function issueVerificationEmail(user: AppUser): Promise<IssueResult> {
   try {
     const token = generateVerificationToken()
 
-    const { data: status, error } = await supabase.rpc('create_email_verification', {
-      p_token_hash: hashVerificationToken(token),
-    })
-
-    if (error) {
-      console.error('[verify-email] could not create token', error.message)
-      return 'failed'
-    }
+    const status = await createEmailVerification(userDb(user.id), hashVerificationToken(token))
     if (status !== 'created') return status
 
-    await sendVerificationEmail({ to: email, name, verifyUrl: verificationUrl(siteUrl(), token) })
+    await sendVerificationEmail({
+      to: user.email,
+      name: user.name,
+      verifyUrl: verificationUrl(siteUrl(), token),
+    })
     return 'created'
   } catch (err) {
     console.error('[verify-email] send failed', err instanceof Error ? err.message : err)
@@ -125,15 +130,9 @@ async function issueVerificationEmail(
 // function that ignores both is still assignable to that signature.
 export async function resendVerificationEmailAction(): Promise<AuthFormState> {
   const user = await getCurrentUser()
-  if (!user || user.is_anonymous || !user.email) {
-    return { error: 'Sign in with an email address first.' }
-  }
+  if (!user?.email) return { error: 'Sign in with an email address first.' }
 
-  const name = typeof user.user_metadata?.full_name === 'string' ? user.user_metadata.full_name : null
-
-  const supabase = await createClient()
-
-  switch (await issueVerificationEmail(supabase, user.email, name)) {
+  switch (await issueVerificationEmail(user)) {
     case 'created':
       return { message: `Sent to ${user.email}. The link works for 24 hours.` }
     case 'rate_limited':
@@ -160,73 +159,28 @@ export async function signInAction(
 
   if (!parsed.success) return { error: firstIssue(parsed.error), values }
 
-  const supabase = await createClient()
-  const { error } = await supabase.auth.signInWithPassword(parsed.data)
+  const { error } = await getAuth().signIn.email(parsed.data)
 
   if (error) {
-    // Supabase deliberately returns the same message for a wrong password and an
-    // unknown email so the endpoint can't be used to enumerate accounts. The
-    // friendly rewrite keeps that property — one message for both.
-    return { error: friendlyAuthError(error.message), values }
+    // Better Auth deliberately returns the same error for a wrong password and
+    // an unknown email so the endpoint can't be used to enumerate accounts.
+    // The friendly rewrite keeps that property — one message for both.
+    return { error: friendlyAuthError(error), values }
   }
 
-  // If this sign-in was the second half of a guest upgrade that hit an existing
-  // email, move the guest's invoices across now that we're authenticated as the
-  // account that will own them.
-  await mergePendingGuestData()
-
-  const next = String(formData.get('next') ?? '/dashboard')
-  // '//evil.com' also starts with '/', and browsers treat it as another host.
-  redirect(next.startsWith('/') && !next.startsWith('//') ? next : '/dashboard')
-}
-
-/**
- * Guest mode.
- *
- * An anonymous user is a real user: real uid, real JWT, subject to the same RLS
- * as everyone else. That is what lets a guest's invoices survive intact when
- * they later sign up — the uid never changes, so nothing has to be migrated.
- */
-export async function continueAsGuestAction(): Promise<void> {
-  const supabase = await createClient()
-
-  const { error } = await supabase.auth.signInAnonymously()
-
-  if (error) {
-    // The usual cause is anonymous sign-ins being switched off in the Supabase
-    // dashboard, so say something the user can act on rather than swallowing it.
-    redirect(`/login?error=${encodeURIComponent(`Guest mode is unavailable: ${error.message}`)}`)
-  }
-
-  redirect('/invoices/new')
-}
-
-/** Re-sends the confirmation email. Rate limited by Supabase, not by us. */
-export async function resendConfirmationAction(
-  _prev: AuthFormState,
-  formData: FormData,
-): Promise<AuthFormState> {
-  const email = z.email().safeParse(formData.get('email'))
-  if (!email.success) return { error: 'Enter a valid email address' }
-
-  const supabase = await createClient()
-  const { error } = await supabase.auth.resend({
-    type: 'signup',
-    email: email.data,
-    options: { emailRedirectTo: `${siteUrl()}/auth/callback?next=/onboarding` },
-  })
-
-  if (error) return { error: error.message }
-
-  return { message: 'Sent. Check your inbox again in a moment.' }
+  redirect(safeNext(formData.get('next'), '/dashboard'))
 }
 
 export async function signOutAction(): Promise<never> {
-  const supabase = await createClient()
-  await supabase.auth.signOut()
+  await getAuth().signOut()
   redirect('/')
 }
 
+/**
+ * Step one of a password reset: Neon Auth emails a link to
+ * `<auth base>/reset-password/<token>?callbackURL=<redirectTo>`, which checks
+ * the token and bounces to `redirectTo?token=<token>` (or `?error=INVALID_TOKEN`).
+ */
 export async function requestPasswordResetAction(
   _prev: AuthFormState,
   formData: FormData,
@@ -234,49 +188,62 @@ export async function requestPasswordResetAction(
   const email = z.email().safeParse(formData.get('email'))
   if (!email.success) return withValues({ error: 'Enter a valid email address' }, formData)
 
-  const supabase = await createClient()
-  const { error } = await supabase.auth.resetPasswordForEmail(email.data, {
-    redirectTo: `${siteUrl()}/auth/callback?next=/reset-password`,
+  const { error } = await getAuth().requestPasswordReset({
+    email: email.data,
+    redirectTo: `${siteUrl()}/reset-password`,
   })
 
-  if (error) return withValues({ error: friendlyAuthError(error.message) }, formData)
+  // Better Auth already answers the same way for unknown addresses. A real
+  // failure (rate limit, outage) is logged, but the reply stays neutral so the
+  // form can't be used to find out which addresses have accounts.
+  if (error) console.error('[forgot-password] request failed', error.code, error.message)
 
-  // Deliberately the same response whether or not the address exists.
   return { message: 'If that address has an account, a reset link is on its way.' }
 }
 
-export async function updatePasswordAction(
+/** Step two: the token from the emailed link plus the new password. */
+export async function resetPasswordAction(
   _prev: AuthFormState,
   formData: FormData,
 ): Promise<AuthFormState> {
+  const token = String(formData.get('token') ?? '')
   const password = String(formData.get('password') ?? '')
   const confirm = String(formData.get('confirm_password') ?? '')
 
+  if (!token) return { error: friendlyAuthError({ code: 'INVALID_TOKEN' }) }
   if (password.length < 8) return { error: 'Use at least 8 characters' }
   if (password !== confirm) return { error: 'Those passwords do not match' }
 
-  const supabase = await createClient()
-  const { error } = await supabase.auth.updateUser({ password })
+  const { error } = await getAuth().resetPassword({ newPassword: password, token })
 
-  if (error) return { error: error.message }
+  if (error) return { error: friendlyAuthError(error) }
 
-  redirect('/dashboard')
+  // Resetting doesn't sign anyone in; they use the new password next.
+  redirect('/login?reset=1')
 }
 
+/**
+ * Google sign-in. Neon Auth hands back Google's consent URL (and sets the
+ * OAuth state cookie on this response); after consent the browser comes back
+ * to /auth/callback with a session verifier that proxy.ts exchanges.
+ */
 export async function signInWithGoogleAction(formData: FormData): Promise<never> {
-  const supabase = await createClient()
-  const next = String(formData.get('next') ?? '/dashboard')
+  const next = safeNext(formData.get('next'), '/dashboard')
+  const callbackURL = `${siteUrl()}/auth/callback?next=${encodeURIComponent(next)}`
 
-  const { data, error } = await supabase.auth.signInWithOAuth({
+  const { data, error } = await getAuth().signIn.social({
     provider: 'google',
-    options: {
-      redirectTo: `${siteUrl()}/auth/callback?next=${encodeURIComponent(next)}`,
-    },
+    callbackURL,
+    // A cancelled consent screen comes back here with ?error=…; the callback
+    // route turns that into a sentence on /login.
+    errorCallbackURL: `${siteUrl()}/auth/callback`,
   })
 
-  if (error || !data.url) {
-    redirect(`/login?error=${encodeURIComponent(error?.message ?? 'Could not start Google sign-in')}`)
+  const url = data && 'url' in data && typeof data.url === 'string' ? data.url : null
+
+  if (error || !url) {
+    redirect(`/login?error=${encodeURIComponent(friendlyAuthError(error ?? 'Could not start Google sign-in'))}`)
   }
 
-  redirect(data.url)
+  redirect(url)
 }

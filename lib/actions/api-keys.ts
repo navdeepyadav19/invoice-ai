@@ -3,18 +3,19 @@
 import { revalidatePath } from 'next/cache'
 
 import { requireUser } from '@/lib/queries'
-import { contextFromSession, requireRealAccount } from '@/lib/auth/context'
+import { contextFromSession } from '@/lib/auth/context'
 import { createApiKeyForOwner } from '@/lib/auth/create-api-key'
 import { isScope, type Scope } from '@/lib/auth/scopes'
 import { toActionError } from '@/lib/actions/to-action-error'
 import { withValues, type FormValues } from '@/lib/form-state'
 import type { ApiKeyRow } from '@/lib/database.types'
+import { q } from '@/lib/services/errors'
 
 /**
  * Creating and revoking API keys — web UI only, deliberately.
  *
  * There is no `keys:manage` scope and no /api/v1 route for any of this. A
- * leaked key therefore cannot mint more keys, widen its own scopes, or revoke
+ * leaked key therefore cannot create more keys, widen its own scopes, or revoke
  * the audit trail of itself. The blast radius of a stolen credential stays
  * exactly what that credential was granted, and never grows.
  */
@@ -53,11 +54,7 @@ export async function createApiKeyAction(formData: FormData): Promise<CreateKeyS
   try {
     const ctx = await contextFromSession()
 
-    // Guests are reaped by cleanup_stale_guests after 30 days. A key belonging
-    // to a deleted owner is a credential pointing at nothing.
-    requireRealAccount(ctx)
-
-    const key = await createApiKeyForOwner(ctx.supabase, {
+    const key = await createApiKeyForOwner(ctx.db, {
       ownerId: ctx.userId,
       name,
       scopes,
@@ -91,13 +88,14 @@ export async function revokeApiKeyAction(id: string): Promise<{ error?: string }
   try {
     const ctx = await contextFromSession()
 
-    const { error } = await ctx.supabase
-      .from('api_keys')
-      .update({ revoked_at: new Date().toISOString() })
-      .eq('id', id)
-      .is('revoked_at', null)
-
-    if (error) return { error: error.message }
+    await q(
+      ctx.db
+        .updateTable('api_keys')
+        .set({ revoked_at: new Date().toISOString() })
+        .where('id', '=', id)
+        .where('revoked_at', 'is', null)
+        .execute(),
+    )
   } catch (cause) {
     return toActionError(cause)
   }
@@ -109,12 +107,9 @@ export async function revokeApiKeyAction(id: string): Promise<{ error?: string }
 export async function listApiKeys(): Promise<ApiKeyRow[]> {
   const ctx = await contextFromSession()
 
-  const { data } = await ctx.supabase
-    .from('api_keys')
-    .select('*')
-    .order('created_at', { ascending: false })
+  const rows = await ctx.db.selectFrom('api_keys').selectAll().orderBy('created_at', 'desc').execute()
 
-  return (data ?? []) as ApiKeyRow[]
+  return rows as ApiKeyRow[]
 }
 
 export async function keyScopes(row: ApiKeyRow): Promise<Scope[]> {

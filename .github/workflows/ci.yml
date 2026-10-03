@@ -82,7 +82,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
-      # Supabase and API keys are read at request time, not build time, so the
+      # The database, Neon Auth and API keys are read at request time, not build time, so the
       # build needs no secrets. If a future change makes it need one, this
       # job is where you'll find out.
       - run: pnpm build

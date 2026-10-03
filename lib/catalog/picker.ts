@@ -198,7 +198,11 @@ export function isSavedCustomerLink(input: {
 
 const OWN_ROW_WINDOW_MS = 5_000
 
-/** Escape PostgREST pattern wildcards and drop characters that break an `or=` filter. */
+/**
+ * Escape ILIKE wildcards so a typed `%` or `_` matches literally, and drop
+ * punctuation that never helps a name search. The term is a bound parameter,
+ * so this is about matching what the user meant, not about injection.
+ */
 export function sanitizeSearchTerm(query: string): string {
   return query
     .trim()

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 
-import { ServiceError } from '@/lib/services/errors'
+import { claimIdempotencyKey, completeIdempotencyKey, releaseIdempotencyKey } from '@/lib/db/rpc'
+import { q, ServiceError } from '@/lib/services/errors'
 import type { AuthContext } from '@/lib/auth/context'
 
 /**
@@ -48,19 +49,7 @@ export async function claim(
   path: string,
   hash: string,
 ): Promise<IdempotencyClaim> {
-  const { data, error } = await ctx.supabase.rpc('claim_idempotency_key', {
-    p_key: key,
-    p_method: method,
-    p_path: path,
-    p_request_hash: hash,
-  })
-
-  if (error) {
-    const { fromPostgres } = await import('@/lib/services/errors')
-    throw fromPostgres(error)
-  }
-
-  const row = Array.isArray(data) ? data[0] : data
+  const row = await q(claimIdempotencyKey(ctx.db, { key, method, path, requestHash: hash }))
   const outcome = row?.outcome ?? 'claimed'
 
   switch (outcome) {
@@ -102,17 +91,13 @@ export async function complete(
   status: number,
   body: unknown,
 ): Promise<void> {
-  const { error } = await ctx.supabase.rpc('complete_idempotency_key', {
-    p_key: key,
-    p_status: status,
-    p_body: (body ?? null) as never,
-  })
-
-  // Failing to store the response means a retry re-runs the work rather than
-  // replaying — degraded, not dangerous, and issue_invoice() still holds the
-  // line on the one operation where re-running would actually cost something.
-  if (error) {
-    console.error('[idempotency] could not store response for %s: %s', key, error.message)
+  try {
+    await completeIdempotencyKey(ctx.db, key, status, body)
+  } catch (error) {
+    // Failing to store the response means a retry re-runs the work rather than
+    // replaying — degraded, not dangerous, and issue_invoice() still holds the
+    // line on the one operation where re-running would actually cost something.
+    console.error('[idempotency] could not store response for %s: %s', key, (error as Error).message)
   }
 }
 
@@ -124,10 +109,10 @@ export async function complete(
  * never succeeded.
  */
 export async function release(ctx: AuthContext, key: string): Promise<void> {
-  const { error } = await ctx.supabase.rpc('release_idempotency_key', { p_key: key })
-
-  if (error) {
-    console.error('[idempotency] could not release %s: %s', key, error.message)
+  try {
+    await releaseIdempotencyKey(ctx.db, key)
+  } catch (error) {
+    console.error('[idempotency] could not release %s: %s', key, (error as Error).message)
   }
 }
 

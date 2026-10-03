@@ -1,10 +1,7 @@
-import type { SupabaseClient } from '@supabase/supabase-js'
-
-import { createClient } from '@/lib/supabase/server'
+import { userDb, type Db } from '@/lib/db'
 import { getCurrentUser } from '@/lib/queries'
 import { forbidden, ServiceError } from '@/lib/services/errors'
 import { ALL_SCOPES, type Scope } from '@/lib/auth/scopes'
-import type { Database } from '@/lib/database.types'
 
 /**
  * Who is asking, and how.
@@ -14,16 +11,17 @@ import type { Database } from '@/lib/database.types'
  * be called by a browser, an API key or an AI assistant, whereas a function that
  * reaches for `cookies()` can only ever be called by a browser.
  *
- * `supabase` is already authenticated as this user, so RLS is doing the tenant
- * isolation in all three cases. Services never filter by owner_id by hand.
+ * `db` already runs every statement as this user (lib/db/scoped.ts), so RLS is
+ * doing the tenant isolation in all three cases. Services never filter by
+ * owner_id by hand.
  */
 
 export type AuthVia = 'session' | 'api_key' | 'oauth'
 
 export interface AuthContext {
   userId: string
-  /** Authenticated AS this user. RLS applies. Never a service_role client. */
-  supabase: SupabaseClient<Database>
+  /** Scoped to this user: RLS applies to every statement. Never the owner connection. */
+  db: Db
   via: AuthVia
   scopes: ReadonlySet<Scope>
   /** Set when `via` is 'api_key'. Recorded on events for the audit trail. */
@@ -31,8 +29,6 @@ export interface AuthContext {
   /** Set when `via` is 'oauth'. The third-party app acting for the user. */
   clientId?: string
   requestId: string
-  /** True for anonymous/guest sessions. Credentials are refused for these. */
-  isAnonymous: boolean
 }
 
 /**
@@ -50,13 +46,12 @@ export async function contextFromSession(requestId = newRequestId()): Promise<Au
 
   return {
     userId: user.id,
-    supabase: await createClient(),
+    db: userDb(user.id),
     via: 'session',
     // A person at a keyboard is not a delegated credential; there is no third
     // party to restrict. Scopes narrow what someone acts with *on your behalf*.
     scopes: ALL_SCOPES,
     requestId,
-    isAnonymous: Boolean(user.is_anonymous),
   }
 }
 
@@ -70,20 +65,6 @@ export async function contextFromSession(requestId = newRequestId()): Promise<Au
 export function requireScope(ctx: AuthContext, scope: Scope): void {
   if (!ctx.scopes.has(scope)) {
     throw forbidden(`This credential is missing the ${scope} scope.`)
-  }
-}
-
-/**
- * Reject guests.
- *
- * Anonymous users are ordinary tenants everywhere else — they legitimately
- * create invoices and claim numbers. But `cleanup_stale_guests` deletes them
- * after 30 days, and a deleted owner with live API keys is a credential pointing
- * at nothing. Keys and OAuth grants require a real account.
- */
-export function requireRealAccount(ctx: AuthContext): void {
-  if (ctx.isAnonymous) {
-    throw forbidden('Create an account before generating API credentials.')
   }
 }
 

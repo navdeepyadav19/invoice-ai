@@ -2,6 +2,8 @@
 
 > **Depends on:** [00-foundation.md](00-foundation.md). Every endpoint here is a thin wrapper around a service function.
 > **Needed by:** [02-sdk.md](02-sdk.md), [03-cli.md](03-cli.md), [04-mcp.md](04-mcp.md).
+>
+> **Backend note:** this module was planned on Supabase, where an API key was exchanged for a short-lived JWT so PostgREST would apply RLS. Since the move to **Neon** there is no JWT and no PostgREST: the key resolves to an owner id and the request gets a database handle scoped to that owner. Section 3.2 describes the mechanism as it works now; see also [../neon-overview.md](../neon-overview.md).
 
 ## 1. What this layer is, and what students learn
 
@@ -23,9 +25,9 @@ Students leave this module understanding four ideas:
   - `app/api/invoices/[id]/pdf/route.ts` (the owner's PDF)
   - `app/api/public/[token]/pdf/route.ts` (public share-link PDF)
   - `app/auth/callback/route.ts`
-- **Authentication is cookie-only.** `lib/supabase/server.ts` builds the Supabase client from browser cookies, and nothing reads an `Authorization` header.
-- **`lib/supabase/proxy.ts` redirects every non-public path to `/login`.** A program calling `/api/v1/invoices` with a bearer token would get an HTML redirect today, not a `401`.
-- **Tenant isolation is RLS** (`owner_id = auth.uid()`) on every table in `supabase/migrations/0001_init.sql`. This is good: the API design below keeps RLS as the guard instead of replacing it.
+- **Authentication is cookie-only.** The signed-in user comes from the browser's session cookie, and nothing reads an `Authorization` header.
+- **`proxy.ts` redirects every non-public path to `/login`.** A program calling `/api/v1/invoices` with a bearer token would get an HTML redirect, not a `401`.
+- **Tenant isolation is RLS** (`owner_id = app.uid()`) on every table in `db/migrations/0001_init.sql`. This is good: the API design below keeps RLS as the guard instead of replacing it.
 
 **Show the students:** run `curl -i https://<site>/api/invoices/<id>/pdf` without a cookie. You get a redirect to `/login`, which is fine for browsers and useless for programs.
 
@@ -47,7 +49,7 @@ export const POST = withApi(
 
 ```
 1. request id      read X-Request-Id or generate one, echo it back
-2. authenticate    API key ─► mint user JWT   |   OAuth token ─► verify + grant lookup
+2. authenticate    API key ─► owner id ─► userDb(owner)   |   OAuth token ─► verify + grant lookup
 3. rate limit      per credential quota → 429 + Retry-After
 4. scope check     ctx.scopes must include the route's scope → 403
 5. idempotency     claim Idempotency-Key (writes only) → replay / 409 / 422
@@ -57,7 +59,7 @@ export const POST = withApi(
 9. audit           write one api_requests row
 ```
 
-`lib/supabase/proxy.ts` must **exempt** `/api/v1/`, `/api/mcp` and `/.well-known/` from the login redirect.
+`proxy.ts` must **exempt** `/api/v1/`, `/api/mcp` and `/.well-known/` from the login redirect. (It does, for `/api/v1/`, `/api/cli/`, `/api/cron/` and `/.well-known/`.)
 
 ### 3.2 API keys (built first)
 
@@ -66,14 +68,14 @@ export const POST = withApi(
 | Format | `inv_live_<8-char id>_<32-char base62 secret>`. The prefix makes leaked keys greppable and lets GitHub secret scanning spot them |
 | Storage | Only an **HMAC-SHA256 hash** of the secret (with a server-side pepper `API_KEY_PEPPER`). The full key is shown **once** at creation |
 | Where users manage them | New settings page `app/(app)/settings/api-keys/page.tsx`: create (name, scopes, optional expiry), list (prefix, last used), revoke |
-| Who can create them | Signed-in, **non-anonymous** users only. Guest accounts are cleaned up by `cleanup_stale_guests` and must not leave orphaned credentials |
+| Who can create them | Any signed-in user. (On Supabase this excluded anonymous guest accounts; guest mode no longer exists) |
 
 **New table `api_keys`**
 
 | Column | Type | Notes |
 |---|---|---|
 | `id` | uuid pk | |
-| `owner_id` | uuid → auth.users | RLS: `owner_id = auth.uid()` |
+| `owner_id` | uuid (a Neon Auth user id) | RLS: `owner_id = app.uid()` |
 | `name` | text | "Zapier", "My laptop" |
 | `prefix` | text unique | `inv_live_ab12cd34`, used for lookup |
 | `secret_hash` | text | HMAC-SHA256(pepper, secret) |
@@ -82,62 +84,64 @@ export const POST = withApi(
 
 #### How an API key still respects RLS (the important trick)
 
-The tempting shortcut is to look up the key, then query the database with Supabase's **secret (service_role) key**. That key **bypasses RLS completely**, so one missing `.eq('owner_id', …)` anywhere would leak another business's invoices.
+The tempting shortcut is to look up the key, then query the database with the **owner connection** (the role the app logs in as). That role **bypasses RLS completely**, so one missing `where owner_id = …` anywhere would leak another business's invoices.
 
-Instead, the key is exchanged for a *user* token:
+Instead, the key only ever produces a *user id*, and the request runs as that user:
 
 ```
 Authorization: Bearer inv_live_ab12cd34_…
         │
         ▼
-lib/auth/api-key.ts (new)  look up prefix → constant-time compare hash → not revoked/expired
+lib/api/authenticate.ts   api_key_by_prefix(prefix), called as `anon`
+                          (SECURITY DEFINER: the one table read allowed
+                          before anyone is known)
         │
         ▼
-lib/auth/mint.ts (new)     sign a 60-second JWT with OUR ES256 key (imported into Supabase):
-                           { sub: owner_id, role: "authenticated", exp: now+60,
-                             api_key_id, scopes }
+lib/auth/api-key.ts       HMAC(API_KEY_PEPPER, secret) compared in constant
+                          time → not revoked / not expired → scopes
         │
         ▼
-lib/supabase/for-token.ts  Supabase client with the publishable key as `apikey`
-(new, from 00)             and `Authorization: Bearer <minted JWT>`
+lib/db/index.ts           ctx.db = userDb(row.owner_id)
         │
         ▼
-Postgres sees role=authenticated, auth.uid() = owner_id → the same RLS as the browser
+lib/db/scoped.ts          every statement:
+                            begin;
+                            set local role authenticated;
+                            select set_config('app.user_id', owner_id, true);
+                            <query>;
+                            commit;
+        │
+        ▼
+Postgres sees role=authenticated, app.uid() = owner_id → the same RLS as the browser
 ```
 
-Supabase lets you **import your own signing key** (with a `kid`) so tokens you mint are accepted. The existing `claim_invoice_number` RPC already checks `auth.uid()` and is granted to `authenticated`, so it works unchanged with minted tokens.
+A browser session takes the same last two steps: `contextFromSession()` gets the user id from Neon Auth's session cookie and calls `userDb(user.id)`. **Both doors end in the same function**, so there is no second security model to keep in sync. The existing `claim_invoice_number` and `issue_invoice` functions check `app.uid()` and are granted to `authenticated`, so they work unchanged for API calls.
 
-> **Verify at build time:** does Supabase accept tokens from an imported key on *standby*, or only after rotating it to active? Once active it signs **every** session, which makes that private key the most sensitive secret in the system.
+There is no token to mint and no signing key to protect. There is also no public HTTP endpoint into the database (no PostgREST, Neon's Data API is off): only our server holds a connection string, so every query passes through `userDb()`, `anonDb()` or the cron's owner connection.
 
-**Show the students:** paste a minted JWT into jwt.io. `sub` is the user, `role` is `authenticated`, and `exp` is 60 seconds away. The API key itself never reaches the database.
+> **How it was on Supabase:** the key was exchanged for a 60-second ES256 JWT (`sub: owner_id`, `role: authenticated`) signed with a key imported into Supabase, and the request went through PostgREST with that token. It worked, but the private signing key could forge a session for any user. The Neon design removed that secret entirely.
+
+**Show the students:** open `lib/db/scoped.ts` and point at `scopePrelude()`. Then, in the Neon SQL editor, run `set role authenticated; select set_config('app.user_id', '<some user id>', false); select count(*) from invoices;` and compare with the count as the owner. Same table, different answers: that is RLS.
 
 ### 3.3 OAuth for third-party apps (built second)
 
-Use **Supabase Auth's built-in OAuth 2.1 server**. We don't build our own authorization server.
-
-```toml
-# supabase/config.toml
-[auth.oauth_server]
-enabled = true
-authorization_url_path = "/oauth/consent"
-allow_dynamic_registration = true   # lets MCP clients register themselves
-```
+**Not built yet.** The original plan used Supabase Auth's built-in OAuth 2.1 server, which went away with the move to Neon. The design below still holds; what provides the authorization server is open again. Candidates: an OAuth-provider plugin of Better Auth, if Neon's managed Better Auth exposes one, or a small authorization server of our own. Either way, an access token must end in the same place an API key does: a verified user id handed to `userDb()`.
 
 | Piece | What it does |
 |---|---|
-| **Discovery** | Supabase publishes `/.well-known/oauth-authorization-server`, so clients find the endpoints automatically |
+| **Discovery** | The authorization server publishes `/.well-known/oauth-authorization-server`, so clients find the endpoints automatically (`proxy.ts` already exempts `/.well-known/`) |
 | **Client types** | *Confidential* (a company's backend with a secret) and *public* (CLI, desktop AI apps, no secret, must use PKCE) |
-| **Consent page** | New `app/oauth/consent/page.tsx`. Requires a signed-in non-anonymous user and shows the app name, redirect host, an **"Unverified app"** badge for dynamically registered clients, and scope checkboxes |
-| **Access token** | A Supabase JWT with `sub`, `role: authenticated`, `client_id`, `session_id`, `exp`. We verify it locally with `supabase.auth.getClaims()` |
+| **Consent page** | New `app/oauth/consent/page.tsx`. Requires a signed-in user and shows the app name, redirect host, an **"Unverified app"** badge for dynamically registered clients, and scope checkboxes |
+| **Access token** | A signed token carrying `sub`, `client_id`, `exp`. `withApi` verifies it, then runs the request as `userDb(sub)` |
 | **Connected apps page** | New `app/(app)/settings/connected-apps/page.tsx`: list grants, revoke |
 
-**Scopes aren't in Supabase's token**, so we keep our own record of what the user approved.
+**We keep our own record of the scopes the user approved**, rather than trusting whatever the token carries.
 
 **New table `oauth_grants`**: `id`, `owner_id`, `client_id`, `scopes text[]`, `granted_at`, `revoked_at`, unique (`owner_id`, `client_id`).
 
 On each OAuth request, `withApi` verifies the token, then looks up the grant by (`sub`, `client_id`). A revoked grant gets `401` immediately, even if the token hasn't expired.
 
-> **Verify at build time:** the exact Supabase consent-page APIs (approve/deny), whether the OAuth server is still in beta, and loopback redirect port rules for public clients.
+> **Verify at build time:** whether Neon Auth (managed Better Auth) can act as an OAuth 2.1 authorization server with dynamic client registration, its consent-page APIs, and loopback redirect port rules for public clients.
 
 ### 3.4 Scopes
 
@@ -312,18 +316,17 @@ Roll out WAF rules as **log → preview → production** (see the Vercel Firewal
 
 | Phase | Scope | Acceptance criteria | Teaching checkpoint |
 |---|---|---|---|
-| **A1: Read-only API with keys** | `withApi`, proxy exemption, `api_keys` + settings page, JWT minting, all `GET` endpoints, problem+json, `openapi.json` | `curl` with a key lists only the owner's invoices. Another user's id returns 404. A revoked key returns 401 | Decode a minted JWT on jwt.io and explain `sub` / `role` / `exp` |
+| **A1: Read-only API with keys** | `withApi`, proxy exemption, `api_keys` + settings page, key → `userDb(owner)`, all `GET` endpoints, problem+json, `openapi.json` | `curl` with a key lists only the owner's invoices. Another user's id returns 404. A revoked key returns 401 | Run the same `select` as the owner and as `authenticated` with `app.user_id` set, and explain why the counts differ |
 | **A2: Writes + idempotency** | Draft/issue/send/mark-paid/cancel endpoints, `idempotency_keys`, rate limits, `api_requests` | The same `Idempotency-Key` sent twice to `/issue` gives one number plus `Idempotent-Replayed: true`. A different body gives 422 | Simulate a lost response and a retry, before and after idempotency |
 | **A3: Webhooks** | Outbox trigger, endpoints API, signing, `after()` delivery, Cron retries, SSRF guard | A local receiver verifies the signature. A failing endpoint shows the retry schedule, then `dead` | Students write a 10-line receiver that rejects a tampered body |
-| **A4: OAuth** | `[auth.oauth_server]`, consent page, `oauth_grants`, connected-apps page, token verification in `withApi` | A test public client completes PKCE. A missing scope gives 403. A revoked grant gives 401 immediately | Walk through the consent screen as the user, then as the attacker registering a fake app |
+| **A4: OAuth** | An authorization server (see 3.3), consent page, `oauth_grants`, connected-apps page, token verification in `withApi` | A test public client completes PKCE. A missing scope gives 403. A revoked grant gives 401 immediately | Walk through the consent screen as the user, then as the attacker registering a fake app |
 
 ## 5. Security and abuse
 
 - **Keys:**
   - hashed with a pepper and compared in constant time
   - shown once, prefixed for secret scanning, optional expiry, `last_used_at` visible
-  - never available to anonymous users
-- **RLS stays the tenant guard.** API requests run as `authenticated` through minted or OAuth user tokens. The Supabase secret key is never used for tenant data.
+- **RLS stays the tenant guard.** API requests run as `authenticated` with `app.uid()` pinned to the key's owner (`userDb()`). The owner connection (`systemDb()`) is never used for tenant data; ESLint lets only the webhook cron import it.
 - **Scopes are enforced on the server** in `withApi`, never trusted from the client. Credential management is UI-only.
 - **Enumeration:** other owners' resources return `404`, not `403`.
 - **Webhook SSRF guard:**
@@ -332,14 +335,13 @@ Roll out WAF rules as **log → preview → production** (see the Vercel Firewal
   - no redirects, 10-second timeout, response body not stored beyond a short error excerpt
 - **Dynamic client registration can be spammed.** Consent shows an "Unverified app" badge and the redirect host, and grants are per client and revocable.
 - **Cost abuse:** the endpoints that cost money per call (AI, GSTIN lookup) are excluded from v1. Sends are capped per hour.
-- **The imported signing key is the root secret.** Keep it only in Vercel env (sensitive) and document rotation.
+- **`API_KEY_PEPPER` and the database URLs are the root secrets.** The pepper makes stored hashes uncheckable without it (changing it invalidates every key); `DATABASE_URL*` log in as the owner role, which bypasses RLS. Keep them only in Vercel env (sensitive).
 
 ## 6. Open decisions
 
 - **Quotas:** exact numbers per credential, and whether sends/hour differ for API keys vs OAuth apps.
 - **Vercel plan tier:** per-minute Cron for webhook retries, and the Rate Limiting SDK availability.
-- **Signing key:** standby vs active-key behaviour (see 3.2).
-- **Encryption for webhook secrets at rest:** Supabase Vault vs app-level encryption with an env key.
+- **Encryption for webhook secrets at rest:** a Postgres extension (`pgcrypto`) vs app-level encryption with an env key.
 - **Resends:** whether `send` to the same address within 24h is a replay (same idempotency key) or needs an explicit `resend` flag.
 
 > ### How the MCP story uses this layer

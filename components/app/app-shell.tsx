@@ -97,7 +97,7 @@ export function AppShell({
           >
             <Menu aria-hidden="true" />
           </Button>
-          <Wordmark href={user.isGuest ? '/invoices/new' : '/dashboard'} className="min-w-0 flex-1" />
+          <Wordmark href="/dashboard" className="min-w-0 flex-1" />
           <Button
             size="icon"
             nativeButton={false}

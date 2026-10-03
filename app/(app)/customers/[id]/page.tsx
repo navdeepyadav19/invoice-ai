@@ -47,15 +47,18 @@ export default async function CustomerPage({ params }: PageProps<'/customers/[id
     throw cause
   }
 
-  const { data, error } = await ctx.supabase
-    .from('invoices')
-    .select('id, invoice_number, issue_date, due_date, status, total, currency, client_id')
-    .eq('client_id', customer.id)
-    .order('created_at', { ascending: false })
-    .limit(50)
-
-  if (error) console.error('[customers] invoice list failed', error.message)
-  const invoices = (data ?? []) as InvoiceListRow[]
+  let invoices: InvoiceListRow[] = []
+  try {
+    invoices = (await ctx.db
+      .selectFrom('invoices')
+      .select(['id', 'invoice_number', 'issue_date', 'due_date', 'status', 'total', 'currency', 'client_id'])
+      .where('client_id', '=', customer.id)
+      .orderBy('created_at', 'desc')
+      .limit(50)
+      .execute()) as InvoiceListRow[]
+  } catch (cause) {
+    console.error('[customers] invoice list failed', cause)
+  }
   const summary = summarizeInvoices(invoices).get(customer.id)
 
   const address = formatClientAddress({

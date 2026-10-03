@@ -49,15 +49,20 @@ export default async function CustomersPage({ searchParams }: PageProps<'/custom
   // One query for the whole page, rolled up in memory. RLS scopes it to this user.
   let summaries = new Map<string, BilledSummary>()
   if (rows.length) {
-    const { data: invoices, error } = await ctx.supabase
-      .from('invoices')
-      .select('client_id, status, total, currency')
-      .in(
-        'client_id',
-        rows.map((r) => r.id),
-      )
-    if (error) console.error('[customers] invoice summary failed', error.message)
-    summaries = summarizeInvoices(invoices ?? [])
+    try {
+      const invoices = await ctx.db
+        .selectFrom('invoices')
+        .select(['client_id', 'status', 'total', 'currency'])
+        .where(
+          'client_id',
+          'in',
+          rows.map((r) => r.id),
+        )
+        .execute()
+      summaries = summarizeInvoices(invoices)
+    } catch (cause) {
+      console.error('[customers] invoice summary failed', cause)
+    }
   }
 
   const filtered = Boolean(params.q)

@@ -3,7 +3,7 @@ import { createHash, randomBytes } from 'node:crypto'
 /**
  * Pure pieces of the CLI device flow (RFC 8628). No database, no Next — so they
  * can be unit-tested and reasoned about on their own. The flow itself is
- * described in supabase/migrations/0013_cli_device_auth.sql.
+ * described in db/migrations/0013_cli_device_auth.sql.
  */
 
 /** Seconds the CLI waits between polls. Returned as `interval`. */
@@ -175,7 +175,7 @@ export type DeviceStatus = 'pending' | 'approved' | 'denied' | 'consumed' | 'exp
  * specification they are tested against, and what the UI uses to decide what a
  * status means.
  *
- * consumed → approved exists for one case only: the key mint failed after the
+ * consumed → approved exists for one case only: the key insert failed after the
  * poll claimed the row (cli_device_release), so the next poll can retry.
  */
 export const TRANSITIONS: Record<DeviceStatus, readonly DeviceStatus[]> = {

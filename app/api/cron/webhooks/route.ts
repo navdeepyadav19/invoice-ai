@@ -1,9 +1,10 @@
-import { createClient } from '@supabase/supabase-js'
 import { timingSafeEqual } from 'node:crypto'
 
-import { supabaseUrl } from '@/lib/supabase/env'
+import type { Db } from '@/lib/db'
+import { claimDueWebhookDeliveries, finishWebhookDelivery } from '@/lib/db/rpc'
+import { systemDb } from '@/lib/db/system'
 import { deliver, nextAttemptAt } from '@/lib/webhooks/deliver'
-import type { Database, WebhookDeliveryRow, WebhookEndpointRow } from '@/lib/database.types'
+import type { WebhookDeliveryRow, WebhookEndpointRow } from '@/lib/database.types'
 
 export const maxDuration = 60
 
@@ -21,52 +22,63 @@ export const maxDuration = 60
  * note lives here because vercel.json's schema rejects extra keys like
  * "comment" and fails the build.)
  *
- * ── Why this is the one place a service-role client is allowed ──────────────
+ * ── Why this is the one place the owner connection is allowed ───────────────
  *
- * Everywhere else in this codebase, tenant data is reached through a user token
- * so RLS does the isolation. Here there is no user: the worker has to read
- * pending deliveries across ALL owners, which no user token can do and no RLS
- * policy should ever permit.
+ * Everywhere else in this codebase, tenant data is reached through userDb() so
+ * RLS does the isolation. Here there is no user: the worker has to read
+ * pending deliveries across ALL owners, which no user-scoped handle can do and
+ * no RLS policy should ever permit.
  *
- * The risk is contained by not letting this client touch tenant tables at all.
- * It calls exactly two SECURITY DEFINER functions — claim_due_webhook_deliveries
- * and finish_webhook_delivery — both revoked from anon and authenticated. There
- * is no `.from('invoices')` in this file and there should never be one.
+ * The risk is contained by not letting this connection touch tenant tables. It
+ * calls exactly two SECURITY DEFINER functions — claim_due_webhook_deliveries
+ * and finish_webhook_delivery — both revoked from anon and authenticated, and
+ * reads the endpoints those deliveries point at. There is no
+ * `selectFrom('invoices')` in this file and there should never be one.
  */
 export async function POST(request: Request): Promise<Response> {
   if (!isAuthorised(request)) {
     return new Response('Unauthorized', { status: 401 })
   }
 
-  const admin = adminClient()
-  if (!admin) {
+  if (!process.env.DATABASE_URL) {
     return Response.json(
-      { error: 'SUPABASE_SERVICE_ROLE_KEY is not configured; webhook delivery is disabled.' },
+      { error: 'DATABASE_URL is not configured; webhook delivery is disabled.' },
       { status: 503 },
     )
   }
 
-  const { data, error } = await admin.rpc('claim_due_webhook_deliveries', { p_limit: 50 })
+  const admin = systemDb()
 
-  if (error) {
-    console.error('[webhooks] could not claim deliveries: %s', error.message)
-    return Response.json({ error: error.message }, { status: 500 })
+  let deliveries: WebhookDeliveryRow[]
+  try {
+    deliveries = (await claimDueWebhookDeliveries(admin, 50)) as unknown as WebhookDeliveryRow[]
+  } catch (cause) {
+    console.error('[webhooks] could not claim deliveries', cause)
+    return Response.json({ error: 'Could not claim deliveries.' }, { status: 500 })
   }
 
-  const deliveries = (data ?? []) as WebhookDeliveryRow[]
   if (!deliveries.length) return Response.json({ claimed: 0, succeeded: 0, dead: 0 })
 
   // Endpoints are fetched once rather than per delivery: a burst of events for
   // one subscriber is the normal case, not the exception.
   const endpointIds = [...new Set(deliveries.map((d) => d.endpoint_id))]
-  const { data: endpointRows } = await admin
-    .from('webhook_endpoints')
-    .select('*')
-    .in('id', endpointIds)
+  let endpointRows: WebhookEndpointRow[] = []
+  try {
+    endpointRows = endpointIds.length
+      ? ((await admin
+          .selectFrom('webhook_endpoints')
+          .selectAll()
+          .where('id', 'in', endpointIds)
+          .execute()) as unknown as WebhookEndpointRow[])
+      : []
+  } catch (cause) {
+    // Nothing has been sent yet. Claiming only pushed next_attempt_at an hour
+    // out, so these rows are picked up again by a later run.
+    console.error('[webhooks] could not load endpoints', cause)
+    return Response.json({ error: 'Could not load endpoints.' }, { status: 500 })
+  }
 
-  const endpoints = new Map(
-    ((endpointRows ?? []) as WebhookEndpointRow[]).map((row) => [row.id, row]),
-  )
+  const endpoints = new Map(endpointRows.map((row) => [row.id, row]))
 
   let succeeded = 0
   let dead = 0
@@ -110,23 +122,23 @@ export const GET = POST
 // ---------------------------------------------------------------------------
 
 async function finish(
-  admin: ReturnType<typeof createClient<Database>>,
+  admin: Db,
   id: string,
   status: string,
   responseCode: number | null,
   error: string | null,
   nextAttempt: Date | null,
 ): Promise<void> {
-  const { error: rpcError } = await admin.rpc('finish_webhook_delivery', {
-    p_id: id,
-    p_status: status,
-    p_response_code: responseCode,
-    p_error: error,
-    p_next_attempt_at: nextAttempt?.toISOString() ?? null,
-  })
-
-  if (rpcError) {
-    console.error('[webhooks] could not finish delivery %s: %s', id, rpcError.message)
+  try {
+    await finishWebhookDelivery(admin, {
+      id,
+      status,
+      responseCode,
+      error,
+      nextAttemptAt: nextAttempt?.toISOString() ?? null,
+    })
+  } catch (cause) {
+    console.error('[webhooks] could not finish delivery %s', id, cause)
   }
 }
 
@@ -148,13 +160,4 @@ function isAuthorised(request: Request): boolean {
   if (a.length !== b.length) return false
 
   return timingSafeEqual(a, b)
-}
-
-function adminClient() {
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY
-  if (!key) return null
-
-  return createClient<Database>(supabaseUrl(), key, {
-    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
-  })
 }

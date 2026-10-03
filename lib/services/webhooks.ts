@@ -1,6 +1,6 @@
 import { requireScope, type AuthContext } from '@/lib/auth/context'
-import { fromPostgres, notFound, ServiceError } from '@/lib/services/errors'
-import { afterFilter, clampLimit, parseCursor, toPage, type Page } from '@/lib/services/pagination'
+import { notFound, q, ServiceError } from '@/lib/services/errors'
+import { afterPosition, clampLimit, parseCursor, toPage, type Page } from '@/lib/services/pagination'
 import { isUuid } from '@/lib/catalog/ids'
 import { assertSafeUrl } from '@/lib/webhooks/deliver'
 import { generateSecret } from '@/lib/webhooks/sign'
@@ -38,19 +38,18 @@ export async function list(
   requireScope(ctx, 'webhooks:manage')
 
   const limit = clampLimit(options.limit)
-  let q = ctx.supabase
-    .from('webhook_endpoints')
-    .select('*')
-    .order('created_at', { ascending: false })
-    .order('id', { ascending: false })
+  let query = ctx.db
+    .selectFrom('webhook_endpoints')
+    .selectAll()
+    .orderBy('created_at', 'desc')
+    .orderBy('id', 'desc')
     .limit(limit + 1)
 
   const after = parseCursor(options.cursor)
-  if (after) q = q.or(afterFilter(after))
+  if (after) query = query.where(afterPosition(after))
 
-  const { data, error } = await q
-  if (error) throw fromPostgres(error)
-  return toPage((data ?? []) as unknown as WebhookEndpointRow[], limit)
+  const data = await q(query.execute())
+  return toPage(data as WebhookEndpointRow[], limit)
 }
 
 export async function create(
@@ -78,38 +77,34 @@ export async function create(
 
   const secret = generateSecret()
 
-  const { data, error } = await ctx.supabase
-    .from('webhook_endpoints')
-    .insert({
-      owner_id: ctx.userId,
-      url: input.url,
-      secret,
-      // Empty means "everything", so a subscriber need not re-register each
-      // time we add an event type.
-      events: input.events ?? [],
-    } as never)
-    .select('*')
-    .single()
-
-  if (error) throw fromPostgres(error)
+  const data = await q(
+    ctx.db
+      .insertInto('webhook_endpoints')
+      .values({
+        owner_id: ctx.userId,
+        url: input.url,
+        secret,
+        // text[], so a JS array goes in as-is. Empty means "everything", so a
+        // subscriber need not re-register each time we add an event type.
+        events: input.events ?? [],
+      })
+      .returningAll()
+      .executeTakeFirstOrThrow(),
+  )
 
   // The only time the secret is returned. It stays in the database because we
   // need it to sign, but the API never echoes it again.
-  return data as unknown as WebhookEndpointRow & { secret: string }
+  return data as WebhookEndpointRow & { secret: string }
 }
 
 export async function remove(ctx: AuthContext, id: string): Promise<void> {
   requireScope(ctx, 'webhooks:manage')
   if (!isUuid(id)) throw notFound('Webhook endpoint not found.')
 
-  const { data, error } = await ctx.supabase
-    .from('webhook_endpoints')
-    .delete()
-    .eq('id', id)
-    .select('id')
-    .maybeSingle()
+  const data = await q(
+    ctx.db.deleteFrom('webhook_endpoints').where('id', '=', id).returning('id').executeTakeFirst(),
+  )
 
-  if (error) throw fromPostgres(error)
   if (!data) throw notFound('Webhook endpoint not found.')
 }
 

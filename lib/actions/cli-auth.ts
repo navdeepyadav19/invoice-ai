@@ -7,13 +7,14 @@ import { checkRateLimit } from '@/lib/api/rate-limit'
 import { formatUserCode, normaliseUserCode } from '@/lib/cli-auth/device'
 import { CLI_DEFAULT_SCOPES } from '@/lib/cli-auth/scopes'
 import { lookupCliLogin, type CliLoginRequest } from '@/lib/cli-auth/lookup'
+import { cliDeviceDecide } from '@/lib/db/rpc'
 import { toActionError } from '@/lib/actions/to-action-error'
 import { withValues, type FormValues } from '@/lib/form-state'
 
 /**
  * The browser half of `invoice-ai login`: look up a user code, then Authorize
  * or Deny it. Nothing here creates a key — approval only records who approved
- * and which scopes. The key is minted when the CLI next polls /api/cli/token,
+ * and which scopes. The key is created when the CLI next polls /api/cli/token,
  * so its plaintext is never in this page, a cookie, or the database.
  */
 
@@ -60,10 +61,6 @@ export async function cliAuthorizeAction(
   try {
     const ctx = await contextFromSession()
 
-    if (ctx.isAnonymous) {
-      return { step: 'enter', error: 'Create an account before authorizing the CLI.' }
-    }
-
     const limit = await checkRateLimit(ctx.userId, 'cli-authorize', LOOKUP_RULE)
     if (!limit.ok) {
       return withValues(
@@ -72,7 +69,7 @@ export async function cliAuthorizeAction(
       )
     }
 
-    const request = await lookupCliLogin(ctx.supabase, code)
+    const request = await lookupCliLogin(ctx.db, code)
     if (!request) return withValues({ step: 'enter' as const, error: GONE }, formData)
 
     const confirm = { step: 'confirm' as const, userCode: formatUserCode(code), request }
@@ -100,23 +97,20 @@ export async function cliAuthorizeAction(
       )
     }
 
-    const { data, error } = await ctx.supabase.rpc('cli_device_decide', {
-      p_user_code: code,
-      p_approve: approve,
-      p_scopes: approve ? scopes : [],
-    })
+    let decision: string
+    try {
+      decision = await cliDeviceDecide(ctx.db, code, approve, approve ? scopes : [])
+    } catch (cause) {
+      return withValues({ ...confirm, ...toActionError(cause) }, formData)
+    }
 
-    if (error) return withValues({ ...confirm, error: error.message }, formData)
-
-    switch (data) {
+    switch (decision) {
       case 'approved':
-        // No key exists yet — it is minted when the CLI next polls, and shows
+        // No key exists yet — it is created when the CLI next polls, and shows
         // up in Settings → API keys from then on.
         return { step: 'approved', userCode: confirm.userCode, request }
       case 'denied':
         return { step: 'denied', userCode: confirm.userCode, request }
-      case 'guest':
-        return { step: 'enter', error: 'Create an account before authorizing the CLI.' }
       default:
         return { step: 'enter', error: GONE }
     }

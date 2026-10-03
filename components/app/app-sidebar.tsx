@@ -12,7 +12,6 @@ import {
   Package,
   PanelLeftClose,
   PanelLeftOpen,
-  Sparkles,
   Users,
   Webhook,
   type LucideIcon,
@@ -47,7 +46,6 @@ const SETTINGS_NAV: readonly NavItem[] = [
 
 export type SidebarUser = {
   email: string | null
-  isGuest: boolean
   emailUnverified: boolean
 }
 
@@ -70,7 +68,7 @@ export function SidebarContents({
   onNavigate?: () => void
 }) {
   const pathname = usePathname()
-  const homeHref = user.isGuest ? '/invoices/new' : '/dashboard'
+  const homeHref = '/dashboard'
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -129,43 +127,36 @@ export function SidebarContents({
         aria-label="Main"
         className={cn('min-h-0 flex-1 overflow-y-auto px-3 py-2', collapsed && 'px-2')}
       >
-        {user.isGuest ? (
-          <GuestNote collapsed={collapsed} onNavigate={onNavigate} />
-        ) : (
-          <>
-            <NavList
-              items={PRIMARY_NAV}
-              pathname={pathname}
-              collapsed={collapsed}
-              onNavigate={onNavigate}
-            />
-            <div className="mt-6">
-              {collapsed ? (
-                <div className="mx-2 mb-2 border-t border-sidebar-border" aria-hidden="true" />
-              ) : (
-                <p
-                  aria-hidden="true"
-                  className="mb-1 px-3 text-xs font-medium tracking-wide text-muted-foreground uppercase"
-                >
-                  Settings
-                </p>
-              )}
-              <NavList
-                items={SETTINGS_NAV}
-                pathname={pathname}
-                collapsed={collapsed}
-                onNavigate={onNavigate}
-                label="Settings"
-              />
-            </div>
-          </>
-        )}
+        <NavList
+          items={PRIMARY_NAV}
+          pathname={pathname}
+          collapsed={collapsed}
+          onNavigate={onNavigate}
+        />
+        <div className="mt-6">
+          {collapsed ? (
+            <div className="mx-2 mb-2 border-t border-sidebar-border" aria-hidden="true" />
+          ) : (
+            <p
+              aria-hidden="true"
+              className="mb-1 px-3 text-xs font-medium tracking-wide text-muted-foreground uppercase"
+            >
+              Settings
+            </p>
+          )}
+          <NavList
+            items={SETTINGS_NAV}
+            pathname={pathname}
+            collapsed={collapsed}
+            onNavigate={onNavigate}
+            label="Settings"
+          />
+        </div>
       </nav>
 
       <div className={cn('shrink-0 border-t border-sidebar-border p-3', collapsed && 'px-2')}>
         <UserMenu
           email={user.email}
-          isGuest={user.isGuest}
           emailUnverified={user.emailUnverified}
           collapsed={collapsed}
         />
@@ -214,29 +205,6 @@ function NavList({
         )
       })}
     </ul>
-  )
-}
-
-/** Guests get no navigation — they only have the builder — just the nudge to keep their work. */
-function GuestNote({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: () => void }) {
-  if (collapsed) return null
-  return (
-    <div className="rounded-lg border border-primary/15 bg-primary/[0.06] p-3 text-sm">
-      <p className="flex items-center gap-1.5 font-medium text-foreground">
-        <Sparkles className="size-4 text-primary" aria-hidden="true" />
-        Guest mode
-      </p>
-      <p className="mt-1 text-muted-foreground">
-        Add an email to keep your invoices and unlock customers, products and settings.
-      </p>
-      <Link
-        href="/claim"
-        onClick={onNavigate}
-        className="mt-2 inline-block font-medium text-primary underline underline-offset-4 hover:opacity-80"
-      >
-        Save my work
-      </Link>
-    </div>
   )
 }
 

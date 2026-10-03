@@ -6,7 +6,9 @@ import { InvoiceDocument } from '@/components/invoice/invoice-document'
 import { Mark } from '@/components/brand'
 import { Button } from '@/components/ui/button'
 import { StatusBadge } from '@/components/app/status-badge'
-import { createClient } from '@/lib/supabase/server'
+import { isUuid } from '@/lib/catalog/ids'
+import { anonDb } from '@/lib/db'
+import { getPublicInvoice, logPublicInvoiceEvent } from '@/lib/db/rpc'
 import { isPublicInvoicePayload, viewFromRows } from '@/lib/invoice-load'
 import { deriveStatus } from '@/lib/invoice-status'
 import { formatPaise } from '@/lib/money'
@@ -23,17 +25,21 @@ export const metadata: Metadata = {
 export default async function PublicInvoicePage({ params }: PageProps<'/i/[token]'>) {
   const { token } = await params
 
-  const supabase = await createClient()
-  const { data, error } = await supabase.rpc('get_public_invoice', { p_token: token })
+  // A malformed token, a bad token, a draft and a cancelled invoice are all
+  // 404 — the visitor learns nothing about which, which is the point. The
+  // shape check keeps a non-uuid from reaching Postgres as a cast error.
+  if (!isUuid(token)) notFound()
 
-  // A bad token, a draft and a cancelled invoice are all 404 — the visitor
-  // learns nothing about which, which is the point.
-  if (error || !isPublicInvoicePayload(data)) notFound()
+  const data = await getPublicInvoice(anonDb(), token).catch((cause) => {
+    console.error('[public] invoice lookup failed', cause)
+    return null
+  })
+  if (!isPublicInvoicePayload(data)) notFound()
 
   const view = viewFromRows(data.invoice, data.items)
   const status = deriveStatus(data.invoice)
 
-  void supabase.rpc('log_public_invoice_event', { p_token: token, p_type: 'viewed' })
+  void logPublicInvoiceEvent(anonDb(), token, 'viewed').catch(() => {})
 
   return (
     <div className="min-h-svh bg-background">
