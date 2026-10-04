@@ -2,6 +2,8 @@
 
 > **Depends on:** [01-api.md](01-api.md) (its OpenAPI document).
 > **Needed by:** [03-cli.md](03-cli.md), [04-mcp.md](04-mcp.md).
+>
+> **Status (Oct 2026): built, differently from this plan, and moved out of this repo.** The SDKs live in the public repo [navdeepyadav19/invoice-ai-sdk](https://github.com/navdeepyadav19/invoice-ai-sdk): TypeScript as `@horizonpay/invoice-ai` (`packages/sdk-ts`) and Python as `horizonpay-invoice-ai` (`packages/sdk-python`), both generated from `api-docs/openapi.json` by that repo's own generator rather than `openapi-fetch`, with zero runtime dependencies. The surface is Stripe-style (`new InvoiceAI()`, `customers.create`, `invoices.finalize` / `send` / `pay` / `void`, `webhooks.constructEvent`). npm/PyPI publishing is pending. This repo's part is the spec: `pnpm openapi:gen` writes `api-docs/openapi.json`, CI fails if it's stale, and invoice-ai-sdk pulls it to regenerate. The rest of this document is the original plan, kept for the teaching story.
 
 ## 1. What this layer is, and what students learn
 
@@ -19,9 +21,11 @@ Students leave this module understanding:
 
 ## 2. How it works in this repo today
 
-- **There is no SDK, and no workspace packages.** `pnpm-workspace.yaml` exists but only contains `allowBuilds` settings.
-- **The contract will come from zod.** [01-api.md](01-api.md) generates `openapi.json` from zod schemas (`lib/api/schemas.ts`, new, built on the existing `lib/validators.ts`). That document is the SDK's input.
-- **Business types exist but aren't shareable as they are.** `lib/database.types.ts` and `lib/invoice-view.ts` describe database rows and view models. The SDK must *not* import them, because API shapes (paise, snake_case, cursors) are a separate public contract from database internals.
+*(As planned, before the SDK existed.)*
+
+- **There is no SDK, and no workspace packages.** `pnpm-workspace.yaml` exists but only contains `allowBuilds` settings. (Still true here: the packages went to invoice-ai-sdk.)
+- **The contract will come from zod.** [01-api.md](01-api.md) generates `openapi.json` from the zod schemas in `lib/validators.ts` via `lib/api/openapi.ts`. That document is the SDK's input.
+- **Business types exist but aren't shareable as they are.** `lib/database.types.ts` and `lib/invoice-view.ts` describe database rows and view models. The SDK must *not* import them, because API shapes (minor units, snake_case, cursors) are a separate public contract from database internals.
 
 ## 3. Design
 
@@ -63,9 +67,11 @@ curl -s http://localhost:3000/api/v1/openapi.json > openapi.json   # or import l
 npx openapi-typescript openapi.json -o src/generated/schema.d.ts
 ```
 
-**CI check (added to `.github/workflows/ci.yml`):**
-1. Regenerate `openapi.json` from `lib/api/openapi.ts`.
-2. `git diff --exit-code packages/sdk/openapi.json packages/sdk/src/generated`.
+**CI check (as built, the `api-docs` job in `.github/workflows/ci.yml`):**
+1. `pnpm openapi:gen && pnpm postman:gen` regenerate `api-docs/openapi.json` and the Postman collection from `lib/api/openapi.ts`.
+2. `git diff --exit-code -- api-docs/openapi.json docs/platform/postman`.
+
+The SDK-side check (regenerate the SDKs from the spec, fail on drift) runs in invoice-ai-sdk.
 
 If someone changes an API schema without regenerating, the build fails. **That failure is the lesson.**
 
@@ -133,7 +139,7 @@ for await (const invoice of invoiceAI.invoices.listAll({ status: 'sent' })) {
 }
 ```
 
-**Show the students:** in the editor, type `invoiceAI.invoices.issue(` and show the autocomplete. Then change `rate_paise` to `rate` in `lib/api/schemas.ts`, regenerate, and watch every SDK call site turn red.
+**Show the students:** in the editor, type `invoiceAI.invoices.issue(` and show the autocomplete. Then rename a field in its zod schema in `lib/validators.ts`, regenerate, and watch every SDK call site turn red.
 
 ### 3.5 Testing
 
@@ -171,8 +177,8 @@ for await (const invoice of invoiceAI.invoices.listAll({ status: 'sent' })) {
 
 ## 7. Five-minute demo order
 
-1. Show `packages/sdk/openapi.json`. *"The dictionary."*
-2. Show `src/generated/schema.d.ts`. *"Printed automatically from the dictionary, never typed by hand."*
+1. Show `api-docs/openapi.json`. *"The dictionary."*
+2. Show the generated SDK in invoice-ai-sdk (`packages/sdk-ts`). *"Printed automatically from the dictionary, never typed by hand."*
 3. Write a 6-line script: create the client with an API key, `for await` over `invoices.listAll()`, print numbers.
 4. Rename a field in the zod schema, regenerate, and show the red squiggles.
 5. Run the "kill the connection mid-issue" test and show a single invoice number.

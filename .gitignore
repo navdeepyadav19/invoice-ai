@@ -54,5 +54,7 @@ firebase-debug.log
 .api-signing-key.json
 .env.vercel-api
 
-# Personal Claude Code permissions. Shared agent skills live in .agents/.
+# Personal Claude Code state. Shared agent skills live in .agents/.
 .claude/settings.local.json
+.claude/worktrees/
+.remember/

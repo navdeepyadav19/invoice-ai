@@ -13,7 +13,9 @@ email it to your client.
 | Database | Neon Postgres, project `invoice-ai-db`, region `aws-ap-southeast-1` (Singapore). Created through the Vercel Marketplace integration, so it's managed from Vercel → Storage |
 | Auth | Neon Auth (managed Better Auth). Users live in the `neon_auth` schema of the same database |
 
-Deployment Protection is **off**, so the URL is publicly shareable.
+Vercel Deployment Protection is on in Standard mode. The production domain is
+public, but per-deployment and preview URLs (`*.vercel.app`) redirect to a
+Vercel login.
 
 Redeploy with `npx vercel deploy --prod`. Schema changes go in a new file under
 `db/migrations/` and are applied with `pnpm db:migrate`. See
@@ -67,8 +69,8 @@ Editing an applied migration is a hard error. Fix forward with a new file.
 
 ### 4. Turn on Google sign-in (optional)
 
-Create an OAuth client in Google Cloud (this project uses GCP project
-`invoice-ai-e34a00`) with the redirect URI `{NEON_AUTH_BASE_URL}/callback/google`,
+Create an OAuth client in Google Cloud (a dedicated GCP project keeps it tidy)
+with the redirect URI `{NEON_AUTH_BASE_URL}/callback/google`,
 then add its client id and secret under **Neon console → Auth → OAuth providers**.
 Add your app's origins (`http://localhost:3000` and the production domain) to
 Neon Auth's trusted domains, or the redirect back to `/auth/callback` is refused.
@@ -96,12 +98,18 @@ Two files describe the schema, on purpose:
 |---|---|
 | `pnpm dev` | Dev server on :3000 |
 | `pnpm build` | Production build (typechecks) |
-| `pnpm test` | Vitest — the GST engine and validators |
+| `pnpm start` | Serve a production build |
+| `pnpm test` | Vitest — unit tests under `lib/` (tax engine, money, validators, API, db scoping) |
 | `pnpm lint` | ESLint |
 | `pnpm typecheck` | `tsc --noEmit` (includes the schema drift check) |
 | `pnpm db:migrate` | Apply new files in `db/migrations/` (`--status` to just list) |
 | `pnpm db:types` | Regenerate `lib/db/schema.ts` from the database |
 | `pnpm api:key <email>` | Mint an API key for a user from the terminal (uses `DATABASE_URL_UNPOOLED`) |
+| `pnpm openapi:gen` | Regenerate `api-docs/openapi.json` from `lib/api/openapi.ts` |
+| `pnpm postman:gen` | Regenerate the Postman collection in `docs/platform/postman/` |
+
+CI runs lint, typecheck, tests, build, and fails if the generated API docs are
+stale. See [docs/cicd-pipeline.md](docs/cicd-pipeline.md).
 
 ## How it fits together
 
@@ -109,8 +117,12 @@ Two files describe the schema, on purpose:
 app/(marketing)   landing page
 app/(auth)        login, signup, password reset, email verification
 app/(setup)       onboarding wizard
-app/(app)         dashboard, invoice builder, settings — gated
+app/(app)         dashboard, invoice builder, customers, products, settings — gated
+app/i/[token]     the public invoice page a share link opens
+app/api/v1        the public REST API (Bearer API keys)
 app/api/auth      Neon Auth's endpoints, proxied through our origin
+app/api/cli       device login for the invoice-ai CLI
+app/api/cron      the webhook delivery worker (Vercel Cron, daily — vercel.json)
 proxy.ts          sends signed-out visitors to /login; finishes Google sign-in
 lib/tax.ts        the tax engine (pure, unit tested)
 lib/money.ts      integer minor-unit arithmetic, amount in words
@@ -118,7 +130,11 @@ lib/validators.ts Zod schemas (internal) + Stripe-shaped wire schemas
 lib/catalog/      products & prices (prod_… / price_… ids)
 lib/db/           the only way into Postgres: userDb(), anonDb(), typed SQL calls
 lib/auth/         Neon Auth server instance, API keys, AuthContext, scopes
+lib/services/     invoices, customers, products, prices, webhooks — shared by
+                  the UI's server actions and the API
+lib/webhooks/     signing and delivery of webhook events
 db/migrations/    schema, RLS, and the SQL functions
+api-docs/         the developer docs site (Mintlify), docs.horizonpay.co
 ```
 
 **The tax engine is the load-bearing part.** `lib/tax.ts` charges a free-form
@@ -131,9 +147,14 @@ is one way to charge for it (`unit_amount` in minor units, one-off or
 recurring). Invoice lines name a `price_…` or carry ad-hoc amounts.
 
 **The API is Stripe-shaped.** `customers`, `products`, `prices`, `invoices`
-(`draft → open → paid`, `void`), `invoice-items`, `finalize` / `pay` / `void`
-lifecycle, `cus_…` / `in_…` / `ii_…` ids — with this API's envelope
-(`{ data }`), Bearer keys, cursor pagination, and problem+json errors.
+(`draft → open → paid`, `void`), `invoice-items`, `finalize` / `send` / `pay` /
+`void` lifecycle, `webhook-endpoints`, `cus_…` / `in_…` / `ii_…` ids — with this
+API's envelope (`{ data }`), Bearer keys, cursor pagination, idempotency keys,
+and problem+json errors. The live OpenAPI document is at
+[`/api/v1/openapi.json`](https://invoice.horizonpay.co/api/v1/openapi.json);
+guides and the reference are at [docs.horizonpay.co](https://docs.horizonpay.co).
+The SDKs (TypeScript, Python) and the `invoice-ai` CLI live in
+[invoice-ai-sdk](https://github.com/navdeepyadav19/invoice-ai-sdk).
 
 **Tenant isolation is RLS, not application code.** Every table keys off
 `owner_id = app.uid()`. The database is only reachable from the server, and
@@ -183,8 +204,9 @@ One thing the model is deliberately not trusted with, in
 
 ## Emailing invoices
 
-Optional — the app works fully without it, you just don't get the "Email it"
-button. To enable:
+Optional — without it you still get the PDF and the share link, but "Email
+it" issues the invoice and then reports that the email couldn't be sent, and
+sign-up verification emails don't go out. To enable:
 
 1. Add a domain in Resend and verify its DNS records.
 2. Set `RESEND_API_KEY` and `INVOICE_FROM_EMAIL` (an address on that domain).
@@ -197,4 +219,26 @@ Until a domain is verified, Resend only delivers to your own address from
 - Payment links and marking paid from a webhook
 - Recurring billing runs (intervals are stored on prices; nothing auto-bills yet)
 - Credit notes, subscriptions with trials/proration
-- A catalog picker in the invoice builder (the catalog is API-first today)
+- Marking an invoice paid or void from the app (the API and CLI can; `POST /api/v1/invoices/{id}/pay` and `/void`)
+
+## Docs
+
+- [docs/neon-overview.md](docs/neon-overview.md) — how the backend works: RLS,
+  the three database entry points, auth, branches, migrations
+- [docs/cicd-pipeline.md](docs/cicd-pipeline.md) — GitHub Actions and Vercel
+- [docs/platform/](docs/platform/README.md) — design docs for the API, SDKs,
+  CLI and MCP server
+- [docs/ai-invoice-creation.md](docs/ai-invoice-creation.md) — the AI invoice flow
+- [docs/qa-test-cases.md](docs/qa-test-cases.md) — manual test cases
+- [docs/agents/](docs/agents/01-agents-and-subagents.md) — plans for AI agents
+  (not built)
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setting up your own Neon branch and
+what CI checks. Report security problems privately — see
+[SECURITY.md](SECURITY.md).
+
+## License
+
+[MIT](LICENSE)

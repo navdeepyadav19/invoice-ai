@@ -4,6 +4,16 @@ Study sheet for interviews when someone is reviewing this project. Answers are
 grounded in the current codebase. Skim the **Where to look** links before you
 interview; say these in your own words, not as a script.
 
+> **Two things changed after this was written.** On 2026-09-20 the app went
+> worldwide (commit `dc3eaac`): the GST engine (`lib/gst.ts`), GSTIN/PAN/IFSC
+> validation and the Sandbox GSTIN lookup were deleted, replaced by a generic
+> exclusive tax engine in `lib/tax.ts`, a country + currency per business, and
+> an optional free-text tax ID. On 2026-10-04 the backend moved from Supabase to
+> Neon, and guest mode went with it. Answers that describe the GST era are kept
+> because they are still good interview material, but each one is marked with
+> what is true today. Files that no longer exist are in git history before
+> `dc3eaac`.
+
 ---
 
 ## 1. Who is the source of truth for invoice totals — the browser or the server?
@@ -12,11 +22,12 @@ interview; say these in your own words, not as a script.
 
 Both run the same tax engine for the live preview, but the **server is the
 source of truth when we save**. The builder calls `computeInvoice` in the
-browser so the user sees CGST/SGST/IGST update as they type. On save, the server
+browser so the user sees the tax and total update as they type (in the GST era,
+the CGST/SGST/IGST split). On save, the server
 action **recomputes every total from the line items** and ignores whatever
 totals the client sent. A tampered request can change *what* is billed (that’s
 the user’s own draft), but it can’t store a document whose tax doesn’t follow
-from its own lines — which is what has to hold up against a GST filing.
+from its own lines — which is what has to hold up against a tax filing.
 
 **Why it matters as a PM**
 
@@ -25,15 +36,23 @@ money on an invoice is a P0; a slightly laggy preview is not.
 
 **Where to look**
 
-- `lib/gst.ts` — shared engine; comments on server recompute
-- `lib/actions/invoice.ts` — `saveInvoiceDraft` recomputes before persist
+- `lib/tax.ts` — shared engine; comments on server recompute
+- `lib/actions/invoice.ts` — `saveInvoiceDraft`, which calls
+  `lib/services/invoices.ts` to recompute before persisting
 - `components/invoice/builder.tsx` — live preview via the same `computeInvoice`
 
 ---
 
 ## 2. How do you decide CGST+SGST vs IGST (and the other tax treatments)?
 
-**Good answer**
+> **Since the worldwide release (Sep 2026):** the app no longer does this.
+> `lib/tax.ts` charges one free-form exclusive rate per line, in any currency;
+> there are no treatments, no place of supply and no CGST/SGST/IGST split. The
+> answer below is how the India-only version worked. The today answer is “I
+> dropped the GST engine to sell outside India, and kept the invariants: integer
+> minor units, server recompute.”
+
+**Good answer (GST era)**
 
 The engine picks a **tax treatment** from supply context, in a fixed order:
 
@@ -50,8 +69,9 @@ sellers and exports.
 
 **Where to look**
 
-- `lib/gst.ts` — `resolveTreatment`, `computeInvoice`, `TaxTreatment`
-- `lib/gst.test.ts` — cases for intra, inter, export, unregistered, reverse charge
+- Git history before `dc3eaac`: `lib/gst.ts` (`resolveTreatment`,
+  `computeInvoice`, `TaxTreatment`) and `lib/gst.test.ts`
+- `lib/tax.ts` and `lib/tax.test.ts` — the engine that replaced it
 
 ---
 
@@ -82,14 +102,21 @@ account’s uid and consume the token so it can’t be replayed.
 
 **Where to look**
 
-- Git history before the Neon migration: `lib/actions/claim.ts`,
-  `continueAsGuestAction`, and the `merge_tokens` table in the old
-  `db/migrations/0001_init.sql`
-- `db/migrations/0001_init.sql` — the RLS policies that still apply
+- Git history before the Neon migration (`a314f67`): `lib/actions/claim.ts`,
+  `continueAsGuestAction`, and the `merge_tokens` table in
+  `supabase/migrations/0001_init.sql`
+- `db/migrations/0001_init.sql` — the RLS policies that still apply, now on
+  `app.uid()`
 
 ---
 
 ## 4. Why does the app compute money in integer paise instead of floating-point rupees?
+
+> **Since the worldwide release (Sep 2026):** same idea, any currency. The app
+> computes in integer **minor units** (`toMinor` / `mulMinor` in `lib/money.ts`;
+> the `…Paise` names are kept as aliases), respects each currency’s decimals
+> (`lib/currency.ts`), and formats per locale. There is no CGST/SGST split to
+> round any more.
 
 **Good answer**
 
@@ -104,8 +131,8 @@ subtraction so `cgst + sgst` always equals the total tax even on odd paise.
 
 **Where to look**
 
-- `lib/money.ts` — `toPaise`, `mulPaise`, formatting with Indian digit grouping
-- `lib/gst.ts` — CGST/SGST split comment around odd paise
+- `lib/money.ts` — `toMinor`, `mulMinor`, `formatMinor`
+- `lib/tax.ts` — the per-line computation in minor units
 - `db/migrations/0001_init.sql` — money as `numeric(14,2)`, never float
 
 ---
@@ -114,7 +141,7 @@ subtraction so `cgst + sgst` always equals the total tax even on odd paise.
 
 **Good answer**
 
-When we save an invoice, we store **JSONB copies** of the business (“From”) and
+When we save an invoice, the server stores **JSONB copies** of the business (“From”) and
 client (“Bill to”) as they stood at that moment — `business_snapshot` and
 `client_snapshot`. Live profile rows can change later (new address, new trade
 name). Without snapshots, editing your address would silently rewrite every
@@ -124,7 +151,7 @@ snapshots make the data model match that product rule.
 **Where to look**
 
 - `db/migrations/0001_init.sql` — schema comments on snapshots
-- `lib/actions/invoice.ts` — writes `business_snapshot` / `client_snapshot` on save
+- `lib/services/invoices.ts` — writes `business_snapshot` / `client_snapshot` on save
 - `lib/invoice-view.ts` — `snapshotBusiness` helper
 - README — “Invoices freeze their parties”
 
@@ -136,13 +163,16 @@ snapshots make the data model match that product rule.
 
 **Tenant isolation lives in the database (RLS), not in “remember to filter in
 the app.”** Every sensitive table keys off `owner_id`. Policies allow access
-only when `owner_id = auth.uid()`. Invoice line items and events are gated
-through their parent invoice’s owner. Guests get a real `auth.uid()`, so they’re
-ordinary tenants — no second security model.
+only when `owner_id = app.uid()`. Invoice line items and events are gated
+through their parent invoice’s owner. The database is only reachable from the
+server: `lib/db/scoped.ts` opens a transaction, runs `SET LOCAL ROLE
+authenticated`, and pins the caller’s user id, so the same policies apply to a
+browser session, an API key and the CLI.
 
-As a PM I’d still want captcha on anonymous sign-in before public traffic,
-because anonymous auth is an unauthenticated user-creation endpoint — but the
-isolation model itself doesn’t special-case guests.
+> **Since the move to Neon (Oct 2026):** this used to read `auth.uid()` from a
+> Supabase JWT, and guests were ordinary tenants with an anonymous uid. There are
+> no guests now, so the old “captcha on anonymous sign-in” point becomes
+> “rate-limit and captcha the public sign-up form”.
 
 **Where to look**
 
@@ -156,28 +186,42 @@ isolation model itself doesn’t special-case guests.
 
 **Good answer**
 
-Numbers are **per business**, not global: prefix + Indian financial year
-(April–March) + padded sequence, e.g. `INV/25-26/0001`. A single Postgres
-`SEQUENCE` is the wrong tool for multi-tenant numbering. Instead,
-`claim_invoice_number` locks the business row, increments `next_invoice_number`,
-and returns the formatted string. The row lock serializes two “send” clicks at
-the same instant so they can’t get the same number.
+Numbers are **per business**, not global: prefix + zero-padded sequence, e.g.
+`INV-0042`. A single Postgres `SEQUENCE` is the wrong tool for multi-tenant
+numbering, and it leaves gaps on rollback. Instead, finalizing a draft calls the
+SQL function `issue_invoice()`, which in **one transaction** locks the invoice
+row, refuses an empty or non-draft invoice, calls `claim_invoice_number` (which
+increments `businesses.next_invoice_number` with `UPDATE … RETURNING`), stores
+the number, moves the invoice `draft → open`, and writes a `finalized` event.
+Because claim and save are one statement, two clicks or two API retries can’t
+burn two numbers, and a second call just returns the number already assigned.
 
-**Status note for honesty:** claiming a number and moving `draft → sent` is
-designed in SQL but **not fully wired in the product UI yet** (see README “Not
-built yet”). You can talk about the design and the gap without overselling.
+It’s wired end to end: **Issue invoice** (or **Email it**) in the builder, and
+`POST /api/v1/invoices/{id}/finalize` or `/send` in the API.
+
+> **Since the worldwide release (Sep 2026):** numbers used to carry the Indian
+> financial year (`INV/25-26/0001`). Migration `0009` switched new numbers to
+> `PREFIX-0001`; numbers already issued were left as they were.
 
 **Where to look**
 
-- `db/migrations/0001_init.sql` — `claim_invoice_number`, FY logic
-- `businesses.invoice_prefix` / `next_invoice_number` columns
-- README — Not built yet: sending / claiming number
+- `db/migrations/0011_stripe_api.sql` — current `issue_invoice()` (first
+  version in `0004_foundation.sql`, whose header explains the race it fixes)
+- `db/migrations/0009_global_breaking.sql` — current `claim_invoice_number`
+- `lib/services/invoices.ts` — `finalize()`; `lib/actions/send.ts` — the UI action
+- `components/invoice/send-controls.tsx` — the Issue invoice / Email it buttons
 
 ---
 
 ## 8. How do you validate a GSTIN, and why isn’t a regex enough?
 
-**Good answer**
+> **Since the worldwide release (Sep 2026):** the app no longer validates
+> GSTINs. The tax ID is optional free text (VAT, EIN, GSTIN, ABN…), and
+> migration `0009` dropped the `businesses_gstin_*` checks. Use the answer below
+> as “how I handled a domain rule when I had one”; the code is in git history
+> before `dc3eaac`.
+
+**Good answer (GST era)**
 
 A GSTIN is 15 characters with a known shape (state code + PAN + entity + `Z` +
 check character). We validate shape with a regex, then run the **official
@@ -189,36 +233,46 @@ enforces that the GSTIN’s state digits match `state_code` — so no code path
 
 **Where to look**
 
-- `lib/validators.ts` — `GSTIN_REGEX`, `hasValidGstinChecksum`, cross-field rules
-- `lib/validators.test.ts` — checksum / registration tests
-- `db/migrations/0001_init.sql` — `businesses_gstin_matches_state` check
+- Git history before `dc3eaac`: `lib/validators.ts` (`GSTIN_REGEX`,
+  `hasValidGstinChecksum`) and `lib/validators.test.ts`
+- `db/migrations/0001_init.sql` — `businesses_gstin_matches_state` check, dropped
+  in `0009_global_breaking.sql`
 
 ---
 
 ## 9. What’s intentionally not shipped yet, and how did you sequence the MVP?
 
-**Good answer**
+> **Since this was written:** the send loop shipped. Issuing (`draft → open`
+> with a number), the PDF, the public share page and email via Resend all work
+> now, along with a public REST API, webhooks, products & prices, and a CLI.
+> The sequencing story below is still the right answer to “how did you
+> sequence the MVP?”; for “what’s not built?” use README → “Not built yet”.
 
-Working today: guest entry, auth (email/Google/claim), onboarding, GST engine
-with tests, draft invoice builder with live tax, persistence, RLS, snapshots.
+**Good answer (MVP sequencing)**
 
-**Not built yet** (called out in README):
+Working first: auth, onboarding, the tax engine with tests, the draft invoice
+builder with live tax, persistence, RLS, snapshots.
+
+**Built after that:**
 
 - PDF generation (`/api/invoices/[id]/pdf`)
 - Public share page (`/i/[token]`)
 - Emailing via Resend
-- Issuing: `claim_invoice_number` + status `draft → sent`
+- Issuing: `issue_invoice()` + status `draft → open`
 
 Sequencing logic: the landing page sells the *job* (PDF + share + email), but
 we shipped **correct tax + durable drafts + identity** first. A pretty wrong
-invoice is worse than a missing download button. Next product bet is closing
-the send loop (number → PDF/share/email) now that the engine and data model hold.
+invoice is worse than a missing download button. The send loop came next, once
+the engine and data model held.
+
+**Not built yet today:** payment links, marking paid from a webhook, recurring
+billing runs, credit notes. Marking paid and voiding exist in the API and CLI
+but have no button in the app yet.
 
 **Where to look**
 
 - README — “Not built yet”
-- `package.json` — `@react-pdf/renderer`, `resend` already present as deps
-- `lib/gst.test.ts` — evidence the tax layer was treated as load-bearing
+- `lib/tax.test.ts` — evidence the tax layer was treated as load-bearing
 
 ---
 
@@ -233,22 +287,24 @@ the send loop (number → PDF/share/email) now that the engine and data model ho
   tenant isolation in one Postgres; RLS still does the isolation, with the app
   pinning the user per transaction. Moved from Supabase because its free tier
   pauses idle projects, while Neon scales compute to zero instead.
-- **Zod validators + pure GST/money modules** — domain rules unit-tested without
+- **Kysely + pg** — typed SQL against Neon; `lib/db/` is the only way in.
+- **Zod validators + pure tax/money modules** — domain rules unit-tested without
   the framework; browser and server can share the same functions.
 - **Tailwind / shadcn** — fast UI for forms and app shell without a design system
   project of its own.
-- Planned delivery: **@react-pdf/renderer** for PDFs, **Resend** for email.
+- Delivery: **@react-pdf/renderer** for PDFs, **Resend** for email.
 
 I’m not claiming this is the only valid stack — I’m claiming it matches the
-product constraints: Indian GST domain logic, multi-tenant data, low-friction
-guest → account path, and a small team (or solo PM) shipping end-to-end.
+product constraints: money and tax logic that must be exact, multi-tenant data,
+a short sign-up path, and a small team (or solo PM) shipping end-to-end.
 
 **Where to look**
 
 - `package.json` — dependencies and scripts
 - `README.md` — setup and architecture sketch
 - `app/(marketing)`, `app/(auth)`, `app/(setup)`, `app/(app)` — route groups
-- `proxy.ts` — Next 16 session refresh (formerly middleware)
+- `proxy.ts` — Next 16 proxy (formerly middleware): sends signed-out visitors
+  to `/login` and finishes Google sign-in
 
 ---
 
@@ -257,15 +313,15 @@ guest → account path, and a small team (or solo PM) shipping end-to-end.
 | # | Prompt | One-liner |
 |---|--------|-----------|
 | 1 | Source of truth for totals? | Server recomputes; client preview only |
-| 2 | CGST vs IGST? | Same state vs different place of supply |
-| 3 | Guest isolation? | Real uid + RLS; claim keeps uid or merges via token |
-| 4 | Why paise? | No float money bugs; filing-grade precision |
+| 2 | CGST vs IGST? | GST era: same state vs different place of supply. Today: one exclusive rate per line |
+| 3 | Guest isolation? | Supabase era: real uid + RLS, claim or merge. Today: no guests |
+| 4 | Why integer minor units? | No float money bugs; filing-grade precision |
 | 5 | Snapshots? | Freeze parties so edits don’t rewrite old invoices |
-| 6 | Multi-tenant security? | RLS on `owner_id = auth.uid()` |
-| 7 | Invoice numbers? | Per-business, FY-aware, row-locked claim |
-| 8 | GSTIN? | Regex + checksum + state match in DB |
-| 9 | What’s missing? | PDF, public link, email, draft→sent |
-| 10 | Stack? | Next + Neon (Postgres + Auth) + shared GST engine |
+| 6 | Multi-tenant security? | RLS on `owner_id = app.uid()`, role pinned per transaction |
+| 7 | Invoice numbers? | Per-business `PREFIX-0001`, claimed and saved in one locked `issue_invoice()` |
+| 8 | GSTIN? | GST era: regex + checksum + state match. Today: free-text tax ID |
+| 9 | What’s missing? | Payment links, recurring runs, credit notes; mark-paid/void UI |
+| 10 | Stack? | Next + Neon (Postgres + Auth) + Kysely + shared tax engine |
 
 ---
 

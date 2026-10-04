@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/navdeepyadav19/invoice-ai/security/advisories/new
+    about: Please don't open a public issue. Report it privately — see SECURITY.md.
+  - name: SDK or CLI problem
+    url: https://github.com/navdeepyadav19/invoice-ai-sdk/issues
+    about: The TypeScript/Python SDKs and the invoice-ai CLI live in invoice-ai-sdk.
+  - name: API documentation
+    url: https://docs.horizonpay.co
+    about: Guides and the API reference for /api/v1.

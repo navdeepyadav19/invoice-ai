@@ -1,8 +1,8 @@
 # 02 · Build spec: Recovery Agent and Invoice Assistant
 
 > **Concepts behind this spec:** [01-agents-and-subagents.md](01-agents-and-subagents.md).
-> **Depends on (assumed built first):** the whole platform layer in [../platform/](../platform/README.md): 00 foundation, 01 API, 02 SDK, 03 CLI, 04 MCP.
-> **Status:** build specification. Nothing here exists yet. Every table, route, file and package is **(new)** unless it links to an existing file on `main`. Code is **shape only**.
+> **Depends on:** the platform layer in [../platform/](../platform/README.md). The foundation (00) and REST API (01) are on `main`; the SDK (02) and CLI (03) live in the separate [invoice-ai-sdk](https://github.com/navdeepyadav19/invoice-ai-sdk) repo; the MCP server (04) is not built yet.
+> **Status:** build specification. None of the agent code exists yet. Every table, route, file and package is **(new)** unless it links to an existing file on `main`. Code is **shape only**.
 
 ## 1. What we're building, and what students learn
 
@@ -30,16 +30,16 @@ Students leave understanding:
 
 ## 2. Assumptions and how it works today
 
-### 2.1 Assumed from the platform layer (not yet on `main`)
+### 2.1 What we use from the platform layer
 
 | From | We rely on |
 |---|---|
-| [00-foundation](../platform/00-foundation.md) | `lib/services/*` business functions, `AuthContext`, the atomic `issue_invoice` RPC, `invoices.cancel`/`list`/`events`, client CRUD, `invoice_events.meta.actor` |
-| [01-api](../platform/01-api.md) | `/api/v1/*`, scopes, `Idempotency-Key`, problem+json errors, webhooks (`invoice.paid`, `invoice.emailed`), API keys that resolve to their owner and run as `userDb(ownerId)`, audit `api_requests` |
-| [02-sdk](../platform/02-sdk.md) | `@invoice-ai/sdk` with retries, idempotency reuse, pagination, typed errors |
-| [04-mcp](../platform/04-mcp.md) | The same tool semantics exposed to external AI apps; the confirmation-token pattern for irreversible actions |
+| [00-foundation](../platform/00-foundation.md) (on `main`) | `lib/services/*` business functions (`invoices.finalize`/`send`/`pay`/`voidInvoice`/`list`/`events`, `clients.*`, `products.*`, `prices.*`), `AuthContext` (`lib/auth/context.ts`), the atomic `issue_invoice()` SQL function, `invoice_events.meta.actor` |
+| [01-api](../platform/01-api.md) (on `main`) | `/api/v1/*`, scopes (`lib/auth/scopes.ts`), `Idempotency-Key` (`idempotency_keys` table), problem+json errors, webhooks (`invoice.paid`, `invoice.emailed`, …), API keys that resolve to their owner and run as `userDb(ownerId)`, audit `api_requests` |
+| [02-sdk](../platform/02-sdk.md) (invoice-ai-sdk repo) | `@invoice-ai/sdk` with retries, idempotency reuse, pagination, typed errors |
+| [04-mcp](../platform/04-mcp.md) (not built) | The same tool semantics exposed to external AI apps; the confirmation-token pattern for irreversible actions |
 
-**Rule:** agent tools call **`@invoice-ai/sdk` (or `lib/services` in-process with an `AuthContext`)**, never the database directly. That way scopes, idempotency, GST maths (`lib/gst.ts#computeInvoice`) and audit apply to agents automatically.
+**Rule:** agent tools call **`@invoice-ai/sdk` (or `lib/services` in-process with an `AuthContext`)**, never the database directly. That way scopes, idempotency, tax maths (`lib/tax.ts#computeInvoice`) and audit apply to agents automatically.
 
 ### 2.2 What exists on `main` today that we reuse
 
@@ -47,22 +47,23 @@ Students leave understanding:
 |---|---|
 | `app/api/ai/parse-invoice/route.ts`, `lib/ai/invoice-schema.ts`, `lib/ai/normalise.ts` | The "model never does arithmetic" rule; free-text → structured draft parsing can become an Assistant tool |
 | `components/invoice/ai-panel.tsx`, `components/invoice/ai-summary.ts` | The **propose → summary card → "Fill this in"** confirmation UX, and totals from real `computeInvoice` |
-| `lib/invoice-status.ts` (`deriveStatus`, `isPastDue`, `daysOverdue`) | "Overdue" is derived; the recovery case scan uses the same rules (India-time calendar) |
-| `lib/money.ts`, `lib/gst.ts` | Paise maths and GST split for every amount an agent shows |
+| `lib/invoice-status.ts` (`deriveStatus`, `isPastDue`, `daysOverdue`) | "Overdue" is derived; the recovery case scan uses the same rules (UTC calendar days, `todayUtc`) |
+| `lib/money.ts`, `lib/tax.ts` | Integer minor-unit maths and the per-rate tax summary for every amount an agent shows |
 | `lib/email.tsx#sendInvoiceEmail`, `emails/invoice-email.tsx` | Pattern and template for reminder emails |
-| `lib/actions/send.ts#markPaidAction` | Mark-paid exists (no UI); the platform `invoices.markPaid` supersedes it |
-| `clients` table (`email`, `phone`) | Contact details for recovery |
+| `lib/services/invoices.ts#pay` (`payAction` in `lib/actions/send.ts`, `POST /api/v1/invoices/{id}/pay`) | Marks an open invoice paid, with an optional `reference`; emits `invoice.paid` |
+| `clients` table (`email`, `phone`, `country_code`, `region`) | Contact details for recovery |
 | `invoice_events` (`meta jsonb`) | Timeline and audit of agent actions |
-| `components/app/app-header.tsx`, `app/(app)/layout.tsx`, `app/(app)/dashboard/page.tsx` | Where the Assistant and Recovery pages plug into navigation |
+| `products` / `prices` tables (`db/migrations/0010_products_prices.sql`), `lib/services/products.ts`, `lib/services/prices.ts`, `/api/v1/products`, `/api/v1/prices` | The catalog the Assistant's product tools read and write (`prod_…` / `price_…` ids, scopes `products:read`/`products:write`) |
+| `lib/nav.ts`, `components/app/app-sidebar.tsx`, `app/(app)/layout.tsx`, `app/(app)/dashboard/page.tsx` | Where the Assistant and Recovery pages plug into navigation |
 
 ### 2.3 Gaps this spec fills
 
-- **Products:** there's no product or catalogue table (line items are free text). Adds migration `0005_products.sql`.
-- **Recovery data:** no reminder, message, call, promise, escalation or approval tables. Adds migration `0006_recovery.sql`.
-- **Background runs:** no cron or background execution. Adds Vercel Cron and workflow resume routes.
+- **Products:** already built (products, prices, invoice lines linked by `price_id`). The Assistant's tools wrap the existing services; no catalog migration is needed.
+- **Recovery data:** no reminder, message, call, promise, escalation or approval tables. Adds migration `0015_recovery.sql` (the latest on `main` is `0014_webhook_payload_v2.sql`; take the next free number at build time).
+- **Background runs:** the only cron is the daily webhook-delivery job (`/api/cron/webhooks` in `vercel.json`). Adds a recovery cron and workflow resume routes.
 - **Proxy redirects:** `proxy.ts` `PUBLIC_PREFIXES` already exempts `/api/cron/`, but would redirect `/api/webhooks/*` and `/api/agents/*` bearer calls to `/login`. Add exemptions and verify secrets/signatures inside each route.
-- **Background auth:** there's no background identity. Recovery runs act **as the owner** via an `AuthContext` built from `userDb(ownerId)` (`via: 'agent'`, a new `AuthVia` value; scopes limited per subagent), so RLS still applies. Never `systemDb()`, the owner connection that bypasses RLS.
-- **Message ids:** Resend message ids are discarded in `lib/actions/send.ts`. Channels must store provider ids.
+- **Background auth:** there's no background identity. Recovery runs act **as the owner** via an `AuthContext` built from `userDb(ownerId)` (`via: 'agent'`, a new `AuthVia` value next to `session`/`api_key`/`oauth`; scopes limited per subagent), so RLS still applies. Never `systemDb()`, the owner connection that bypasses RLS.
+- **Message ids:** `lib/email.tsx#sendInvoiceEmail` returns the Resend id, but `lib/services/invoices.ts#send` discards it. Channels must store provider ids.
 
 ---
 
@@ -152,8 +153,8 @@ app/(app)/recovery/page.tsx, app/(app)/recovery/[caseId]/page.tsx
 app/(app)/recovery/approvals/page.tsx, app/(app)/recovery/simulator/page.tsx
 app/(app)/settings/recovery/page.tsx
 evals/{assistant,recovery}/*.eval.ts + datasets/*.json
-db/migrations/0005_products.sql, 0006_recovery.sql
-vercel.ts (crons)
+db/migrations/0015_recovery.sql
+vercel.json (add the recovery cron next to /api/cron/webhooks)
 ```
 
 ### 3.2 Configuration
@@ -165,7 +166,7 @@ vercel.ts (crons)
 
 **`next.config.ts`:** add `'@mastra/*'` to the existing `serverExternalPackages` (today: `['@react-pdf/renderer']`).
 
-**`proxy.ts`:** exempt `/api/webhooks/` and `/api/agents/` from the login redirect (`/api/cron/` is already in `PUBLIC_PREFIXES`). Each of those routes authenticates itself:
+**`proxy.ts`:** exempt `/api/webhooks/` and `/api/agents/` from the login redirect (`/api/cron/`, `/api/v1/` and `/api/cli/` are already in `PUBLIC_PREFIXES`). Each of those routes authenticates itself:
 - cron: secret
 - webhooks: HMAC signature
 - agents: session cookie or bearer token
@@ -186,12 +187,12 @@ export const models = {
 | Variable | Used by |
 |---|---|
 | `AGENT_MODEL`, `AGENT_MODEL_FAST`, `AGENT_MODEL_JUDGE` | Model routing |
-| `OPENROUTER_API_KEY` / `OPENAI_API_KEY` | Provider keys |
-| `DATABASE_URL` | Mastra `PostgresStore` (Neon pooled connection string; PgBouncer in transaction mode, so session-level state doesn't survive across transactions) |
+| `OPENROUTER_API_KEY` / `OPENAI_API_KEY` (exists; the AI invoice parser uses it) | Provider keys |
+| `DATABASE_URL` (exists) | Mastra `PostgresStore` (Neon pooled connection string; PgBouncer in transaction mode, so session-level state doesn't survive across transactions) |
 | `ELEVENLABS_API_KEY`, `ELEVENLABS_AGENT_ID`, `ELEVENLABS_WEBHOOK_SECRET` | Voice sessions, post-call webhook |
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | Payment links, reconciliation (test mode) |
 | `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASE_URL` | Production tracing |
-| `CRON_SECRET` | Cron route auth |
+| `CRON_SECRET` (exists) | Cron route auth, shared with `/api/cron/webhooks` |
 | `RECOVERY_SIMULATION=true` | Forces all channels to the simulator (**required** in this course and on previews) |
 | `RECOVERY_OUTBOUND_PAUSED` | Kill switch |
 
@@ -209,13 +210,13 @@ All tools are `createTool` wrappers in `lib/agents/tools/`. Each one:
 
 | Tool id | Input (summary) | Output (summary) | Scope | Tier | Idempotency key |
 |---|---|---|---|---|---|
-| `find-customers` | `query`, `limit ≤ 10` | `[{ id, name, email, phone, gstin, state }]` | clients:read | read | — |
-| `create-customer` | name, email?, phone?, gstin?, state_code, city? | `{ id, name }` | clients:write | draft | `customer:{owner}:{hash(name,gstin,email)}` |
-| `find-products` | `query`, `limit ≤ 10` | `[{ id, name, hsn_sac, rate_label, gst_rate }]` | products:read | read | — |
-| `create-product` | name, hsn_sac?, unit, default_rate_rupees, gst_rate | `{ id, name }` | products:write | draft | `product:{owner}:{hash(name,hsn)}` |
-| `create-invoice-draft` | customer_id, items[{product_id? \| description, quantity, rate_rupees, gst_rate}], due_date? | `{ invoice_id, total_label, tax_split_label, missing[] }` | invoices:write | draft | `draft:{runId}:{hash(input)}` |
+| `find-customers` | `query`, `limit ≤ 10` | `[{ id (cus_…), name, email, phone, tax_id, country_code }]` | clients:read | read | — |
+| `create-customer` | name, email?, phone?, tax_id?, address{country, state?, city?}? | `{ id, name }` | clients:write | draft | `customer:{owner}:{hash(name,tax_id,email)}` |
+| `find-products` | `query`, `limit ≤ 10` | `[{ id (prod_…), name, prices: [{ id (price_…), amount_label, currency, tax_rate }] }]` | products:read | read | — |
+| `create-product` | name, description?, price{ unit_amount (minor units), currency, tax_rate } | `{ product_id, price_id, name }` | products:write | draft | `product:{owner}:{hash(name,currency,unit_amount)}` |
+| `create-invoice-draft` | customer (cus_…), items[{price? (price_…) \| description, quantity, unit_amount (minor units), tax_rate}], due_date? | `{ invoice_id, total_label, tax_summary_label, missing[] }` | invoices:write | draft | `draft:{runId}:{hash(input)}` |
 | `get-invoice` | invoice_id | `{ number, status, customer, total_label, due_date, days_overdue, pay_link? }` | invoices:read | read | — |
-| `issue-invoice` | invoice_id | `{ invoice_number }` | invoices:issue | **send** (approval) | `issue:{invoice_id}` |
+| `finalize-invoice` | invoice_id | `{ invoice_number }` | invoices:finalize | **send** (approval) | `finalize:{invoice_id}` |
 | `send-invoice` | invoice_id, to? | `{ emailed, public_url }` | invoices:send | **send** (approval) | `send:{invoice_id}:{to}` |
 | `list-overdue` | min_days?, limit ≤ 50 | `[{ invoice_id, number, customer, total_label, days_overdue }]` | invoices:read | read | — |
 | `get-invoice-timeline` | invoice_id | last N events + contact attempts (summaries) | invoices:read | read | — |
@@ -225,12 +226,13 @@ All tools are `createTool` wrappers in `lib/agents/tools/`. Each one:
 
 Recovery-only tools are listed with each subagent in §6.
 
-**Products table (`0005_products.sql`, spec only):**
-- `products(id, owner_id, name, description, hsn_sac, unit, default_rate numeric(14,2), gst_rate numeric(5,2), archived_at, created_at, updated_at)`
-- RLS `owner_id = (select app.uid())`
-- unique (`owner_id`, lower(`name`))
-- no explicit grants needed: `db/migrations/0000_neon_prelude.sql` sets default privileges so new `public` tables get select/insert/update/delete for `authenticated`
-- platform additions: service `products.*`, endpoints `/api/v1/products`, SDK `invoiceAI.products`, scopes `products:read|write`
+**Products and prices already exist** (`db/migrations/0010_products_prices.sql`), so the product tools are thin wrappers, not new schema:
+- `products(id, public_id prod_…, owner_id, name, description, images, active, …)` and `prices(id, public_id price_…, product_id, nickname, unit_amount, currency, type one_time|recurring, recurring_interval, interval_count, tax_rate, active, …)`, both RLS `owner_id = (select app.uid())`
+- `unit_amount` is stored as `numeric(14,2)` major units and exposed on the API and SDK as integer **minor units** (`lib/api/serialize.ts`); tools speak the API's minor units
+- invoice lines link to the catalog through `invoice_items.price_id` / `product_id`; a line that names a `price` borrows its amount and tax rate
+- "archive" is `active = false` (`products.archive` / `restore`), not a delete
+- there is no unique constraint on product names, so `create-product` calls `find-products` first and asks before creating a near-duplicate
+- platform side already shipped: services `products.*` / `prices.*`, endpoints `/api/v1/products` and `/api/v1/prices`, SDK `invoiceAI.products` / `invoiceAI.prices`, scopes `products:read|write`
 
 ---
 
@@ -240,11 +242,11 @@ Recovery-only tools are listed with each subagent in §6.
 
 A chat on `/assistant` that can:
 - **create customers and products**
-- **draft invoices** with the real GST split
+- **draft invoices** with the real tax totals from `computeInvoice`
 - **issue and send** them after the user approves
 - answer questions: "what's overdue?", "how much does Acme owe?"
 
-It **asks** when information is missing or ambiguous (pre-tax vs inclusive, GST rate, which "Acme").
+It **asks** when information is missing or ambiguous (pre-tax vs inclusive, tax rate, currency, which "Acme").
 
 ### 5.2 Agent (shape only)
 
@@ -252,22 +254,22 @@ It **asks** when information is missing or ambiguous (pre-tax vs inclusive, GST 
 export const invoiceAssistant = new Agent({
   id: 'invoice-assistant',
   name: 'Invoice Assistant',
-  description: 'Helps the business owner create customers, products and GST invoices by chat.',
+  description: 'Helps the business owner create customers, products and invoices by chat.',
   instructions: `You are Invoice-AI's assistant for a small business owner.
-- Use tools for every fact. Never invent customers, amounts, GST rates or invoice numbers.
-- Money: users speak in rupees. Tools compute totals; show the tool's total_label, never your own maths.
-- If an amount might include GST, or a GST rate is not stated, ASK.
+- Use tools for every fact. Never invent customers, amounts, tax rates or invoice numbers.
+- Money: users speak in major units of the invoice currency (e.g. dollars). Tools take minor units and compute totals; show the tool's total_label, never your own maths.
+- If an amount might include tax, or a tax rate is not stated, ASK.
 - If several customers match, list them and ask which one.
-- Issuing assigns a permanent GST number and sending emails a customer: always show a summary first.`,
+- Finalizing assigns a permanent invoice number and sending emails a customer: always show a summary first.`,
   model: models.main,
   tools: { findCustomers, createCustomer, findProducts, createProduct, createInvoiceDraft,
-           getInvoice, issueInvoice, sendInvoice, listOverdue },
+           getInvoice, finalizeInvoice, sendInvoice, listOverdue },
   memory: assistantMemory,   // thread per chat, resource = owner, working memory = business preferences
 })
 ```
 
-- `issueInvoice` and `sendInvoice` have `requireApproval: true`.
-- Working memory template: default GST rate, usual due days, frequent customers, preferred invoice notes.
+- `finalizeInvoice` and `sendInvoice` have `requireApproval: true`.
+- Working memory template: default tax rate and currency, usual due days, frequent customers, preferred invoice notes.
 
 ### 5.3 Route and UI
 
@@ -282,11 +284,11 @@ export const invoiceAssistant = new Agent({
 |---|---|
 | text | Chat bubble |
 | `find-customers` result | Customer chips; click to choose |
-| `create-invoice-draft` result | **Invoice card**: lines, `tax_split_label`, total, "Open in builder" (links to `/invoices/[id]/edit`) |
-| approval request (`issue-invoice`, `send-invoice`) | **Confirmation card**: number preview, recipient, total, **Approve / Decline**, which calls `approveToolCall`/`declineToolCall` via a small route |
+| `create-invoice-draft` result | **Invoice card**: lines, `tax_summary_label`, total, "Open in builder" (links to `/invoices/[id]/edit`) |
+| approval request (`finalize-invoice`, `send-invoice`) | **Confirmation card**: number preview, recipient, total, **Approve / Decline**, which calls `approveToolCall`/`declineToolCall` via a small route |
 | errors | Inline notice with the tool's actionable message |
 
-- **Navigation:** add "Assistant" to `components/app/app-header.tsx` `NavLink`s.
+- **Navigation:** add "Assistant" to the sidebar items in `lib/nav.ts` (rendered by `components/app/app-sidebar.tsx`).
 - **Voice input:** reuse the MediaRecorder pattern from `components/invoice/ai-panel.tsx` and `/api/ai/transcribe`.
 
 ### 5.4 Example conversations, and what each teaches
@@ -294,9 +296,9 @@ export const invoiceAssistant = new Agent({
 | User says | Agent does | Concept |
 |---|---|---|
 | "Invoice Acme for 10 hours of consulting at 2,500" | `find-customers` → 2 matches → asks which | Clarifying questions, tool-first facts |
-| "The Mumbai one. GST 18." | `find-products` (none) → `create-invoice-draft` → invoice card | Tools, generative UI, real GST split |
+| "The Berlin one. 19% VAT." | `find-products` (none) → `create-invoice-draft` → invoice card | Tools, generative UI, real tax totals |
 | "Save consulting as a product" | `create-product` | Draft-tier write |
-| "Issue and email it" | Approval card → approve → `issue-invoice` → approval → `send-invoice` | HITL, irreversible actions |
+| "Finalize and email it" | Approval card → approve → `finalize-invoice` → approval → `send-invoice` | HITL, irreversible actions |
 | "What's overdue?" | `list-overdue` → table | Read tools |
 | (next day) "Same as last month for Acme" | Working memory + `get-invoice-timeline` | Memory vs facts |
 
@@ -426,7 +428,7 @@ export const recoveryCaseWorkflow = createWorkflow({
 
 **Idempotency.** Every `executeAction` uses the key `recovery:{caseId}:{attemptNo}:{action}`, so a double resume (cron plus webhook racing) sends at most once.
 
-**Cron scan.** The same cron also **opens cases**: invoices with `status = 'sent'`, a `due_date` before today in India time (same rule as `lib/invoice-status.ts#isPastDue`), no open case, and `policy.enabled`. It works in batches of N per tick to stay under the function timeout.
+**Cron scan.** The same cron also **opens cases**: invoices with `status = 'open'`, a `due_date` before today in UTC (same rule as `lib/invoice-status.ts#isPastDue`), no open case, and `policy.enabled`. It works in batches of N per tick to stay under the function timeout.
 
 ```mermaid
 sequenceDiagram
@@ -471,7 +473,7 @@ sequenceDiagram
 | Amount check | Outbound text must contain the tool's `amount_label` exactly, or it's blocked |
 | Kill switch | `RECOVERY_OUTBOUND_PAUSED` or the per-owner toggle blocks all `executeAction` |
 
-### 6.6 Data model (`0006_recovery.sql`, spec only)
+### 6.6 Data model (`0015_recovery.sql`, or the next free number, spec only)
 
 All tables:
 - have `owner_id uuid not null`
@@ -485,13 +487,13 @@ All tables:
 | `customer_contact_prefs` | client_id, preferred_channel, timezone, do_not_contact bool, do_not_contact_at, consent jsonb (per channel) | Opt-out and consent live here, not in memory |
 | `recovery_cases` | invoice_id unique, client_id, status (enum from §6.2), risk_score, risk_band, attempts_count, next_action_at, workflow_run_id, opened_at, resolved_at, resolution (paid/escalated_resolved/cancelled/paused) | Index on (`status`, `next_action_at`) for cron |
 | `contact_attempts` | case_id, channel (email/sms/whatsapp/voice), direction (out/in), status (drafted/approved/sent/delivered/failed/received/completed), body/summary, provider_message_id, conversation_id, transcript_ref, idempotency_key unique, created_by (agent/user), agent_run_id | Replies and calls land here |
-| `promises_to_pay` | case_id, promised_date, amount_paise (nullable = full), source_attempt_id, status (open/kept/broken/cancelled) | Broken promise → `follow_up_due` |
+| `promises_to_pay` | case_id, promised_date, amount numeric(14,2) in the invoice currency (nullable = full), source_attempt_id, status (open/kept/broken/cancelled) | Broken promise → `follow_up_due` |
 | `approval_requests` | case_id, action jsonb (NextAction + draft), reason, status (pending/approved/rejected/expired), decided_by, decided_at, expires_at, edited_body | Drives the inbox |
 | `escalations` | case_id, reason, summary, customer_position, suggested_next_step, urgency, status (open/resolved), resolved_by | Human queue |
 | `simulated_messages` | case_id, channel, direction, persona, body, delivered_at | Simulator transport (course mode) |
 | `agent_runs` | agent_id, workflow_run_id, case_id?, thread_id?, model, trace_id, tokens_in/out, cost_usd, status, error, started_at, ended_at | Links business records to traces |
 
-The platform's `invoice_event_type` gets additional values for the timeline (e.g. `reminder_sent`, `call_completed`, `promise_recorded`, `escalated`), and `meta.actor = 'agent'` carries `agent_run_id`.
+The `invoice_event_type` enum (today: `created`, `finalized`, `viewed`, `downloaded`, `paid`, `updated`, `emailed`, `email_failed`, `voided`) gets additional values for the timeline (e.g. `reminder_sent`, `call_completed`, `promise_recorded`, `escalated`), and `meta.actor = 'agent'` carries `agent_run_id`.
 
 ### 6.7 Voice (simulated with ElevenLabs)
 
@@ -563,7 +565,7 @@ Everything flows through the **same** workflow, webhooks and policy as productio
 ### 6.10 Payments and reconciliation (Stripe test mode)
 
 1. `create-payment-link` creates a Stripe Checkout/Payment Link with `metadata.invoice_id` and `owner_id`. The link is included in reminders.
-2. `/api/webhooks/stripe` verifies the signature, then handles `checkout.session.completed`: `invoices.markPaid(ctx, invoice_id, { reference: session.id })`, idempotent by session id.
+2. `/api/webhooks/stripe` verifies the signature, then handles `checkout.session.completed`: `invoices.pay(ctx, invoice_id, { reference: session.id })`, idempotent by session id.
 3. The platform emits `invoice.paid`, and the workflow resumes with `{ reason: 'paid' }` → case `resolved`, open promises `kept`.
 4. Manual "I paid, ref X" replies go through **reconciliationAgent**, which always creates an approval request (no auto-mark without a verified payment event).
 
@@ -575,14 +577,14 @@ Everything flows through the **same** workflow, webhooks and policy as productio
 
 **Assistant (≥ 12 cases):**
 - ambiguous customer
-- missing GST rate
+- missing tax rate
 - tax-inclusive amount
 - product reuse
 - issue without approval attempt
 - decline approval
 - memory recall
 - unknown customer creation
-- invalid GSTIN
+- unknown currency code
 - "what's overdue"
 - injection in a customer name
 - multi-item invoice
@@ -647,7 +649,7 @@ Everything flows through the **same** workflow, webhooks and policy as productio
 
 **Dashboards (Langfuse):**
 - runs, errors and cost per day
-- cost per recovered ₹
+- cost per recovered unit of currency
 - p95 latency per agent
 - tool error rate
 - approvals: approve/edit/reject rates
@@ -698,8 +700,8 @@ Each phase is a PR through the existing CI (`.github/workflows/ci.yml`), plus th
 | Phase | Scope | Acceptance criteria | Teaching checkpoint |
 |---|---|---|---|
 | **R0: Mastra foundation** | Packages, `lib/mastra/index.ts`, `models.ts` (OpenRouter default, OpenAI switch), `PostgresStore` (`mastra` schema), observability (Studio), `serverExternalPackages`, proxy exemptions, a hello agent with one read tool | `mastra dev` shows the agent in Studio. One tool call is traced. Switching `AGENT_MODEL` to `openai/...` works without code changes | Read a trace span by span |
-| **R1: Invoice Assistant** | Tools layer (§4, incl. `0005_products.sql` + platform products endpoints), `invoice-assistant` agent, route with `handleChatStream`, `/assistant` UI with cards and approvals, memory, assistant eval set + smoke CI job | Chat creates a customer, product and draft with the correct GST split. Issue/send require approval. Refresh keeps the thread. Smoke evals pass | Break a tool description and watch the eval fail |
-| **R2: Recovery core** | `0006_recovery.sql`, `policy.ts` with unit tests, case scan, `riskScorer` + `recoverySupervisor` (structured `NextAction`), `/recovery` board read-only | Scan opens cases for overdue invoices. The supervisor returns valid actions. Policy tests cover hours, limits and opt-out | Why policy is code, not prompt |
+| **R1: Invoice Assistant** | Tools layer (§4, wrapping the existing products/prices endpoints), `invoice-assistant` agent, route with `handleChatStream`, `/assistant` UI with cards and approvals, memory, assistant eval set + smoke CI job | Chat creates a customer, product and draft with the correct tax totals. Finalize/send require approval. Refresh keeps the thread. Smoke evals pass | Break a tool description and watch the eval fail |
+| **R2: Recovery core** | `0015_recovery.sql`, `policy.ts` with unit tests, case scan, `riskScorer` + `recoverySupervisor` (structured `NextAction`), `/recovery` board read-only | Scan opens cases for overdue invoices. The supervisor returns valid actions. Policy tests cover hours, limits and opt-out | Why policy is code, not prompt |
 | **R3: Workflow + approvals** | `recoveryCaseWorkflow` with suspend/resume, `approval_requests`, `/recovery/approvals`, Vercel Cron `/api/cron/recovery`, idempotent `executeAction` | An approve in the inbox resumes the run. A double resume sends once. Cron resumes due cases | Kill the function mid-run; the run resumes from its snapshot |
 | **R4: Channels + simulator** | `Channel` interface, simulator transport, `messageAgent` (draft, send, classify-reply), `customerSimulator` personas, `/recovery/simulator`, inbound resume | `promise_forgetter` → promise recorded → follow-up after the missed date. `stop_requester` → no further contact | Run the persona matrix live |
 | **R5: Voice (simulated)** | ElevenLabs agent config (dynamic variables, data collection, evaluation criteria), `voice-session` route, browser call UI, `/api/webhooks/elevenlabs`, `voiceAgent`, automated voice simulations | A student call captures `promise_to_pay_date`, which resumes the run. A simulated conversation passes the voice criteria | Latency, interruptions, structured outcomes |
@@ -713,8 +715,8 @@ Each phase is a PR through the existing CI (`.github/workflows/ci.yml`), plus th
 **Open decisions:**
 - **Model choice:** which OpenRouter free model(s) have reliable tool calling at build time, and when to move `main` to a paid model (an eval-driven decision).
 - **Autopilot:** whether owners can enable auto-send for friendly email reminders under an amount threshold, or approval stays mandatory in v1.
-- **Customer timezone:** where it comes from (client address country/state, or an explicit field). Default is the business's timezone.
-- **Partial payments:** requires platform support for payments/partials (the foundation marks the whole invoice paid today).
+- **Customer timezone:** where it comes from (client `country_code`/`region`, or an explicit field). Default is the business's timezone.
+- **Partial payments:** requires platform support for payments/partials (`invoices.pay` marks the whole invoice paid today).
 - **Real channels later:** swapping the simulator for Resend inbound, Twilio SMS/WhatsApp and telephony means consent capture, templates and a legal review.
 - **Workflow runner:** stay on Mastra snapshots + Vercel Cron, or move to Vercel Workflow / Inngest if case volume or wait precision needs it.
 
@@ -742,8 +744,8 @@ Each phase is a PR through the existing CI (`.github/workflows/ci.yml`), plus th
 
 ### Invoice Assistant
 1. Open `/assistant`: "Invoice Acme for 10 hours of consulting at 2,500." It asks which Acme. *"Tools for facts, questions for ambiguity."*
-2. Pick one → the invoice card shows the CGST/SGST split. *"The model didn't do this maths; `computeInvoice` did."*
-3. "Issue and email it." → approval card → approve. *"Irreversible actions need a human."*
+2. Pick one → the invoice card shows the tax line and total. *"The model didn't do this maths; `computeInvoice` did."*
+3. "Finalize and email it." → approval card → approve. *"Irreversible actions need a human."*
 4. Open Mastra Studio → the trace for that turn: model → tools → approval → tools.
 5. Change the `create-invoice-draft` description to "handles invoices" and run the smoke eval: red. Revert: green.
 

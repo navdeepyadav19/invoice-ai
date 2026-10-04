@@ -1,0 +1,25 @@
+# Weekly dependency PRs. Each one runs the PR pipeline like any other change.
+#
+# npm covers package.json + pnpm-lock.yaml. Minor and patch bumps arrive as one
+# grouped PR so they don't bury the queue; majors stay one PR each, because
+# those are the ones that need reading (Next.js especially — see AGENTS.md).
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+
+  # Keeps the SHA-pinned third-party actions (and their version comments)
+  # and the actions/* major tags current.
+  - package-ecosystem: github-actions
+    directories: [/, /.github/actions/setup]
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        update-types: [minor, patch]

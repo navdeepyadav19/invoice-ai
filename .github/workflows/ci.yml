@@ -5,6 +5,10 @@
 # main are held to exactly the same checks.
 #
 # The jobs run in parallel, so one failing check doesn't hide another.
+#
+# No job uses a secret, and every checkout drops the token once it's done
+# (persist-credentials: false): PR code from a fork runs here, so nothing it
+# executes should be able to push with the workflow's GITHUB_TOKEN.
 
 name: CI
 
@@ -21,6 +25,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/setup
       - run: pnpm lint
 
@@ -30,6 +36,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/setup
       # Pages use the global PageProps/LayoutProps/RouteContext types, which
       # Next generates into .next/types. A fresh checkout has no .next folder,
@@ -44,6 +52,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/setup
       - run: pnpm test
 
@@ -57,6 +67,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/setup
       - run: pnpm openapi:gen
       - run: pnpm postman:gen
@@ -81,6 +93,8 @@ jobs:
       NEXT_TELEMETRY_DISABLED: 1
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/setup
       # The database, Neon Auth and API keys are read at request time, not build time, so the
       # build needs no secrets. If a future change makes it need one, this

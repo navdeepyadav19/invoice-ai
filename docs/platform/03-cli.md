@@ -1,7 +1,9 @@
 # 03 · Command-line interface (`invoice-ai`)
 
 > **Depends on:** [02-sdk.md](02-sdk.md) for all API calls, and [01-api.md](01-api.md) for API keys and OAuth.
-> **Built in parallel with:** [04-mcp.md](04-mcp.md). The CLI also ships the local MCP server (`invoice-ai mcp`).
+> **Built in parallel with:** [04-mcp.md](04-mcp.md). The plan has the CLI also ship the local MCP server (`invoice-ai mcp`).
+>
+> **Status (Oct 2026): built, and moved out of this repo.** The CLI is `@horizonpay/invoice-ai-cli` (binary `invoice-ai`) in [navdeepyadav19/invoice-ai-sdk](https://github.com/navdeepyadav19/invoice-ai-sdk) (`packages/cli`), on top of the TypeScript SDK; npm publishing is pending. What shipped follows the Stripe-shaped API: command groups `customers`, `products`, `prices`, `invoices`, `invoice-items`, `webhooks`, plus `api`, `open`, `docs` and `completion`; invoices are `finalize` / `send` / `pay` / `void`; amounts are minor units of the invoice currency. `invoice-ai mcp` was **not** built (see 04). The server half of `login` lives here (`app/api/cli/`, `lib/cli-auth/`). The full command reference is generated into `api-docs/cli/commands.mdx` and synced daily by `.github/workflows/sync-cli-docs.yml`. Sections 3–7 are the original plan; the GST-era command and preview examples are kept as written.
 
 ## 1. What this layer is, and what students learn
 
@@ -21,7 +23,7 @@ Students leave this module understanding:
 - **There is no CLI.** The closest things are the `pnpm` scripts in `package.json` (`dev`, `build`, `test`), which are for developers of the app, not users of the product.
 - **Existing CLIs to learn from:**
   - **Supabase CLI:** `supabase login` stores a token.
-  - **Vercel CLI:** used in this repo's CD pipeline (`.github/actions/vercel-deploy/action.yml`) with a token from an environment variable, the same "env var beats stored login" precedence planned below.
+  - **Vercel CLI:** `vercel login` stores a token, but `VERCEL_TOKEN` in the environment wins in CI, the same "env var beats stored login" precedence planned below.
 - **The server half of `invoice-ai login` is built:** `POST /api/cli/device`, `POST /api/cli/token`, `DELETE /api/cli/session` (`app/api/cli/`), the browser consent page `app/(app)/cli/authorize/page.tsx`, the logic in `lib/cli-auth/`, and the `cli_device_codes` table in `db/migrations/0013_cli_device_auth.sql`.
 - **The SDK from 02 does all HTTP work.** The CLI adds no fetch calls of its own.
 
@@ -107,7 +109,7 @@ invoice-ai login
 
 Checked in this order; the first one found wins:
 
-1. **`INVOICE_AI_API_KEY` environment variable.** For CI and scripts, and always wins, like `VERCEL_TOKEN` in our pipeline.
+1. **`INVOICE_AI_API_KEY` environment variable.** For CI and scripts, and always wins, like `VERCEL_TOKEN` does for the Vercel CLI.
 2. **OS keychain** (macOS Keychain, Windows Credential Manager, libsecret) via `@napi-rs/keyring`, under service `invoice-ai`, account `<profile>`.
 3. **Fallback file** `~/.config/invoice-ai/credentials.json` with permissions `0600`. Used only when no keychain is available (e.g. a headless Linux box), with a warning printed.
 
@@ -162,7 +164,7 @@ Proceed? [y/N]
 - **The consent page shows the device name** the CLI reported, so a user who didn't run `login` can see that and deny.
 - **Tokens are stored in the OS keychain.** The file fallback is `0600` and warns.
 - **`--debug` output redacts** `Authorization` headers and tokens.
-- **Least privilege:** the consent page pre-ticks every scope except admin-grade ones (`CLI_DEFAULT_SCOPES`; today there are none), and the user can untick any of them, e.g. leave only `*:read` for a reporting laptop.
+- **Least privilege:** the consent page pre-ticks every scope except admin-grade ones (`CLI_DEFAULT_SCOPES` in `lib/cli-auth/scopes.ts`; today there are none), and the user can untick any of them, e.g. leave only `*:read` for a reporting laptop.
 - **Destructive commands** require confirmation or explicit `--yes`, and the CLI offers no bulk "cancel all" command.
 
 ## 6. Open decisions

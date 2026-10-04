@@ -76,7 +76,7 @@ Moving right buys flexibility but costs predictability, cost, latency and testab
 | Use plain code or a workflow when… | Use an agent when… |
 |---|---|
 | The steps are known and fixed ("every 7 days send reminder #2") | The next step depends on messy input ("customer replied: 'paid half, rest next week?'") |
-| Correctness is mathematical (GST totals) | Judgment is needed (tone, whether to escalate) |
+| Correctness is mathematical (tax totals) | Judgment is needed (tone, whether to escalate) |
 | Mistakes are costly and rules are clear | The task varies too much to write rules for |
 
 **In Invoice-AI.**
@@ -163,7 +163,7 @@ const res = await overdueAgent.generate('Who owes me the most?', { maxSteps: 8 }
 
 ## 3. Tools: the agent's hands
 
-**Analogy.** A new employee reads the job's tool manual. If the manual says "handles invoices", they'll guess. If it says "creates a DRAFT; issuing is a separate, irreversible step", they'll do it right.
+**Analogy.** A new employee reads the job's tool manual. If the manual says "handles invoices", they'll guess. If it says "creates a DRAFT; finalizing is a separate, irreversible step", they'll do it right.
 
 **What it is.** A tool is a **name + description + input schema + output schema + execute function**. The model only ever sees the first four, so **tool design is prompt design**.
 
@@ -176,18 +176,18 @@ import { z } from 'zod'
 export const createInvoiceDraft = createTool({
   id: 'create-invoice-draft',
   description: [
-    'Create a DRAFT GST invoice. Drafts have no invoice number and can be edited.',
-    'rate is the PRE-TAX price per unit in rupees. If the user gave a tax-inclusive amount or it is unclear, ask first.',
-    'gst_rate must be one of 0, 5, 12, 18, 28. Never guess it.',
+    'Create a DRAFT invoice. Drafts have no invoice number and can be edited.',
+    'unit_amount is the PRE-TAX price per unit in minor units of the currency (cents). If the user gave a tax-inclusive amount or it is unclear, ask first.',
+    'tax_rate is a percentage from 0 to 100. Never guess it; ask if the user did not say.',
   ].join('\n'),
   inputSchema: z.object({
-    customer_id: z.string().uuid(),
+    customer: z.string().startsWith('cus_'),
     due_date: z.string().date().optional(),
     items: z.array(z.object({
       description: z.string().min(1),
       quantity: z.number().positive(),
-      rate_rupees: z.number().nonnegative(),
-      gst_rate: z.union([z.literal(0), z.literal(5), z.literal(12), z.literal(18), z.literal(28)]),
+      unit_amount: z.number().int().nonnegative(),
+      tax_rate: z.number().min(0).max(100),
     })).min(1),
   }),
   outputSchema: z.object({ invoice_id: z.string(), total_label: z.string(), tax_note: z.string() }),
@@ -207,17 +207,17 @@ export const createInvoiceDraft = createTool({
 |---|---|
 | **Verb-noun names:** `find_customers`, `create_invoice_draft` | The model picks tools by name first |
 | **Descriptions state rules and when to ask** | Vague tools get guessed at |
-| **Strict schemas** (enums, min/max, formats) | The model can't invent a 17% GST rate if the schema forbids it |
-| **Units the model handles well** (rupees in, paise inside) | Models are bad at paise arithmetic, and `lib/money.ts` is good at it |
+| **Strict schemas** (enums, min/max, formats) | The model can't send a 170% tax rate or a non-`cus_` customer id if the schema forbids it |
+| **Units are explicit** (integer minor units, like the API) | Models are bad at money arithmetic, and `lib/money.ts` is good at it |
 | **Small outputs** (summaries, ids, labels) | Every token returned is context the model must carry |
-| **Actionable errors:** "Invoice already issued as INV/26-27/0042; use get_invoice" | The model can recover instead of retrying blindly |
+| **Actionable errors:** "Invoice already finalized as INV-0042; use get_invoice" | The model can recover instead of retrying blindly |
 | **Idempotency keys on writes** | Agents retry. See [../platform/01-api.md §3.6](../platform/01-api.md) |
-| **Call the SDK/API, never the database** | Scopes, rate limits, audit and GST rules are enforced once, in the platform |
+| **Call the SDK/API, never the database** | Scopes, rate limits, audit and tax rules are enforced once, in the platform |
 | **No bulk or destructive-by-default tools** | A tool the model doesn't have is a mistake it can't make |
 
 **Tool sources.**
-1. **Your own tools** wrapping `@invoice-ai/sdk` ([../platform/02-sdk.md](../platform/02-sdk.md)).
-2. **MCP servers:** Mastra and the AI SDK can load tools from MCP. Our own MCP server ([../platform/04-mcp.md](../platform/04-mcp.md)) exposes the same tools to Claude Desktop.
+1. **Your own tools** wrapping `@invoice-ai/sdk` ([../platform/02-sdk.md](../platform/02-sdk.md); the SDK lives in the [invoice-ai-sdk](https://github.com/navdeepyadav19/invoice-ai-sdk) repo).
+2. **MCP servers:** Mastra and the AI SDK can load tools from MCP. Our own MCP server ([../platform/04-mcp.md](../platform/04-mcp.md), planned, not built) would expose the same tools to Claude Desktop.
 3. **Provider tools** (web search, code execution), which run on the model provider's side.
 
 **Show the students.** Replace a good description with "handles invoices" and run the same eval prompt. The agent picks the wrong tool. Put the description back and it's right again.
@@ -225,7 +225,7 @@ export const createInvoiceDraft = createTool({
 **Common mistakes.**
 - A tool per database table.
 - Returning whole rows.
-- Letting the model compute totals, which should come from `lib/gst.ts#computeInvoice` behind the API.
+- Letting the model compute totals, which should come from `lib/tax.ts#computeInvoice` behind the API.
 
 ---
 
@@ -297,13 +297,13 @@ sequenceDiagram
     T-->>M: 1 match
     M-->>UI: stream: text + tool-call part + tool-result part
     M->>T: create_invoice_draft (tool part streamed as a card)
-    M-->>UI: "Draft ready: ₹25,000 + 18% GST = ₹29,500. Issue it?"
+    M-->>UI: "Draft ready: $25,000 + 10% tax = $27,500. Finalize it?"
 ```
 
 - **Server:** `@mastra/ai-sdk` `handleChatStream({ mastra, agentId, version: 'v7', params })` returns a stream wrapped by `createUIMessageStreamResponse`.
-- **Client:** `useChat` from `@ai-sdk/react` renders **message parts**: text, tool calls and tool results. Tool parts become **cards** (a customer card, or an invoice card with the GST split). This is "generative UI".
-- **Clarifying questions are a feature.** "Is ₹25,000 before or after GST?" beats a wrong invoice.
-- **Confirmation cards** for irreversible steps (issue, send) come from **tool approvals** ([§10](#10-human-in-the-loop)).
+- **Client:** `useChat` from `@ai-sdk/react` renders **message parts**: text, tool calls and tool results. Tool parts become **cards** (a customer card, or an invoice card with the tax line and total). This is "generative UI".
+- **Clarifying questions are a feature.** "Is $25,000 before or after tax?" beats a wrong invoice.
+- **Confirmation cards** for irreversible steps (finalize, send) come from **tool approvals** ([§10](#10-human-in-the-loop)).
 
 **In Invoice-AI.** `components/invoice/ai-panel.tsx` already shows the principle: the AI proposes, a **summary card** shows totals computed by real code (`components/invoice/ai-summary.ts` → `computeInvoice`), and the user clicks **"Fill this in"**. The Invoice Assistant generalises this to many tools.
 
@@ -327,10 +327,10 @@ sequenceDiagram
 
 | Kind | Lives in | Example in Invoice-AI | Mastra feature |
 |---|---|---|---|
-| **Instructions** | The agent definition | Tone, policies, "never guess GST rate" | `instructions` |
+| **Instructions** | The agent definition | Tone, policies, "never guess a tax rate" | `instructions` |
 | **Conversation history** | A thread | This chat's last N messages | `Memory` with `lastMessages` |
 | **Working memory** | Per resource (user/customer) | "Acme pays ~10 days late; prefers email; contact: accounts@" | `workingMemory` (template) |
-| **Retrieved knowledge** | Tools or vector search | Payment history (SQL tool), HSN/SAC code lookup | Tools; `semanticRecall` / `PgVector` |
+| **Retrieved knowledge** | Tools or vector search | Payment history (SQL tool), product/price lookup | Tools; `semanticRecall` / `PgVector` |
 
 ```ts
 // shape only
@@ -507,7 +507,7 @@ sequenceDiagram
 |---|---|---|
 | **Read** | List overdue, get invoice, payment history | Auto |
 | **Draft** | Create draft invoice, draft a reminder | Auto |
-| **Send** | Issue invoice, send email/WhatsApp | **Approval** (can be relaxed per policy for low amounts or friendly reminders) |
+| **Send** | Finalize invoice, send email/WhatsApp | **Approval** (can be relaxed per policy for low amounts or friendly reminders) |
 | **Call** | Start a voice call | **Approval** |
 | **Irreversible / sensitive** | Cancel invoice, write-off, dispute resolution | **Human only** (no tool) |
 
@@ -549,7 +549,7 @@ flowchart LR
 ```
 
 - **Channel interface** in code: `send(to, message, metadata) → providerMessageId` and `parseInbound(request) → { from, text, providerMessageId }`. A **Simulator** implementation lets students run everything with no accounts.
-- **Store provider message ids.** Today `lib/email.tsx#sendInvoiceEmail` returns the Resend id and `lib/actions/send.ts` discards it. Agents must keep it to match replies and delivery events.
+- **Store provider message ids.** Today `lib/email.tsx#sendInvoiceEmail` returns the Resend id and `lib/services/invoices.ts#send` discards it. Agents must keep it to match replies and delivery events.
 - **Always verify webhook signatures**, and exempt webhook routes from the login redirect.
 
 **How it works: voice.**
@@ -695,7 +695,7 @@ export const mastra = new Mastra({
 | Tool error rate by tool | Broken integration vs broken prompt |
 | Steps per run | Rising steps mean the agent is confused |
 | Approval rate and edit rate | High edit rate means the drafts are bad |
-| Outcome metrics: recovered ₹, days-to-pay, promise-kept rate | Is the agent actually useful? |
+| Outcome metrics: amount recovered, days-to-pay, promise-kept rate | Is the agent actually useful? |
 | Eval scores over time | Detect drift after model or prompt changes |
 
 **Debugging a bad run (teach this as a drill):**
@@ -823,7 +823,7 @@ One line on **when to pick** each. The course default is **bold**.
 | Tool | Pick when |
 |---|---|
 | **Neon Postgres (`@mastra/pg`)** | Threads, working memory, workflow snapshots, traces in one DB |
-| pgvector (`PgVector`) | Semantic recall over transcripts and knowledge (HSN/SAC, policies) |
+| pgvector (`PgVector`) | Semantic recall over transcripts and knowledge (policies, past disputes) |
 | Upstash Redis | Rate limits, short-lived state, resumable streams |
 
 ### Voice

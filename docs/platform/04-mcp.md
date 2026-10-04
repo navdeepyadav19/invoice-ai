@@ -2,6 +2,8 @@
 
 > **Depends on:** [02-sdk.md](02-sdk.md) for all calls, and [01-api.md](01-api.md) for API keys and scopes. The remote server's auth is an open decision (3.1); one option needs phase A4 (OAuth).
 > **Local version ships with:** [03-cli.md](03-cli.md) (`invoice-ai mcp`).
+>
+> **Status (Oct 2026): not built.** There is no `app/api/mcp` route and no `invoice-ai mcp` command. The tool designs below were written against the GST-era plan in 01; when this is built, map them onto the API that shipped: `customers` (not `clients`), `invoices.finalize` / `send` / `pay` / `void` with scope `invoices:finalize` (not `issue` / `cancel` / `invoices:issue`), amounts in minor units of the invoice currency, and a free-form per-line `tax_rate` computed by `lib/tax.ts` instead of a GST rate list and CGST/SGST/IGST split. The SDKs and CLI now live in [navdeepyadav19/invoice-ai-sdk](https://github.com/navdeepyadav19/invoice-ai-sdk), so a shared `mcp-tools` package belongs there.
 
 ## 1. What this layer is, and what students learn
 
@@ -60,7 +62,7 @@ packages/mcp-tools/ (new)
 | **(b) Our own OAuth 2.1 authorization server** | Self-host one (e.g. Better Auth's MCP/OIDC-provider plugin, or a small AS of our own) that issues tokens mapped to an owner + scopes, with dynamic client registration and an `/oauth/consent` page. `/.well-known/oauth-protected-resource` names it. | A second auth system to run and secure, plus `oauth_grants`, revocation and a connected-apps page (01, A4) |
 | **(c) Reuse the CLI device flow** | For clients that can't do (a): approve on `/cli/authorize` and receive a scoped API key (03, 3.3), which then works as in (a). | Not part of the MCP spec, so it's a setup step outside the client, not a connection flow inside it |
 
-**Recommendation:** start with **(a)**. It reuses `authenticate()`, scopes, rate limits and the audit log with no new code, and `invoice-ai mcp` (local) already works the same way. Build (b) only when a client we care about can't connect any other way.
+**Recommendation:** start with **(a)**. It reuses `authenticate()`, scopes, rate limits and the audit log with no new code, and `invoice-ai mcp` (local) would work the same way. Build (b) only when a client we care about can't connect any other way.
 
 ### 3.2 The tools
 
@@ -144,7 +146,7 @@ Step 2: issue_invoice({ invoice_id, confirmation_token })
 | 5 | `send_invoice({ invoice_id })` | Preview (recipient `accounts@acme.in`) + token | "Email it to accounts@acme.in?" |
 | 6 | *(user: "yes")* `send_invoice({ invoice_id, confirmation_token })` | Emails PDF, `invoice.emailed` webhook fires | "Sent. Public link: https://…/i/…" |
 
-If the business is registered in another state from Acme, step 2's totals show a single **IGST 18%** line instead of CGST + SGST. The model doesn't compute tax; `lib/gst.ts#computeInvoice` does, behind the API.
+If the business is registered in another state from Acme, step 2's totals show a single **IGST 18%** line instead of CGST + SGST. The model doesn't compute tax; `lib/gst.ts#computeInvoice` (now `lib/tax.ts`) does, behind the API.
 
 ### 3.5 Tool output design
 
@@ -193,11 +195,11 @@ If the business is registered in another state from Acme, step 2's totals show a
 - **Elicitation:** add server-initiated confirmation through MCP elicitation once major AI apps support it widely, possibly replacing the two-step token for those apps.
 - **Composite tool:** keep issue and send as separate steps (recommended for v1, since two confirmations for two irreversible effects), or add `issue_and_send_invoice` later.
 - **Resend semantics:** the idempotency key `send:{id}:{to}` makes "send it again" within 24h a replay. Decide whether an explicit `resend: true` should create a new key.
-- **Remote hosting of the tool package:** `packages/mcp-tools` imported by the Next.js app requires the workspace (see the branch policy in [README.md](README.md)).
+- **Remote hosting of the tool package:** the SDKs moved to invoice-ai-sdk, so the Next.js app would consume `mcp-tools` as a published package (or keep the remote server's tool definitions in this repo).
 - **Verify at build time:** the MCP SDK v2 and `mcp-handler` APIs at the time of building, and Claude's remote-connector requirements.
 
 > ### How the MCP story uses this layer
-> This is the layer the user actually talks to. One sentence ("invoice Acme ₹25,000 and email it") becomes **six scoped, previewed, idempotent calls**: find client, create draft, issue (preview, confirm), send (preview, confirm). The GST math comes from `lib/gst.ts` behind the API, the number from the atomic `issue_invoice` RPC, and the email from `lib/email.tsx`. All of it is the same code the web UI uses.
+> This is the layer the user actually talks to. One sentence ("invoice Acme ₹25,000 and email it") becomes **six scoped, previewed, idempotent calls**: find client, create draft, issue (preview, confirm), send (preview, confirm). The tax math comes from `lib/tax.ts` behind the API, the number from the atomic `issue_invoice` RPC, and the email from `lib/email.tsx`. All of it is the same code the web UI uses.
 
 ## 7. Five-minute demo order
 

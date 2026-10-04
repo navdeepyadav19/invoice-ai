@@ -82,19 +82,23 @@ signing key could forge any user, and it no longer exists.)
 - Email verification is still the app's own: Resend email, then
   `profiles.email_verified_at`. Neon Auth's verification is off so a new
   account can start onboarding immediately.
-- Google OAuth uses our own client (GCP project `invoice-ai-e34a00`). The
+- Google OAuth uses our own OAuth client in a dedicated GCP project. The
   authorized redirect URI is `{NEON_AUTH_BASE_URL}/callback/google`.
 - There is no guest mode: Neon's managed auth has no anonymous users.
 
 ## Local development runs on the `dev` branch
 
-`.env.local` points at a Neon branch called `dev` (`br-cool-cake-b3iw0o41`),
-not at `main`. `main` is production. The branch is a copy-on-write clone, so
+> This is how the maintainer's setup works. Contributors use a Neon project of
+> their own, set up the same way: see [CONTRIBUTING.md](../CONTRIBUTING.md).
+> `<project-id>` and `<dev-endpoint>` below stand for your own values (Neon
+> console, or `neon projects list` / `neon neon-auth status --branch=dev`).
+
+`.env.local` points at a Neon branch called `dev`, not at `main`. `main` is production. The branch is a copy-on-write clone, so
 `pnpm dev`, test sign-ups and trial migrations never touch real users. Things to
 know about it:
 
 - **It has its own Neon Auth.** Each branch gets its own Neon Auth instance with
-  a separate `NEON_AUTH_BASE_URL` (`https://ep-calm-dew-b3x43xxf.neonauth…`).
+  a separate `NEON_AUTH_BASE_URL` (`https://<dev-endpoint>.neonauth…`).
   It also gets its own users and sessions, and copies main's OAuth provider,
   SMTP and trusted-domain settings.
 - **Its `NEON_AUTH_COOKIE_SECRET` is local-only.** It differs from production's,
@@ -103,11 +107,11 @@ know about it:
   the branch ones. Pull into another file (`vercel env pull .env.vercel`) and
   copy across only what you need.
 - **Reset it to production's current state** with
-  `neon branches reset dev --parent --project-id=frosty-recipe-40221070`. That
+  `neon branches reset dev --parent --project-id=<project-id>`. That
   throws away everything written to the branch.
 - **Google sign-in on localhost** needs the branch's callback added as a second
   redirect URI on the GCP client:
-  `https://ep-calm-dew-b3x43xxf.neonauth.c-4.ap-southeast-1.aws.neon.tech/neondb/auth/callback/google`
+  `{NEON_AUTH_BASE_URL of the dev branch}/callback/google`
 
 ## Migrations
 
@@ -143,7 +147,7 @@ DATABASE_URL_UNPOOLED='<main branch direct connection string>' pnpm db:migrate
 | `NEON_AUTH_BASE_URL` | Vercel ↔ Neon integration |
 | `NEON_AUTH_COOKIE_SECRET` | Set by hand per environment, 32+ chars (`openssl rand -base64 32`) |
 | `API_KEY_PEPPER`, `CRON_SECRET` | Set by hand (API keys, webhook cron) |
-| `RESEND_API_KEY`, `INVOICE_FROM_EMAIL`, `OPENAI_API_KEY`, `NEXT_PUBLIC_SITE_URL` | Unchanged |
+| `RESEND_API_KEY`, `INVOICE_FROM_EMAIL`, `OPENAI_API_KEY`, `NEXT_PUBLIC_SITE_URL` | Set by hand; same as before the move (see `.env.example`) |
 
 None of these is needed at build time. CI builds with no secrets at all.
 
