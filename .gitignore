@@ -53,3 +53,6 @@ firebase-debug.log
 # Leftovers from the Supabase-era API signing key setup. Never commit.
 .api-signing-key.json
 .env.vercel-api
+
+# Personal Claude Code permissions. Shared agent skills live in .agents/.
+.claude/settings.local.json

@@ -46,6 +46,10 @@ vercel env pull .env.local
 (`openssl rand -base64 32`) and add it to Vercel and `.env.local` yourself.
 Everything else is listed in `.env.example`.
 
+The pull gives you production's database. For day-to-day work, point
+`.env.local` at a Neon `dev` branch instead (this project already has one).
+See [Local development runs on the `dev` branch](docs/neon-overview.md#local-development-runs-on-the-dev-branch).
+
 ### 3. Run the migrations
 
 ```bash

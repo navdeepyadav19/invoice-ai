@@ -125,7 +125,7 @@ There is no token to mint and no signing key to protect. There is also no public
 
 ### 3.3 OAuth for third-party apps (built second)
 
-**Not built yet.** The original plan used Supabase Auth's built-in OAuth 2.1 server, which went away with the move to Neon. The design below still holds; what provides the authorization server is open again. Candidates: an OAuth-provider plugin of Better Auth, if Neon's managed Better Auth exposes one, or a small authorization server of our own. Either way, an access token must end in the same place an API key does: a verified user id handed to `userDb()`.
+**Not built yet.** The original plan used Supabase Auth's built-in OAuth 2.1 server, which went away with the move to Neon. The design below still holds; what provides the authorization server is open again. Neon's managed Better Auth doesn't expose one: its plugins are organization, magic link, phone number, email/password and social login, with no OAuth-provider or OIDC-provider plugin (checked with `neon neon-auth plugins list`, Oct 2026). So the candidates are a self-hosted Better Auth instance running its OIDC-provider plugin, or a small authorization server of our own. [04-mcp](04-mcp.md) weighs the same choice for the MCP server. Either way, an access token must end in the same place an API key does: a verified user id handed to `userDb()`.
 
 | Piece | What it does |
 |---|---|
@@ -141,7 +141,7 @@ There is no token to mint and no signing key to protect. There is also no public
 
 On each OAuth request, `withApi` verifies the token, then looks up the grant by (`sub`, `client_id`). A revoked grant gets `401` immediately, even if the token hasn't expired.
 
-> **Verify at build time:** whether Neon Auth (managed Better Auth) can act as an OAuth 2.1 authorization server with dynamic client registration, its consent-page APIs, and loopback redirect port rules for public clients.
+> **Verify at build time:** re-check `neon neon-auth plugins list` in case Neon has since added an OAuth-provider plugin. Otherwise, check that whichever authorization server we pick supports dynamic client registration, a consent page we control, and loopback redirect port rules for public clients.
 
 ### 3.4 Scopes
 
