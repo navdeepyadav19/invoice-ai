@@ -1,0 +1,45 @@
+# Publishes the generated Postman collection and environment to the public
+# Postman workspace behind the docs' "Run in Postman" button
+# (api-docs/postman.mdx). The button follows the collection, so replacing it
+# in place here is what keeps the button current. See lib/postman/sync.ts.
+#
+# Needs, in this repo's settings:
+#   secret   POSTMAN_API_KEY        a Postman API key that can edit the workspace
+#   variable POSTMAN_WORKSPACE_ID   the workspace's UUID (Postman → workspace → Info)
+# Without them the job reports a notice and does nothing, so forks stay green.
+name: Postman sync
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - docs/platform/postman/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: postman-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: github.repository == 'navdeepyadav19/invoice-ai'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - name: Push the collection and environment to Postman
+        env:
+          POSTMAN_API_KEY: ${{ secrets.POSTMAN_API_KEY }}
+          POSTMAN_WORKSPACE_ID: ${{ vars.POSTMAN_WORKSPACE_ID }}
+        run: |
+          if [ -z "$POSTMAN_API_KEY" ] || [ -z "$POSTMAN_WORKSPACE_ID" ]; then
+            echo "::notice::POSTMAN_API_KEY or POSTMAN_WORKSPACE_ID is not set; skipping the Postman sync."
+            exit 0
+          fi
+          pnpm postman:sync
