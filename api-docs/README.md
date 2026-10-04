@@ -67,11 +67,13 @@ this repo.
 1. In the Mintlify dashboard, install the GitHub app on
    `navdeepyadav19/invoice-ai`.
 2. In **Git settings**, choose the deployment branch (`main`), turn on the
-   **monorepo** toggle, and set the docs path to `api-docs` (no leading or
-   trailing slash).
+   **monorepo** toggle, and set the docs path to `/api-docs` (leading slash,
+   no trailing slash, per Mintlify's monorepo guide).
 3. Add the custom domain `docs.horizonpay.co` in the dashboard (or run
    `npx mint add-domain docs.horizonpay.co`), then create the DNS `CNAME`
    record the dashboard shows.
 
 After that, every push to the deployment branch that touches `api-docs/`
-triggers a new deployment.
+triggers a new deployment. The site was switched to this folder on
+2026-10-04. Before that, docs.horizonpay.co served a separately generated
+site, and its old URLs now redirect via `redirects` in `docs.json`.
