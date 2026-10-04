@@ -58,6 +58,19 @@ export async function create(
 ): Promise<WebhookEndpointRow & { secret: string }> {
   requireScope(ctx, 'webhooks:manage')
 
+  // The API hands over whatever JSON it was sent, so check the shapes before
+  // anything treats them as a string and a string[].
+  if (typeof input.url !== 'string' || input.url.length > 2048) {
+    throw new ServiceError('validation', 'url must be an https URL of at most 2048 characters.', [
+      { path: 'url', message: 'Expected an https URL.' },
+    ])
+  }
+  if (input.events !== undefined && (!Array.isArray(input.events) || input.events.some((e) => typeof e !== 'string'))) {
+    throw new ServiceError('validation', 'events must be an array of event type strings.', [
+      { path: 'events', message: `Valid types are ${WEBHOOK_EVENTS.join(', ')}.` },
+    ])
+  }
+
   // Validated here as well as by the DB constraint, because this is where we
   // can explain *why* — and because the DNS/private-range check cannot be
   // expressed as a CHECK constraint at all.

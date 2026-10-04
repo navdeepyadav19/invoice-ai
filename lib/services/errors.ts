@@ -29,6 +29,8 @@ export type ServiceErrorCode =
   | 'forbidden'
   /** Something we depend on failed: Resend, OpenAI, or another provider. */
   | 'upstream_failed'
+  /** A per-owner cap was hit (e.g. invoices emailed per hour). Carries `retryAfter`. */
+  | 'rate_limited'
 
 export interface ServiceErrorDetail {
   path: string
@@ -38,6 +40,8 @@ export interface ServiceErrorDetail {
 export class ServiceError extends Error {
   readonly code: ServiceErrorCode
   readonly details?: ServiceErrorDetail[]
+  /** Seconds until a `rate_limited` caller may try again. */
+  retryAfter?: number
 
   constructor(code: ServiceErrorCode, message: string, details?: ServiceErrorDetail[]) {
     super(message)
@@ -74,6 +78,12 @@ export function upstreamFailed(message: string): ServiceError {
   return new ServiceError('upstream_failed', message)
 }
 
+export function rateLimitedError(message: string, retryAfterSeconds: number): ServiceError {
+  const error = new ServiceError('rate_limited', message)
+  error.retryAfter = retryAfterSeconds
+  return error
+}
+
 /**
  * Run a query and turn any database failure into a ServiceError.
  *
@@ -103,6 +113,12 @@ export function toServiceError(error: unknown): ServiceError {
  * issue_invoice() and replace_invoice_items() raise bare SQLSTATEs rather than
  * messages so the mapping lives here, in one place, instead of being string-
  * matched at every call site.
+ *
+ * Only P0001 keeps the database's message, because only our own functions
+ * raise it. Everything else reaches API callers and forms as `detail`, and a
+ * driver or Postgres message can name tables, constraints, roles or the
+ * database host — so those get a fixed sentence and the original goes to the
+ * server log.
  */
 export function fromPostgres(error: { code?: string; message?: string } | null): ServiceError {
   const message = error?.message ?? 'Database error'
@@ -114,16 +130,20 @@ export function fromPostgres(error: { code?: string; message?: string } | null):
       return invalidState(message)
     // 23505 unique_violation — e.g. two invoices claiming one number.
     case '23505':
-      return new ServiceError('conflict', message)
+      return new ServiceError('conflict', 'That conflicts with an existing record.')
     // 23514 check_violation — e.g. an invoice prefix over the length limit.
     case '23514':
-      return new ServiceError('validation', message)
+      return new ServiceError('validation', 'A value is outside the allowed range.')
+    // 23503 foreign_key_violation — a reference to a row that isn't there.
+    case '23503':
+      return new ServiceError('validation', 'A referenced record does not exist.')
     // 22P02 invalid_text_representation — a malformed uuid reached a query.
     // Services check id shapes first, so this is the backstop: an id that
     // can't exist is a 404 like any other unknown id, never a 502.
     case '22P02':
       return notFound()
     default:
-      return upstreamFailed(message)
+      console.error('[db] unexpected database error', error?.code ?? '', message)
+      return upstreamFailed('A database error occurred. Try again in a moment.')
   }
 }

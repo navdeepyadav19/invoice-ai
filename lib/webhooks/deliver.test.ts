@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { isPrivateAddress, nextAttemptAt, RETRY_SCHEDULE_SECONDS } from './deliver'
+import { assertSafeUrl, deliver, isPrivateAddress, nextAttemptAt, pinnedLookup, RETRY_SCHEDULE_SECONDS } from './deliver'
 
 /**
  * A webhook URL is an arbitrary address a user gives us, which our server then
@@ -23,6 +23,16 @@ describe('SSRF guard', () => {
     ['IPv6 link-local', 'fe80::1'],
     ['IPv6 unique local', 'fd00::1'],
     ['IPv4-mapped loopback', '::ffff:127.0.0.1'],
+    ['IPv4-mapped loopback, hex form', '::ffff:7f00:1'],
+    ['IPv4-mapped metadata', '::ffff:a9fe:a9fe'],
+    ['NAT64 loopback', '64:ff9b::7f00:1'],
+    ['6to4 wrapping loopback', '2002:7f00:1::1'],
+    ['Teredo', '2001:0:4136:e378:8000:63bf:3fff:fdd2'],
+    ['IPv6 link-local beyond fe80', 'febf::1'],
+    ['IPv6 site-local', 'fec0::1'],
+    ['IPv6 unspecified', '::'],
+    ['benchmarking range', '198.18.0.1'],
+    ['broadcast', '255.255.255.255'],
     ['not an address at all', 'nonsense'],
   ])('blocks %s', (_label, address) => {
     expect(isPrivateAddress(address)).toBe(true)
@@ -45,6 +55,44 @@ describe('SSRF guard', () => {
    */
   it('blocks the cloud metadata endpoint specifically', () => {
     expect(isPrivateAddress('169.254.169.254')).toBe(true)
+  })
+})
+
+describe('assertSafeUrl', () => {
+  it.each([
+    ['plain http', 'http://example.com/hook'],
+    ['an IPv6 loopback literal', 'https://[::1]/hook'],
+    ['an IPv4-mapped literal', 'https://[::ffff:127.0.0.1]/hook'],
+    ['the metadata endpoint', 'https://169.254.169.254/latest/meta-data/'],
+    ['a decimal-encoded loopback', 'https://2130706433/hook'],
+    ['a name that resolves to loopback', 'https://localhost/hook'],
+    ['credentials in the URL', 'https://user:pass@93.184.216.34/hook'],
+    ['garbage', 'not a url'],
+  ])('refuses %s', async (_label, url) => {
+    expect((await assertSafeUrl(url)).ok).toBe(false)
+  })
+
+  it('accepts a public IP literal without a DNS round trip', async () => {
+    expect(await assertSafeUrl('https://93.184.216.34/hook')).toEqual({ ok: true })
+  })
+})
+
+/**
+ * The check at connect time is what defeats DNS rebinding: whatever the name
+ * resolves to when the socket opens is checked again, not trusted from earlier.
+ */
+describe('pinnedLookup', () => {
+  it('refuses a name that resolves to a private address', async () => {
+    const error = await new Promise<Error | null>((resolve) =>
+      pinnedLookup('localhost', {}, (err) => resolve(err)),
+    )
+    expect(error?.message).toMatch(/public address/)
+  })
+
+  it('never reaches a loopback listener, even via deliver()', async () => {
+    const result = await deliver('https://localhost:1/hook', 'whsec_test', 'msg_1', { hello: 'world' })
+    expect(result.ok).toBe(false)
+    expect(result.error).toMatch(/public address/)
   })
 })
 

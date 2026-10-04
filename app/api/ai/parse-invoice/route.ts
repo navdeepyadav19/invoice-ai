@@ -2,12 +2,20 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { Output, generateText } from 'ai'
 import { openai } from '@ai-sdk/openai'
 
+import { checkRateLimit } from '@/lib/api/rate-limit'
 import { requireUser } from '@/lib/queries'
 import { AI_INVOICE_SYSTEM_PROMPT, aiInvoiceSchema } from '@/lib/ai/invoice-schema'
 import { normaliseDraft } from '@/lib/ai/normalise'
 
 export const runtime = 'nodejs'
 export const maxDuration = 30
+
+/**
+ * Every call is an OpenAI bill, and signing up is free — so a single account
+ * scripting this route is a cost attack. Per user, per instance (see
+ * lib/api/rate-limit.ts); generous for a person, useless for a loop.
+ */
+const RATE_LIMIT = { limit: 60, windowSeconds: 3600 }
 
 /**
  * Parse a natural-language instruction into invoice fields.
@@ -17,7 +25,15 @@ export const maxDuration = 30
  * misheard amount can never commit itself.
  */
 export async function POST(request: NextRequest) {
-  await requireUser()
+  const user = await requireUser()
+
+  const limit = await checkRateLimit(user.id, 'ai-parse', RATE_LIMIT)
+  if (!limit.ok) {
+    return NextResponse.json(
+      { error: 'You’ve hit the hourly limit for AI requests. Try again later.' },
+      { status: 429, headers: { 'retry-after': String(limit.retryAfter) } },
+    )
+  }
 
   if (!process.env.OPENAI_API_KEY) {
     return NextResponse.json(
@@ -26,8 +42,8 @@ export async function POST(request: NextRequest) {
     )
   }
 
-  const body = (await request.json().catch(() => null)) as { text?: string } | null
-  const instruction = (body?.text ?? '').trim()
+  const body = (await request.json().catch(() => null)) as { text?: unknown } | null
+  const instruction = typeof body?.text === 'string' ? body.text.trim() : ''
 
   if (!instruction) {
     return NextResponse.json({ error: 'Say or type what you want to bill for.' }, { status: 400 })

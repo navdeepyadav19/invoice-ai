@@ -1,7 +1,7 @@
 import { requireScope, type AuthContext } from '@/lib/auth/context'
 import type { Db } from '@/lib/db'
 import { issueInvoice, replaceInvoiceItems } from '@/lib/db/rpc'
-import { invalidState, notFound, q, ServiceError, upstreamFailed } from '@/lib/services/errors'
+import { invalidState, notFound, q, rateLimitedError, ServiceError, upstreamFailed } from '@/lib/services/errors'
 import { afterPosition, clampLimit, parseCursor, toPage, type Page } from '@/lib/services/pagination'
 import * as businesses from '@/lib/services/business'
 import { get as getClient, rowToInput as clientRowToInput } from '@/lib/services/clients'
@@ -16,6 +16,7 @@ import { viewFromRows } from '@/lib/invoice-load'
 import { deriveStatus, todayUtc } from '@/lib/invoice-status'
 import { renderInvoicePdf, pdfFilename } from '@/lib/pdf'
 import { sendInvoiceEmail } from '@/lib/email'
+import { checkRateLimit } from '@/lib/api/rate-limit'
 import { publicInvoiceUrl } from '@/lib/urls'
 import type { ClientRow, InvoiceEventRow, InvoiceItemRow, InvoiceRow, InvoiceStatus } from '@/lib/database.types'
 
@@ -300,6 +301,38 @@ export async function send(
 ): Promise<{ emailed: boolean; emailedTo: string; publicUrl: string; invoiceNumber: string }> {
   requireScope(ctx, 'invoices:send')
 
+  // The recipient arrives straight from API JSON. Anything but a plausible
+  // address is refused here, before a number is spent or a PDF rendered.
+  if (options.to != null && options.to !== '' && (typeof options.to !== 'string' || !EMAIL.test(options.to))) {
+    throw new ServiceError('validation', 'to must be an email address.', [
+      { path: 'to', message: 'Expected a single email address.' },
+    ])
+  }
+
+  // Sign-up is open and Neon Auth's own verification is off, so an unverified
+  // account is just a typed-in address. Letting it email strangers from our
+  // domain is a spam and phishing relay. Checked before the rate limit and
+  // before finalizing, so a refused send spends neither a slot nor a number.
+  const profile = await q(
+    ctx.db.selectFrom('profiles').select('email_verified_at').where('id', '=', ctx.userId).executeTakeFirst(),
+  )
+  if (!profile?.email_verified_at) {
+    throw invalidState(
+      'Verify your email address before emailing invoices: use the link we sent you, or resend it from the dashboard.',
+    )
+  }
+
+  // Every send lands in a stranger's inbox from our domain, so it is capped per
+  // owner whichever way it arrives — the API's per-key bucket alone leaves the
+  // dashboard (and a stack of keys) unlimited.
+  const limit = await checkRateLimit(ctx.userId, 'send-owner', SENDS_PER_OWNER)
+  if (!limit.ok) {
+    throw rateLimitedError(
+      `Too many invoices emailed in the last hour. Try again in ${Math.ceil(limit.retryAfter / 60)} min.`,
+      limit.retryAfter,
+    )
+  }
+
   const existing = await load(ctx, id)
 
   if (existing.invoice.status === 'void') {
@@ -343,6 +376,12 @@ export async function send(
   return { emailed: true, emailedTo: recipient, publicUrl, invoiceNumber }
 }
 
+/** Deliberately loose: Resend does the real validation; this keeps out junk. */
+const EMAIL = /^[^\s@,;<>]{1,64}@[^\s@,;<>]{1,189}\.[^\s@,;<>]{2,63}$/
+
+/** Shared by every credential an owner holds, dashboard included. */
+const SENDS_PER_OWNER = { limit: 50, windowSeconds: 3600 }
+
 /**
  * `invoices:send` implies issuing, because you cannot email an unnumbered
  * invoice. The scope check is skipped here on purpose — requiring both
@@ -363,6 +402,17 @@ export async function pay(
   options: { paidOn?: string; reference?: string } = {},
 ): Promise<InvoiceRow> {
   requireScope(ctx, 'payments:write')
+
+  if (options.paidOn != null && (typeof options.paidOn !== 'string' || Number.isNaN(Date.parse(options.paidOn)))) {
+    throw new ServiceError('validation', 'paid_on must be an ISO 8601 date.', [
+      { path: 'paid_on', message: 'Expected a date like 2026-10-04.' },
+    ])
+  }
+  if (options.reference != null && (typeof options.reference !== 'string' || options.reference.length > 200)) {
+    throw new ServiceError('validation', 'reference must be a string of at most 200 characters.', [
+      { path: 'reference', message: 'At most 200 characters.' },
+    ])
+  }
 
   const { invoice: openInvoice } = await load(ctx, id)
 
@@ -402,7 +452,12 @@ export async function pay(
 export async function voidInvoice(ctx: AuthContext, id: string, options: { reason: string }): Promise<InvoiceRow> {
   requireScope(ctx, 'invoices:finalize')
 
-  const reason = options.reason?.trim()
+  const reason = typeof options.reason === 'string' ? options.reason.trim() : ''
+  if (reason.length > 500) {
+    throw new ServiceError('validation', 'The void reason must be at most 500 characters.', [
+      { path: 'reason', message: 'At most 500 characters.' },
+    ])
+  }
   if (!reason) {
     throw new ServiceError('validation', 'A void reason is required.', [
       { path: 'reason', message: 'Say why this invoice is void.' },

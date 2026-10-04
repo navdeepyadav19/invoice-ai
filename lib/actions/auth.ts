@@ -17,6 +17,7 @@ import {
 import { siteUrl } from '@/lib/env'
 import { echoValues, withValues, type AuthFormState } from '@/lib/form-state'
 import { ensureProfile, getCurrentUser, type AppUser } from '@/lib/queries'
+import { safeNextPath } from '@/lib/safe-redirect'
 
 const credentialsSchema = z.object({
   email: z.email('Enter a valid email address'),
@@ -27,10 +28,9 @@ function firstIssue(error: z.ZodError): string {
   return error.issues[0]?.message ?? 'Check the details you entered'
 }
 
-/** Only ever a path on this origin: '//evil.com' also starts with '/'. */
+/** Only ever a path on this origin — see lib/safe-redirect.ts for the tricks. */
 function safeNext(raw: FormDataEntryValue | null, fallback: string): string {
-  const next = typeof raw === 'string' ? raw : ''
-  return next.startsWith('/') && !next.startsWith('//') ? next : fallback
+  return safeNextPath(raw, fallback)
 }
 
 /**

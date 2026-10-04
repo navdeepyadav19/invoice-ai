@@ -260,3 +260,30 @@ describe('invoice events are paginated', () => {
     expect(page.next_cursor).not.toBeNull()
   })
 })
+
+describe('emailing an invoice needs a verified account email', () => {
+  it('refuses an unverified account before touching the invoice', async () => {
+    const { ctx, queries } = fakeContext([[{ email_verified_at: null }]])
+
+    const error = await rejection(invoices.send(ctx, UUID))
+
+    expect(error.code).toBe('invalid_state')
+    expect(error.message).toMatch(/verify your email/i)
+    // Only the profile was read: no invoice load, no issue_invoice(), no number spent.
+    expect(queries).toHaveLength(1)
+    expect(queries[0].sql).toContain('from "profiles"')
+    expect(param(queries[0], '"id" =')).toBe('user-1')
+  })
+
+  it('lets a verified account through to the invoice', async () => {
+    const { ctx, queries } = fakeContext((query) =>
+      from('profiles')(query) ? [{ email_verified_at: '2026-10-04T09:00:00.000Z' }] : [],
+    )
+
+    // No invoice rows come back, so the send stops at "not found" — past the gate.
+    const error = await rejection(invoices.send(ctx, UUID))
+
+    expect(error.code).toBe('not_found')
+    expect(queries.some((query) => from('invoices')(query))).toBe(true)
+  })
+})

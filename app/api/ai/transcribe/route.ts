@@ -2,10 +2,18 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { experimental_transcribe as transcribe } from 'ai'
 import { openai } from '@ai-sdk/openai'
 
+import { checkRateLimit } from '@/lib/api/rate-limit'
 import { requireUser } from '@/lib/queries'
 
 export const runtime = 'nodejs'
 export const maxDuration = 30
+
+/**
+ * Every call is an OpenAI bill, and signing up is free — so a single account
+ * scripting this route is a cost attack. Per user, per instance (see
+ * lib/api/rate-limit.ts); generous for a person, useless for a loop.
+ */
+const RATE_LIMIT = { limit: 30, windowSeconds: 3600 }
 
 /** A minute of Opus is well under this; the cap is to stop someone posting a film. */
 const MAX_AUDIO_BYTES = 10 * 1024 * 1024
@@ -19,7 +27,15 @@ const MAX_AUDIO_BYTES = 10 * 1024 * 1024
  * nobody catches by reading a form.
  */
 export async function POST(request: NextRequest) {
-  await requireUser()
+  const user = await requireUser()
+
+  const limit = await checkRateLimit(user.id, 'ai-transcribe', RATE_LIMIT)
+  if (!limit.ok) {
+    return NextResponse.json(
+      { error: 'You’ve hit the hourly limit for AI requests. Try again later.' },
+      { status: 429, headers: { 'retry-after': String(limit.retryAfter) } },
+    )
+  }
 
   if (!process.env.OPENAI_API_KEY) {
     return NextResponse.json(

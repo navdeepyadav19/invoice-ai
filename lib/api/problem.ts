@@ -47,6 +47,7 @@ const STATUS_BY_CODE: Record<ServiceErrorCode, number> = {
   // 502, not 500: Resend or OpenAI failing is not our bug, and the distinction
   // tells an integrator whether retrying is worth anything.
   upstream_failed: 502,
+  rate_limited: 429,
 }
 
 const TITLE_BY_CODE: Record<ServiceErrorCode, string> = {
@@ -57,6 +58,7 @@ const TITLE_BY_CODE: Record<ServiceErrorCode, string> = {
   idempotency_mismatch: 'Idempotency-Key reused',
   forbidden: 'Insufficient scope',
   upstream_failed: 'Upstream service failed',
+  rate_limited: 'Too many requests',
 }
 
 export function problem(
@@ -104,7 +106,11 @@ export function problemFromError(cause: unknown, requestId: string): Response {
       },
       // A 403 from a missing scope should tell the caller how to authenticate
       // correctly, not just that they failed.
-      cause.code === 'forbidden' ? { 'www-authenticate': 'Bearer' } : {},
+      cause.code === 'forbidden'
+        ? { 'www-authenticate': 'Bearer' }
+        : cause.retryAfter != null
+          ? { 'retry-after': String(cause.retryAfter) }
+          : {},
     )
   }
 

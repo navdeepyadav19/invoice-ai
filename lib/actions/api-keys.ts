@@ -41,6 +41,16 @@ export async function createApiKeyAction(formData: FormData): Promise<CreateKeyS
     return withValues({ error: 'Give the key a name.', fieldErrors: { name: 'Required' } }, formData)
   }
 
+  if (name.length > 100) {
+    return withValues({ error: 'Keep the name under 100 characters.', fieldErrors: { name: 'Too long' } }, formData)
+  }
+
+  // Ten years is "never" for any practical purpose; anything beyond it (or not
+  // a number at all) would only make new Date() throw.
+  if (!Number.isFinite(expiresInDays) || expiresInDays < 0 || expiresInDays > 3650) {
+    return withValues({ error: 'Pick a valid expiry.', fieldErrors: { expires_in_days: 'Invalid' } }, formData)
+  }
+
   if (!scopes.length) {
     return withValues(
       {
@@ -104,14 +114,25 @@ export async function revokeApiKeyAction(id: string): Promise<{ error?: string }
   return {}
 }
 
-export async function listApiKeys(): Promise<ApiKeyRow[]> {
+/**
+ * Everything but the secret hash. This feeds a client component, so whatever
+ * is selected here is serialised into the page; the hash has no reason to
+ * leave the server.
+ */
+export type ApiKeyListRow = Omit<ApiKeyRow, 'secret_hash'>
+
+export async function listApiKeys(): Promise<ApiKeyListRow[]> {
   const ctx = await contextFromSession()
 
-  const rows = await ctx.db.selectFrom('api_keys').selectAll().orderBy('created_at', 'desc').execute()
+  const rows = await ctx.db
+    .selectFrom('api_keys')
+    .select(['id', 'owner_id', 'name', 'prefix', 'scopes', 'created_at', 'last_used_at', 'expires_at', 'revoked_at'])
+    .orderBy('created_at', 'desc')
+    .execute()
 
-  return rows as ApiKeyRow[]
+  return rows as ApiKeyListRow[]
 }
 
-export async function keyScopes(row: ApiKeyRow): Promise<Scope[]> {
+export async function keyScopes(row: Pick<ApiKeyRow, 'scopes'>): Promise<Scope[]> {
   return row.scopes.filter(isScope)
 }

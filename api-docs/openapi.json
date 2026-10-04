@@ -4157,7 +4157,7 @@
             }
           },
           "409": {
-            "description": "The invoice is void or has no lines, or the same Idempotency-Key is still running. Codes: `invalid_state`, `conflict`.",
+            "description": "The account email is not verified yet, the invoice is void or has no lines, or the same Idempotency-Key is still running. Codes: `invalid_state`, `conflict`.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4165,6 +4165,17 @@
                 },
                 "examples": {
                   "invalid_state_1": {
+                    "summary": "Verify your email address before emailing invoices: use the link we sent you, or resend it from the dashboard.",
+                    "value": {
+                      "type": "https://invoice.horizonpay.co/problems/invalid-state",
+                      "title": "Invalid state for this operation",
+                      "status": 409,
+                      "detail": "Verify your email address before emailing invoices: use the link we sent you, or resend it from the dashboard.",
+                      "instance": "req_7f3c9a1e2b4d4e8a9c6f2d1b0a3e5f71",
+                      "code": "invalid_state"
+                    }
+                  },
+                  "invalid_state_2": {
                     "summary": "This invoice is void and cannot be sent.",
                     "value": {
                       "type": "https://invoice.horizonpay.co/problems/invalid-state",
@@ -4175,7 +4186,7 @@
                       "code": "invalid_state"
                     }
                   },
-                  "invalid_state_2": {
+                  "invalid_state_3": {
                     "summary": "Add at least one line item before sending.",
                     "value": {
                       "type": "https://invoice.horizonpay.co/problems/invalid-state",
@@ -4186,7 +4197,7 @@
                       "code": "invalid_state"
                     }
                   },
-                  "conflict_3": {
+                  "conflict_4": {
                     "summary": "A request with this Idempotency-Key is still in flight. Retry in a moment.",
                     "value": {
                       "type": "https://invoice.horizonpay.co/problems/conflict",
@@ -4251,7 +4262,7 @@
             "$ref": "#/components/responses/IdempotencyKeyRequired"
           },
           "429": {
-            "description": "More than 10 sends in an hour for this key. Wait `Retry-After` seconds. Codes: `rate_limited`.",
+            "description": "More than 10 sends in an hour for this key, or 50 for the whole account (dashboard included). Wait `Retry-After` seconds. Codes: `rate_limited`.",
             "headers": {
               "Retry-After": {
                 "$ref": "#/components/headers/RetryAfter"
@@ -4266,13 +4277,24 @@
                   "$ref": "#/components/schemas/Problem"
                 },
                 "examples": {
-                  "rate_limited": {
+                  "rate_limited_1": {
                     "summary": "Rate limit of 10 per 3600s exceeded.",
                     "value": {
                       "type": "https://invoice.horizonpay.co/problems/rate-limited",
                       "title": "Too many requests",
                       "status": 429,
                       "detail": "Rate limit of 10 per 3600s exceeded.",
+                      "instance": "req_7f3c9a1e2b4d4e8a9c6f2d1b0a3e5f71",
+                      "code": "rate_limited"
+                    }
+                  },
+                  "rate_limited_2": {
+                    "summary": "Too many invoices emailed in the last hour. Try again in 20 min.",
+                    "value": {
+                      "type": "https://invoice.horizonpay.co/problems/rate-limited",
+                      "title": "Too many requests",
+                      "status": 429,
+                      "detail": "Too many invoices emailed in the last hour. Try again in 20 min.",
                       "instance": "req_7f3c9a1e2b4d4e8a9c6f2d1b0a3e5f71",
                       "code": "rate_limited"
                     }
