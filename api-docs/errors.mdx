@@ -1,10 +1,10 @@
 ---
-title: "Errors & retries"
-description: "What a failed call looks like, which failures to retry, and how Idempotency-Key and rate limits keep retries safe."
+title: "Errors"
+description: "The error format, every error code, and which errors to retry."
 icon: "triangle-exclamation"
 ---
 
-Every error is an [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) `application/problem+json` body with the same shape:
+Errors use HTTP status codes and an [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) `application/problem+json` body:
 
 ```json
 {
@@ -18,67 +18,27 @@ Every error is an [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) `applicatio
 ```
 
 - **Branch on `code`.** The wording of `detail` can change.
-- `instance` is the request id, the same as the `X-Request-Id` header. Quote it to support. You can also send your own `X-Request-Id` (up to 200 characters) and we'll echo it back.
-- A `422` also has `errors`: a list of `{ "path", "message" }`, such as `{ "path": "items.0.unit_amount", "message": "Use whole minor units" }`.
+- **`instance`** is the request id, also sent as the `X-Request-Id` header. Include it when you contact support. You can send your own `X-Request-Id` (up to 200 characters) and it's echoed back.
+- **`errors`** appears on `422` responses: a list of `{ "path", "message" }`, such as `{ "path": "items.0.unit_amount", "message": "Use whole minor units" }`.
 
 ## Error codes
 
 | `code` | Status | Retry? | Meaning |
 |---|---|---|---|
-| `validation` | `422` | No | A field or query parameter is invalid, including an invalid `cursor`. See `errors`. |
+| `validation` | `422` | No | A field or query parameter is invalid. See `errors`. |
 | `idempotency_mismatch` | `422` | No | An `Idempotency-Key` was reused with a different request. |
-| `unauthorized` | `401` | No | The key is missing, malformed, unknown, revoked or expired. See [Authentication](/authentication#authentication-errors). |
-| `forbidden` | `403` | No | The key lacks the scope this endpoint needs. `detail` names it. |
-| `not_found` | `404` | No | No such resource, it belongs to another account, or the id is malformed. |
-| `invalid_state` | `409` | No | The resource is in the wrong state, such as editing a finalized invoice. See [Invoice lifecycle](/invoice-lifecycle). |
-| `conflict` | `409` | Yes | It clashed with another request, such as one with the same `Idempotency-Key` that's still running. |
+| `unauthorized` | `401` | No | The API key is missing, invalid, revoked or expired. |
+| `forbidden` | `403` | No | The key lacks the scope this endpoint needs. |
+| `not_found` | `404` | No | No such resource, or the id is malformed. |
+| `invalid_state` | `409` | No | The resource is in the wrong state, such as editing a finalized invoice. |
+| `conflict` | `409` | Yes | A request with the same `Idempotency-Key` is still running, or a write clashed with another one. |
 | `idempotency_key_required` | `428` | No | This endpoint needs an `Idempotency-Key` header. |
-| `rate_limited` | `429` | Yes, after `Retry-After` | You went over a [rate limit](#rate-limits). |
+| `rate_limited` | `429` | After `Retry-After` | You hit a [rate limit](/rate-limits). |
 | `internal_error` | `500` | Yes | Something went wrong on our side. |
-| `upstream_failed` | `502` | Yes | A service we depend on failed, such as the email provider. |
+| `upstream_failed` | `502` | Yes | A service we depend on failed: the email provider or the database. |
 
-Network errors and timeouts are also worth retrying. When you retry a write, **reuse the same `Idempotency-Key`**.
-
-## Idempotency
-
-Say you finalize an invoice, we assign `INV-0042`, and the response is lost. A plain retry would assign `INV-0043` and leave a gap in your number series. To prevent that, send an `Idempotency-Key` header. A retry with the **same key and the same body** gets the original response back, and the work doesn't run twice.
-
-```bash
-curl -X POST https://invoice.horizonpay.co/api/v1/invoices/in_.../finalize \
-  -H "Authorization: Bearer $INVOICE_AI_API_KEY" \
-  -H "Idempotency-Key: 8e0f4b1c-6f55-4c37-9d0b-2a7f5f0c9e21"
-```
-
-**Required** on `POST /invoices`, `POST /invoice-items` and the lifecycle actions `finalize`, `send`, `pay` and `void`. **Optional** on the other `POST`s. `GET`, `PATCH` and `DELETE` ignore it.
-
-| Situation | Result |
-|---|---|
-| Required, but not sent | `428 idempotency_key_required`. Nothing runs. |
-| Same key and body, first request finished | The stored response is replayed with `Idempotent-Replayed: true`. |
-| Same key, first request still running | `409 conflict`. Retry in a moment. |
-| Same key, different method, path or body | `422 idempotency_mismatch`. |
-| Same key, first request failed (`4xx`/`5xx`) | Failures aren't stored, so the retry runs again. |
-
-- Create the key **once per operation, before your retry loop**. A UUID v4 works well.
-- Keys can be up to 255 characters. They're shared across all your API keys and kept for 24 hours.
-
-<Tip>
-  The [SDKs](/sdks/errors-and-retries) do all of this for you. Every `POST` gets a key, and retries reuse it.
-</Tip>
-
-## Rate limits
-
-Limits apply **per API key**, in fixed windows:
-
-| Bucket | Applies to | Limit |
-|---|---|---|
-| `request` | Every endpoint except `send` | 120 per 60 seconds |
-| `send` | `POST /invoices/{id}/send` | 10 per hour |
-
-Every authenticated response carries `RateLimit-Limit`, `RateLimit-Remaining` and `RateLimit-Reset`. `RateLimit-Reset` is a Unix timestamp in seconds. Over the limit, you get `429 rate_limited` with a `Retry-After` header in seconds. Wait that long, then retry.
-
-To stay under the limit, use `limit=100` on lists, and use [webhooks](/webhooks) instead of polling.
+Also retry network errors and timeouts. When you retry a write, reuse the same [`Idempotency-Key`](/idempotency). The [SDKs](/sdks/node#errors-and-retries) retry for you.
 
 <Note>
-  Limits are currently counted per server instance, so under load you may get more than the documented numbers. Design for 120 per minute and 10 sends per hour anyway.
+  A `502` from `POST /invoices/{id}/send` can arrive **after** the invoice was finalized. The invoice keeps its number, and an `invoice.email_failed` event is recorded. Retry the send.
 </Note>

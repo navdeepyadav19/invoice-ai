@@ -131,7 +131,7 @@ const PROBLEM_CODES = {
   conflict: 'A request with the same Idempotency-Key is still in flight, or a uniqueness clash.',
   idempotency_key_required: 'This operation requires an `Idempotency-Key` header.',
   rate_limited: 'Too many requests for this key. Wait `Retry-After` seconds.',
-  upstream_failed: 'A dependency (email provider, database) failed. Usually safe to retry.',
+  upstream_failed: 'A dependency (email provider, database) failed. `detail` is deliberately generic — quote `instance` to support. Usually safe to retry.',
   internal_error: 'An unexpected error on our side. Quote `instance` to support.',
 } as const
 
@@ -509,7 +509,7 @@ const eventOut = z
     id: z.string().meta({ description: 'Event id (UUID).', examples: [EX.event] }),
     type: z.enum(WEBHOOK_EVENTS).meta({
       description:
-        'What happened. `invoice.viewed` and `invoice.downloaded` are recorded when the customer opens the public share link.',
+        'What happened. `invoice.viewed` and `invoice.downloaded` are recorded when the customer opens the public share link, at most once per type per invoice every 10 minutes.',
       examples: ['invoice.finalized'],
     }),
     meta: z.record(z.string(), z.unknown()).nullable().meta({
@@ -527,9 +527,9 @@ const webhookEndpointOut = z
     events: z.array(z.enum(WEBHOOK_EVENTS)).meta({
       description: 'Subscribed event types. An endpoint registered with no events receives every type, and lists them all here.',
     }),
-    active: z.boolean().meta({ description: '`false` once deliveries are disabled, which happens after 20 consecutive failures.' }),
+    active: z.boolean().meta({ description: '`false` once deliveries are disabled: after 20 deliveries in a row used up every retry. A successful delivery resets the count.' }),
     disabled_at: nullableDateTime('When deliveries were disabled, or `null`.'),
-    failure_count: z.number().int().meta({ description: 'Consecutive failed deliveries.', examples: [0] }),
+    failure_count: z.number().int().meta({ description: 'Deliveries in a row that used up every retry. Resets to 0 on any successful delivery.', examples: [0] }),
     created_at: dateTime('When the endpoint was registered (ISO 8601).'),
   })
   .meta({ id: 'WebhookEndpoint', description: 'A URL that receives signed invoice events (Standard Webhooks format).' })
@@ -934,11 +934,11 @@ const sendBody = z
 const payBody = z
   .object({
     paid_on: z.string().optional().meta({
-      description: 'When payment was received (ISO 8601 date or timestamp). Defaults to now.',
+      description: 'When payment was received: an ISO 8601 date or timestamp. Defaults to now.',
       examples: ['2026-09-29'],
     }),
     reference: z.string().optional().meta({
-      description: 'Your payment reference (cheque number, bank transfer id). Recorded on the `invoice.paid` event.',
+      description: 'Your payment reference (cheque number, bank transfer id), up to 200 characters. Recorded on the `invoice.paid` event.',
       examples: ['chk_123456'],
     }),
   })
@@ -947,7 +947,7 @@ const payBody = z
 const voidBody = z
   .object({
     reason: z.string().min(1).meta({
-      description: 'Why the invoice is void. Required and non-blank; stored as `void_reason`.',
+      description: 'Why the invoice is void: required, non-blank, up to 500 characters. Stored as `void_reason`.',
       examples: ['Raised against the wrong customer.'],
     }),
   })
@@ -956,7 +956,8 @@ const voidBody = z
 const webhookCreateBody = z
   .object({
     url: z.string().meta({
-      description: 'An `https://` URL that does not resolve to a private, loopback or link-local address.',
+      description:
+        'An `https://` URL of up to 2048 characters, without a username or password, that resolves only to public addresses. Redirects are not followed.',
       examples: ['https://example.com/webhooks/invoice-ai'],
     }),
     events: z.array(z.enum(WEBHOOK_EVENTS)).optional().meta({
@@ -999,19 +1000,22 @@ interface OperationSpec extends Omit<ZodOpenApiOperationObject, 'operationId' | 
   alsoRequires?: { scope: Scope; when?: string }[]
   /** Mirrors withApi({ idempotent }). */
   idempotency?: Idempotency
+  /** How the SDKs make this call — drives the operation's `x-codeSamples`. */
+  sdk: SdkSample
 }
 
 type Tag = 'Business' | 'Customers' | 'Products' | 'Prices' | 'Invoices' | 'Invoice items' | 'Webhook endpoints'
 
 const IDEMPOTENCY_TEXT: Record<Idempotency, string> = {
   required:
-    '**Idempotency:** `Idempotency-Key` header **required** (`428` without it). A retry with the same key and body replays the first response with `Idempotent-Replayed: true`; the same key with a different body is a `422` `idempotency_mismatch`.',
+    '**Idempotency:** `Idempotency-Key` **required** (`428` without it). A retry with the same key and body replays the first response (`Idempotent-Replayed: true`); the same key with a different body is a `422` `idempotency_mismatch`.',
   optional:
-    '**Idempotency:** `Idempotency-Key` header optional. When sent, a retry with the same key and body replays the first response with `Idempotent-Replayed: true`; the same key with a different body is a `422` `idempotency_mismatch`.',
+    '**Idempotency:** `Idempotency-Key` optional. With one, a retry with the same key and body replays the first response (`Idempotent-Replayed: true`); the same key with a different body is a `422` `idempotency_mismatch`.',
 }
 
 function operation(spec: OperationSpec): ZodOpenApiOperationObject {
-  const { tag, scope, alsoRequires, idempotency, description, requestParams, ...rest } = spec
+  const { tag, scope, alsoRequires, idempotency, description, requestParams, sdk, ...rest } = spec
+  void sdk // read by sampleSource(spec), not part of the OpenAPI operation
 
   const scopeLine = [
     `**Scope:** \`${scope}\``,
@@ -1028,7 +1032,7 @@ function operation(spec: OperationSpec): ZodOpenApiOperationObject {
       })
     : undefined
 
-  return {
+  const built: ZodOpenApiOperationObject = {
     ...rest,
     tags: [tag],
     description: [description, scopeLine, ...(idempotency ? [IDEMPOTENCY_TEXT[idempotency]] : [])].join('\n\n'),
@@ -1037,6 +1041,226 @@ function operation(spec: OperationSpec): ZodOpenApiOperationObject {
       : {}),
     'x-required-scope': scope,
   }
+  sampleSources.set(built, sampleSource(spec))
+  return built
+}
+
+// ---------------------------------------------------------------------------
+// Code samples — `x-codeSamples` on every operation
+// ---------------------------------------------------------------------------
+//
+// Mintlify renders these as the request example on each API page (docs.json
+// sets `api.examples.autogenerate: false`, so these are the only ones): the
+// code block's title is `label`, and its language menu shows the display name
+// of `lang` — `bash` is "cURL", `node` is "Node.js" (highlighted as JavaScript). They are built from one table — each operation's `sdk`
+// entry — plus the operation's own documented example values (path id, request
+// body), so every tab sends the same request. lib/api/openapi.test.ts checks
+// the SDK calls against the methods the published SDKs actually export.
+
+/** SDK resources as named on the TypeScript client. Python uses snake_case: `invoice_items`. */
+type SdkResource = 'business' | 'customers' | 'products' | 'prices' | 'invoices' | 'invoiceItems' | 'webhookEndpoints'
+
+interface SdkSample {
+  /** `resource.method` on the TypeScript client (`invoices.finalize`). Python: snake_case, and `del` is `delete`. */
+  call: `${SdkResource}.${string}`
+  /** The variable holding the result, or each item of a list. */
+  result?: string
+  /** What the sample prints — an expression list valid in both JavaScript and Python. */
+  print?: string
+  /** A comment after the print line. */
+  note?: string
+  /** Query parameters to show (list filters). */
+  query?: Record<string, string | number | boolean>
+}
+
+type SampleKind = 'data' | 'page' | 'void' | 'binary'
+
+interface SampleSource {
+  sdk: SdkSample
+  kind: SampleKind
+  idempotency?: Idempotency
+  /** The documented example of the `{id}` path parameter. */
+  id?: string
+  /** The documented request body example. */
+  body?: Record<string, unknown>
+}
+
+export interface CodeSample {
+  lang: string
+  label: string
+  source: string
+}
+
+export const SDK_PACKAGES = { node: '@horizonpay/invoice-ai', python: 'horizonpay-invoice-ai' } as const
+
+/** Filled by operation(), read by withCodeSamples() once the operation's path and method are known. */
+const sampleSources = new WeakMap<object, SampleSource>()
+
+function sampleSource(spec: OperationSpec): SampleSource {
+  const path = spec.requestParams?.path as z.ZodObject | undefined
+  const id = path?.shape.id?.meta()?.examples?.[0]
+  const json = (spec.requestBody as { content?: Record<string, { example?: unknown }> } | undefined)?.content?.[
+    'application/json'
+  ]
+  const responses = spec.responses as Record<string, { content?: Record<string, unknown> }>
+  const method = spec.sdk.call.split('.')[1]
+  const kind: SampleKind =
+    method === 'list' || method === 'events'
+      ? 'page'
+      : '204' in responses
+        ? 'void'
+        : responses['200']?.content?.['application/pdf']
+          ? 'binary'
+          : 'data'
+  return {
+    sdk: spec.sdk,
+    kind,
+    idempotency: spec.idempotency,
+    id: typeof id === 'string' ? id : undefined,
+    body: json?.example as Record<string, unknown> | undefined,
+  }
+}
+
+/** Attach cURL, Node.js and Python samples to every operation in `paths`. */
+function withCodeSamples<P extends Record<string, Record<string, ZodOpenApiOperationObject>>>(paths: P, serverUrl: string): P {
+  for (const [path, item] of Object.entries(paths)) {
+    for (const [method, op] of Object.entries(item)) {
+      const source = sampleSources.get(op)
+      if (!source) throw new Error(`${method.toUpperCase()} ${path} was not built with operation()`)
+      op['x-codeSamples'] = codeSamples(method.toUpperCase(), path, serverUrl, source)
+    }
+  }
+  return paths
+}
+
+function codeSamples(method: string, path: string, serverUrl: string, source: SampleSource): CodeSample[] {
+  return [
+    { lang: 'bash', label: 'cURL', source: curlSample(method, path, serverUrl, source) },
+    { lang: 'node', label: 'Node.js', source: nodeSample(source) },
+    { lang: 'python', label: 'Python', source: pythonSample(source) },
+  ]
+}
+
+const MAX_WIDTH = 80
+
+function curlSample(method: string, path: string, serverUrl: string, { id, body, idempotency, kind, sdk }: SampleSource): string {
+  const query = sdk.query ? `?${new URLSearchParams(Object.entries(sdk.query).map(([k, v]) => [k, String(v)]))}` : ''
+  const url = `${serverUrl}${id ? path.replace('{id}', id) : path}${query}`
+  const explicitMethod = method !== 'GET' && !(method === 'POST' && body)
+  return [
+    `curl ${explicitMethod ? `-X ${method} ` : ''}${query ? `"${url}"` : url}`,
+    '-H "Authorization: Bearer $INVOICE_AI_API_KEY"',
+    ...(idempotency ? ['-H "Idempotency-Key: $(uuidgen)"'] : []),
+    ...(body ? ['-H "Content-Type: application/json"', `-d '${literal(body, 'json', '  ', 6).replace(/'/g, `'\\''`)}'`] : []),
+    ...(kind === 'binary' ? ['-o invoice.pdf'] : []),
+  ].join(' \\\n  ')
+}
+
+function nodeSample({ sdk, kind, id, body, idempotency }: SampleSource): string {
+  const [resource, method] = sdk.call.split('.')
+  const params = { ...sdk.query, ...body }
+  const hasParams = Object.keys(params).length > 0
+  const args = id ? [scalar(id, 'js')] : []
+  const lead = { data: `const ${sdk.result} = await `, page: `for await (const ${sdk.result} of `, void: 'await ', binary: 'const pdf = await ' }[kind]
+  const target = `invoiceai.${resource}.${method}`
+  const flat = `${target}(${[...args, ...(hasParams ? [inline(params, 'js')] : [])].join(', ')})`
+  const call =
+    !hasParams || lead.length + flat.length + 3 <= MAX_WIDTH
+      ? flat
+      : `${target}(${[...args, literal(params, 'js', '', Infinity)].join(', ')})`
+
+  const comment = sdk.note ? ` // ${sdk.note}` : ''
+  return [
+    ...(kind === 'binary' ? ["import { writeFile } from 'node:fs/promises'"] : []),
+    `import InvoiceAI from '${SDK_PACKAGES.node}'`,
+    '',
+    'const invoiceai = new InvoiceAI() // reads INVOICE_AI_API_KEY',
+    '',
+    ...(idempotency === 'required' ? ['// Retries reuse one Idempotency-Key; pass { idempotencyKey } to set your own.'] : []),
+    ...{
+      data: [`${lead}${call}`, `console.log(${sdk.print})${comment}`],
+      page: [`${lead}${call}) {`, `  console.log(${sdk.print})`, '}'],
+      void: [`${lead}${call}`],
+      binary: [`${lead}${call}`, "await writeFile('invoice.pdf', Buffer.from(pdf))"],
+    }[kind],
+  ].join('\n')
+}
+
+function pythonSample({ sdk, kind, id, body, idempotency }: SampleSource): string {
+  const [resource, method] = sdk.call.split('.')
+  const target = `client.${snakeCase(resource)}.${method === 'del' ? 'delete' : snakeCase(method)}`
+  const kwargs = Object.entries({ ...sdk.query, ...body })
+  const args = id ? [scalar(id, 'py')] : []
+  const lead = { data: `${sdk.result} = `, page: `for ${sdk.result} in `, void: '', binary: 'pdf = ' }[kind]
+  const flat = `${target}(${[...args, ...kwargs.map(([k, v]) => `${k}=${inline(v, 'py')}`)].join(', ')})`
+  const call =
+    lead.length + flat.length + 1 <= MAX_WIDTH
+      ? flat
+      : `${target}(\n${[...args, ...kwargs.map(([k, v]) => `${k}=${literal(v, 'py', '    ', k.length + 1)}`)].map((a) => `    ${a},`).join('\n')}\n)`
+
+  const comment = sdk.note ? `  # ${sdk.note}` : ''
+  return [
+    'from invoice_ai import InvoiceAI',
+    '',
+    'client = InvoiceAI()  # reads INVOICE_AI_API_KEY',
+    '',
+    ...(idempotency === 'required' ? ['# Retries reuse one Idempotency-Key; pass idempotency_key=... to set your own.'] : []),
+    ...{
+      data: [`${lead}${call}`, `print(${sdk.print})${comment}`],
+      page: [`${lead}${call}:`, `    print(${sdk.print})`],
+      void: [call],
+      binary: [`${lead}${call}`, 'with open("invoice.pdf", "wb") as f:', '    f.write(pdf)'],
+    }[kind],
+  ].join('\n')
+}
+
+type Syntax = 'json' | 'js' | 'py'
+
+const snakeCase = (name: string) => name.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`)
+
+function scalar(value: unknown, syntax: Syntax): string {
+  if (typeof value === 'string') {
+    return syntax === 'js' ? `'${value.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'` : JSON.stringify(value)
+  }
+  if (value === null || value === undefined) return syntax === 'py' ? 'None' : 'null'
+  if (typeof value === 'boolean') return syntax === 'py' ? (value ? 'True' : 'False') : String(value)
+  return String(value)
+}
+
+const key = (name: string, syntax: Syntax) =>
+  syntax === 'js' && /^[A-Za-z_$][\w$]*$/.test(name) ? name : JSON.stringify(name)
+
+/** A literal on one line: `{ price: 'price_…', quantity: 1 }`. */
+function inline(value: unknown, syntax: Syntax): string {
+  if (Array.isArray(value)) return `[${value.map((v) => inline(v, syntax)).join(', ')}]`
+  if (value && typeof value === 'object') {
+    const entries = Object.entries(value).map(([k, v]) => `${key(k, syntax)}: ${inline(v, syntax)}`)
+    if (!entries.length) return '{}'
+    return syntax === 'py' ? `{${entries.join(', ')}}` : `{ ${entries.join(', ')} }`
+  }
+  return scalar(value, syntax)
+}
+
+/**
+ * A literal that stays on one line when it fits in MAX_WIDTH, otherwise one
+ * entry per line (recursively). `lead` is how many characters precede it on its
+ * line after `indent` — a key, `-d '`, `items=`; `Infinity` always expands.
+ */
+function literal(value: unknown, syntax: Syntax, indent = '', lead = 0): string {
+  const flat = inline(value, syntax)
+  // +1 for the trailing comma or quote.
+  if (!value || typeof value !== 'object' || indent.length + lead + flat.length + 1 <= MAX_WIDTH) return flat
+  const inner = indent + (syntax === 'py' ? '    ' : '  ')
+  const lines = Array.isArray(value)
+    ? value.map((v) => `${inner}${literal(v, syntax, inner)}`)
+    : Object.entries(value).map(([k, v]) => {
+        const name = key(k, syntax)
+        return `${inner}${name}: ${literal(v, syntax, inner, name.length + 2)}`
+      })
+  const [open, close] = Array.isArray(value) ? ['[', ']'] : ['{', '}']
+  // JSON has no trailing commas; JavaScript and Python style them.
+  const body = syntax === 'json' ? lines.join(',\n') : lines.map((line) => `${line},`).join('\n')
+  return `${open}\n${body}\n${indent}${close}`
 }
 
 const TAGS: { name: Tag; 'x-displayName': string; description: string }[] = [
@@ -1098,7 +1322,7 @@ export function buildOpenApiDocument(serverUrl: string) {
         '- **Money:** integer minor units of the currency everywhere (`250000` is $2,500.00; ¥5,000 is `5000`).',
         '- **Errors:** RFC 9457 `application/problem+json` — branch on `code`.',
         '- **Idempotency:** operations that spend an invoice number, email or record payment require an `Idempotency-Key`.',
-        '- **Rate limits:** 120 requests/minute per key; sending email is limited to 10/hour. See the `RateLimit-*` headers.',
+        '- **Rate limits:** 120 requests/minute per key. Sending email: 10/hour per key and 50/hour per account. See the `RateLimit-*` headers.',
       ].join('\n'),
       contact: { name: 'Invoice-AI support', url: 'https://invoice.horizonpay.co' },
     },
@@ -1124,15 +1348,16 @@ export function buildOpenApiDocument(serverUrl: string) {
       headers: componentHeaders,
     },
     security: [{ apiKey: [] }],
-    paths: {
+    paths: withCodeSamples({
       '/business': {
         get: operation({
           operationId: 'getBusiness',
           tag: 'Business',
           summary: 'Retrieve the business profile',
           description:
-            'Returns the business profile invoices are issued from: legal name, address, tax id, default currency, bank details and invoice prefix. Read-only — the profile is edited in the app.',
+            'Returns your business profile — the issuer printed on every invoice: legal name, address, tax id, default currency, bank details and invoice prefix. Read-only over the API; edit it in Settings.',
           scope: 'business:read',
+          sdk: { call: 'business.retrieve', result: 'business', print: 'business.legal_name, business.currency' },
           responses: {
             '200': ok('The business profile.', single(businessOut, 'The business profile.'), { data: businessExample }),
             '404': notFound('No business profile yet — onboarding is unfinished.', 'No business profile yet. Finish onboarding first.'),
@@ -1146,9 +1371,9 @@ export function buildOpenApiDocument(serverUrl: string) {
           operationId: 'listCustomers',
           tag: 'Customers',
           summary: 'List customers',
-          description:
-            'Returns customers newest first, cursor-paginated. Archived customers are excluded unless `include_deleted=true`.',
+          description: 'Lists customers, newest first. Archived customers are left out unless `include_deleted=true`.',
           scope: 'clients:read',
+          sdk: { call: 'customers.list', result: 'customer', print: 'customer.id, customer.name', query: { query: 'acme' } },
           requestParams: {
             query: cursorParams.extend({
               query: z.string().optional().meta({ description: 'Case-insensitive substring match on `name`.', examples: ['acme'] }),
@@ -1166,8 +1391,9 @@ export function buildOpenApiDocument(serverUrl: string) {
           tag: 'Customers',
           summary: 'Create a customer',
           description:
-            'Creates a customer you can bill. Only `name` is required. Creating does not deduplicate — two calls with the same name make two customers.',
+            'Creates a customer to bill. Only `name` is required. Calls are not deduplicated: the same name twice makes two customers.',
           scope: 'clients:write',
+          sdk: { call: 'customers.create', result: 'customer', print: 'customer.id' },
           idempotency: 'optional',
           requestBody: json(customerCreateBody, {
             name: 'Acme Industries',
@@ -1192,8 +1418,9 @@ export function buildOpenApiDocument(serverUrl: string) {
           operationId: 'retrieveCustomer',
           tag: 'Customers',
           summary: 'Retrieve a customer',
-          description: 'Returns one customer by `cus_…` id or UUID, including archived ones (`deleted: true`).',
+          description: 'Returns a customer by `cus_…` id or UUID, including archived ones (`deleted: true`).',
           scope: 'clients:read',
+          sdk: { call: 'customers.retrieve', result: 'customer', print: 'customer.name, customer.email' },
           requestParams: { path: idParam('The customer, `cus_…` or UUID.', EX.customer) },
           responses: {
             '200': ok('The customer.', single(customerOut, 'The customer.'), { data: customerExample }),
@@ -1206,8 +1433,9 @@ export function buildOpenApiDocument(serverUrl: string) {
           tag: 'Customers',
           summary: 'Update a customer',
           description:
-            'Updates the fields you send and leaves the rest unchanged. Existing invoices are not affected — each invoice keeps a snapshot of the customer as billed. Naturally idempotent, so no `Idempotency-Key` is needed.',
+            'Updates the fields you send and leaves the rest unchanged. Issued invoices keep the customer details they were billed with. No `Idempotency-Key` needed — repeating the call is harmless.',
           scope: 'clients:write',
+          sdk: { call: 'customers.update', result: 'customer', print: 'customer.phone' },
           requestParams: { path: idParam('The customer, `cus_…` or UUID.', EX.customer) },
           requestBody: json(customerUpdateBody, { phone: '+1 512 555 0100' }),
           responses: {
@@ -1226,8 +1454,9 @@ export function buildOpenApiDocument(serverUrl: string) {
           tag: 'Customers',
           summary: 'Archive a customer',
           description:
-            'Archives the customer (`deleted: true`) instead of deleting it: issued invoices reference customers and must keep naming who they were billed to. Archived customers drop out of `GET /customers` but stay readable by id. Archiving an archived customer succeeds and changes nothing.',
+            'Archives a customer (`deleted: true`). Customers are never hard-deleted, because issued invoices must keep naming who they billed. Archived customers drop out of `GET /customers` but stay readable by id; archiving twice changes nothing.',
           scope: 'clients:write',
+          sdk: { call: 'customers.del', result: 'customer', print: 'customer.deleted' },
           requestParams: { path: idParam('The customer, `cus_…` or UUID.', EX.customer) },
           responses: {
             '200': ok('The archived customer.', single(customerOut, 'The archived customer.'), {
@@ -1244,8 +1473,9 @@ export function buildOpenApiDocument(serverUrl: string) {
           operationId: 'listProducts',
           tag: 'Products',
           summary: 'List products',
-          description: 'Returns products newest first, cursor-paginated. Archived products are included unless you filter with `active`.',
+          description: 'Lists products, newest first. Archived products are included unless you filter with `active`.',
           scope: 'products:read',
+          sdk: { call: 'products.list', result: 'product', print: 'product.id, product.name', query: { active: true } },
           requestParams: {
             query: cursorParams.extend({
               query: z.string().optional().meta({ description: 'Case-insensitive substring match on `name`.', examples: ['consulting'] }),
@@ -1262,8 +1492,9 @@ export function buildOpenApiDocument(serverUrl: string) {
           operationId: 'createProduct',
           tag: 'Products',
           summary: 'Create a product',
-          description: 'Creates a product. Add one or more prices to it with `POST /prices` before billing it.',
+          description: 'Creates a product. Amounts live on prices: add one with `POST /prices` before billing it.',
           scope: 'products:write',
+          sdk: { call: 'products.create', result: 'product', print: 'product.id' },
           idempotency: 'optional',
           requestBody: json(productCreateBody, { name: 'Consulting retainer', description: 'Monthly advisory block.' }),
           responses: {
@@ -1283,8 +1514,9 @@ export function buildOpenApiDocument(serverUrl: string) {
           operationId: 'retrieveProduct',
           tag: 'Products',
           summary: 'Retrieve a product',
-          description: 'Returns one product by `prod_…` id or UUID, whether active or archived.',
+          description: 'Returns a product by `prod_…` id or UUID, active or archived.',
           scope: 'products:read',
+          sdk: { call: 'products.retrieve', result: 'product', print: 'product.name, product.active' },
           requestParams: { path: idParam('The product, `prod_…` or UUID.', EX.product) },
           responses: {
             '200': ok('The product.', single(productOut, 'The product.'), { data: productExample }),
@@ -1297,8 +1529,9 @@ export function buildOpenApiDocument(serverUrl: string) {
           tag: 'Products',
           summary: 'Update a product',
           description:
-            'Updates the fields you send and leaves the rest unchanged — omitted fields are never reset to defaults. Send `active: true` to restore an archived product. Finalized invoices keep the line descriptions they were issued with.',
+            'Updates the fields you send and leaves the rest unchanged. Send `active: true` to restore an archived product. Finalized invoices keep the line descriptions they were issued with.',
           scope: 'products:write',
+          sdk: { call: 'products.update', result: 'product', print: 'product.description' },
           requestParams: { path: idParam('The product, `prod_…` or UUID.', EX.product) },
           requestBody: json(productUpdateBody, { description: 'Monthly advisory block, up to 10 hours.' }),
           responses: {
@@ -1317,8 +1550,9 @@ export function buildOpenApiDocument(serverUrl: string) {
           tag: 'Products',
           summary: 'Archive a product',
           description:
-            'Sets `active: false`. The product is not deleted — its prices and the invoice lines that reference it stay intact. Archiving an archived product succeeds and changes nothing. Restore with `PATCH` and `active: true`.',
+            'Archives a product (`active: false`). Its prices and the invoice lines that use it stay intact; archiving twice changes nothing. Restore with `PATCH` and `active: true`.',
           scope: 'products:write',
+          sdk: { call: 'products.archive', result: 'product', print: 'product.active' },
           requestParams: { path: idParam('The product, `prod_…` or UUID.', EX.product) },
           responses: {
             '200': ok('The archived product.', single(productOut, 'The archived product.'), {
@@ -1336,8 +1570,9 @@ export function buildOpenApiDocument(serverUrl: string) {
           tag: 'Prices',
           summary: 'List prices',
           description:
-            'Returns prices newest first, cursor-paginated, optionally filtered by product, active flag, currency or type. An unknown `product` is a `404`, not an empty page.',
+            'Lists prices, newest first, optionally filtered by `product`, `active`, `currency` or `type`. An unknown `product` is a `404`, not an empty page.',
           scope: 'products:read',
+          sdk: { call: 'prices.list', result: 'price', print: 'price.id, price.unit_amount, price.currency', query: { product: EX.product } },
           requestParams: {
             query: cursorParams.extend({
               product: z.string().optional().meta({ description: 'Only prices of this product, `prod_…` or UUID.', examples: [EX.product] }),
@@ -1358,8 +1593,9 @@ export function buildOpenApiDocument(serverUrl: string) {
           tag: 'Prices',
           summary: 'Create a price',
           description:
-            'Adds a price to a product. `unit_amount` is integer minor units. A `recurring` price needs `recurring.interval`; it is stored for reporting — nothing auto-bills yet.',
+            'Adds a price to a product. `unit_amount` is in integer minor units. A `recurring` price needs `recurring.interval`; it is stored for reporting — nothing auto-bills yet.',
           scope: 'products:write',
+          sdk: { call: 'prices.create', result: 'price', print: 'price.id' },
           idempotency: 'optional',
           requestBody: json(priceCreateBody, {
             product: EX.product,
@@ -1388,8 +1624,9 @@ export function buildOpenApiDocument(serverUrl: string) {
           operationId: 'retrievePrice',
           tag: 'Prices',
           summary: 'Retrieve a price',
-          description: 'Returns one price by `price_…` id or UUID, whether active or archived.',
+          description: 'Returns a price by `price_…` id or UUID, active or archived.',
           scope: 'products:read',
+          sdk: { call: 'prices.retrieve', result: 'price', print: 'price.unit_amount, price.currency' },
           requestParams: { path: idParam('The price, `price_…` or UUID.', EX.price) },
           responses: {
             '200': ok('The price.', single(priceOut, 'The price.'), { data: priceExample }),
@@ -1402,8 +1639,9 @@ export function buildOpenApiDocument(serverUrl: string) {
           tag: 'Prices',
           summary: 'Update a price',
           description:
-            'Updates the fields you send and leaves the rest unchanged. The parent product cannot change — sending `product` is a `422`; create a new price instead. Lines on finalized invoices keep the amount they were billed at; a draft with a line from this price picks up the change the next time it is saved.',
+            'Updates the fields you send and leaves the rest unchanged. A price cannot move to another product (`422`) — create a new price instead. Finalized invoices keep the amount they were billed at; a draft picks up the change the next time it is saved.',
           scope: 'products:write',
+          sdk: { call: 'prices.update', result: 'price', print: 'price.nickname' },
           requestParams: { path: idParam('The price, `price_…` or UUID.', EX.price) },
           requestBody: json(priceUpdateBody, {
             nickname: 'Monthly (annual contract)',
@@ -1426,8 +1664,9 @@ export function buildOpenApiDocument(serverUrl: string) {
           tag: 'Prices',
           summary: 'Archive a price',
           description:
-            'Sets `active: false`. The price is not deleted, because invoice lines may reference it. Archiving an archived price succeeds and changes nothing. Restore with `PATCH` and `active: true`.',
+            'Archives a price (`active: false`). It is kept because invoice lines may reference it; archiving twice changes nothing. Restore with `PATCH` and `active: true`.',
           scope: 'products:write',
+          sdk: { call: 'prices.archive', result: 'price', print: 'price.active' },
           requestParams: { path: idParam('The price, `price_…` or UUID.', EX.price) },
           responses: {
             '200': ok('The archived price.', single(priceOut, 'The archived price.'), { data: { ...priceExample, active: false } }),
@@ -1443,8 +1682,9 @@ export function buildOpenApiDocument(serverUrl: string) {
           tag: 'Invoices',
           summary: 'List invoices',
           description:
-            'Returns invoices newest first, cursor-paginated, without `lines`. `status=overdue` selects open invoices whose `due_date` is before today (UTC); `status=open` returns every open invoice, overdue ones included. An unknown `customer` is a `404`.',
+            'Lists invoices, newest first, without `lines`. `status=overdue` returns open invoices whose `due_date` is before today (UTC); `status=open` includes them. An unknown `customer` filter is a `404`.',
           scope: 'invoices:read',
+          sdk: { call: 'invoices.list', result: 'invoice', print: 'invoice.number, invoice.amount_due', query: { status: 'open' } },
           alsoRequires: [{ scope: 'clients:read', when: 'when filtering by `customer`' }],
           requestParams: {
             query: cursorParams.extend({
@@ -1466,10 +1706,11 @@ export function buildOpenApiDocument(serverUrl: string) {
           tag: 'Invoices',
           summary: 'Create a draft invoice',
           description: [
-            'Creates a `draft` for an existing customer. Each line is either a catalog `price` (description, amount and tax rate are borrowed from it) or an ad-hoc `description` + `unit_amount`. Totals are always computed server-side from the lines. The issue date is today; `currency` defaults to your business currency.',
-            'A draft has no number yet — call `POST /invoices/{id}/finalize` (or `/send`) to issue it. Emits `invoice.created`.',
+            'Creates a `draft` invoice for an existing customer. Each line is either a catalog `price` (its name, amount and tax rate fill in) or an ad-hoc `description` + `unit_amount`. Totals are computed server-side; `currency` defaults to your business currency.',
+            'A draft has no number until you finalize or send it. Emits `invoice.created`.',
           ].join('\n\n'),
           scope: 'invoices:write',
+          sdk: { call: 'invoices.create', result: 'invoice', print: 'invoice.id, invoice.status' },
           alsoRequires: [{ scope: 'business:read' }, { scope: 'clients:read' }],
           idempotency: 'required',
           requestBody: json(invoiceCreateBody, {
@@ -1501,8 +1742,10 @@ export function buildOpenApiDocument(serverUrl: string) {
           operationId: 'retrieveInvoice',
           tag: 'Invoices',
           summary: 'Retrieve an invoice',
-          description: 'Returns one invoice by `in_…` id or UUID, with its `lines`. `status` reflects `overdue` at the moment of reading.',
+          description:
+            'Returns an invoice by `in_…` id or UUID, with its `lines`. `status` reads `overdue` when an open invoice is past its due date.',
           scope: 'invoices:read',
+          sdk: { call: 'invoices.retrieve', result: 'invoice', print: 'invoice.number, invoice.status' },
           requestParams: { path: idParam('The invoice, `in_…` or UUID.', EX.invoice) },
           responses: {
             '200': ok('The invoice, with lines.', single(invoiceOut, 'The invoice.'), { data: openInvoiceExample }),
@@ -1515,8 +1758,9 @@ export function buildOpenApiDocument(serverUrl: string) {
           tag: 'Invoices',
           summary: 'Update a draft invoice',
           description:
-            'Drafts only. A partial update: send only the fields to change — omitted ones (`customer` included) keep their stored value, and `items`, when sent, replaces every line (omit it to keep them). Totals are recomputed and line ids change. Once finalized an invoice is frozen — the customer may already have the PDF — and this returns `409`. Emits `invoice.updated`.',
+            'Updates a draft. Send only the fields to change; `items`, when sent, replaces every line (line ids change). Once finalized an invoice is frozen and this returns `409`. Emits `invoice.updated`.',
           scope: 'invoices:write',
+          sdk: { call: 'invoices.update', result: 'invoice', print: 'invoice.due_date, invoice.total' },
           alsoRequires: [{ scope: 'business:read' }, { scope: 'clients:read' }],
           requestParams: { path: idParam('The draft, `in_…` or UUID.', EX.invoice) },
           requestBody: json(invoiceUpdateBody, {
@@ -1541,8 +1785,9 @@ export function buildOpenApiDocument(serverUrl: string) {
           tag: 'Invoices',
           summary: 'Delete a draft invoice',
           description:
-            'Permanently deletes a draft. A finalized invoice can never be deleted — its number belongs to a consecutive series, and a gap reads as a hidden sale. Void it instead.',
+            'Permanently deletes a draft. A finalized invoice cannot be deleted (`409`) — its number belongs to a gap-free series. Void it instead.',
           scope: 'invoices:write',
+          sdk: { call: 'invoices.del' },
           requestParams: { path: idParam('The draft, `in_…` or UUID.', EX.invoice) },
           responses: {
             '204': noContentResponse('Deleted. No body.'),
@@ -1561,8 +1806,9 @@ export function buildOpenApiDocument(serverUrl: string) {
           tag: 'Invoices',
           summary: 'Finalize an invoice',
           description:
-            'Assigns the next permanent number in your series (e.g. `INV-0042`) and moves the draft to `open`. The draft must have at least one line. Finalizing an invoice that already has a number returns it unchanged with the same number — a retry can never burn a second one. Does not email the customer (see `/send`). Emits `invoice.finalized`.',
+            'Issues a draft: assigns the next number in your series (e.g. `INV-0042`) and moves it to `open`. The draft needs at least one line. Finalizing an invoice that already has a number returns it unchanged, so a retry never spends a second number. Does not email the customer — see `/send`. Emits `invoice.finalized`.',
           scope: 'invoices:finalize',
+          sdk: { call: 'invoices.finalize', result: 'invoice', print: 'invoice.number' },
           idempotency: 'required',
           requestParams: { path: idParam('The draft, `in_…` or UUID.', EX.invoice) },
           responses: {
@@ -1585,11 +1831,13 @@ export function buildOpenApiDocument(serverUrl: string) {
           tag: 'Invoices',
           summary: 'Send an invoice',
           description: [
-            'Emails the invoice PDF and a link to the public invoice page, via Resend, to `to` or else the customer email recorded on the invoice. A draft is finalized first (this scope covers that — `invoices:finalize` is not needed). Open and paid invoices can be re-sent; void ones cannot.',
-            '**Rate limit:** 10 sends per hour per key — each send costs money and lands in a third party’s inbox.',
-            'If the email fails after finalizing, the response is `502` and the number stays spent; retry the send. Emits `invoice.emailed` (or `invoice.email_failed`), plus `invoice.finalized` when it finalized.',
+            'Emails the invoice PDF and a link to its public page to `to`, or else the customer email on the invoice. A draft is finalized first (no `invoices:finalize` scope needed). Open and paid invoices can be re-sent; void ones cannot.',
+            '**Requires a verified account email** — until then this returns `409` `invalid_state`.',
+            '**Rate limits:** 10 sends per hour per API key, and 50 per hour per account across every key and the dashboard (`429` `rate_limited`, with `Retry-After`).',
+            'If the email fails after finalizing, the response is `502` `upstream_failed` and the number stays spent; retry the send. Emits `invoice.emailed` (or `invoice.email_failed`), plus `invoice.finalized` when it finalized.',
           ].join('\n\n'),
           scope: 'invoices:send',
+          sdk: { call: 'invoices.send', result: 'sent', print: 'sent.data.number, sent.emailed_to' },
           idempotency: 'required',
           requestParams: { path: idParam('The invoice, `in_…` or UUID.', EX.invoice) },
           requestBody: { ...json(sendBody, { to: 'ap@acme.example' }), required: false },
@@ -1636,8 +1884,9 @@ export function buildOpenApiDocument(serverUrl: string) {
           tag: 'Invoices',
           summary: 'Mark an invoice paid',
           description:
-            'Records that an `open` (or overdue) invoice was paid outside Invoice-AI — no money moves. Drafts, void and already-paid invoices return `409`. Sets `paid_at` and `amount_due: 0`. The response omits `lines`. Emits `invoice.paid`, with `reference` in the event meta.',
+            'Marks an `open` (or overdue) invoice paid outside Invoice-AI — no money moves. `paid_on` is an ISO 8601 date or timestamp (defaults to now); `reference` is up to 200 characters. Drafts, void and already-paid invoices return `409`. The response omits `lines`. Emits `invoice.paid`, with `reference` in its meta.',
           scope: 'payments:write',
+          sdk: { call: 'invoices.pay', result: 'invoice', print: 'invoice.status, invoice.paid_at' },
           idempotency: 'required',
           requestParams: { path: idParam('The invoice, `in_…` or UUID.', EX.invoice) },
           requestBody: { ...json(payBody, { paid_on: '2026-09-29', reference: 'chk_123456' }), required: false },
@@ -1661,8 +1910,9 @@ export function buildOpenApiDocument(serverUrl: string) {
           tag: 'Invoices',
           summary: 'Void an invoice',
           description:
-            'Voids an `open` (or overdue) invoice with a reason. The number stays on the record — an auditor seeing 0041 then 0043 needs to find 0042 voided, not missing. A paid invoice cannot be voided (it needs a credit note); a draft should be deleted instead. The response omits `lines`. Emits `invoice.voided`.',
+            'Voids an `open` (or overdue) invoice. `reason` is required, up to 500 characters. The number stays on record, so the series has no gaps. A paid invoice cannot be voided (it needs a credit note) and a draft should be deleted instead — both `409`. The response omits `lines`. Emits `invoice.voided`.',
           scope: 'invoices:finalize',
+          sdk: { call: 'invoices.void', result: 'invoice', print: 'invoice.status, invoice.void_reason' },
           idempotency: 'required',
           requestParams: { path: idParam('The invoice, `in_…` or UUID.', EX.invoice) },
           requestBody: json(voidBody, { reason: 'Raised against the wrong customer.' }),
@@ -1689,8 +1939,9 @@ export function buildOpenApiDocument(serverUrl: string) {
           tag: 'Invoices',
           summary: 'Download an invoice PDF',
           description:
-            'Returns the PDF bytes (not a link), rendered on demand from the current invoice, so it is always up to date. Works for drafts too (without a number). Served inline; pass `download=1` for `Content-Disposition: attachment`. Not cacheable (`Cache-Control: private, no-store`).',
+            'Returns the PDF bytes (not a link), rendered on demand from the current invoice — drafts too, without a number. Served inline; pass `download=1` for `Content-Disposition: attachment`. Not cacheable.',
           scope: 'invoices:read',
+          sdk: { call: 'invoices.pdf' },
           requestParams: {
             path: idParam('The invoice, `in_…` or UUID.', EX.invoice),
             query: z.object({
@@ -1723,8 +1974,9 @@ export function buildOpenApiDocument(serverUrl: string) {
           tag: 'Invoices',
           summary: 'List invoice events',
           description:
-            'Returns the history of one invoice, newest first, cursor-paginated: created, updated, finalized, emailed, viewed, downloaded, paid, voided. `invoice.viewed` and `invoice.downloaded` are recorded when the customer opens the public link — the way to tell they actually looked at it.',
+            'Lists one invoice’s history, newest first: created, updated, finalized, emailed, viewed, downloaded, paid, voided. `invoice.viewed` and `invoice.downloaded` mean the customer opened the public link; each is recorded at most once per invoice every 10 minutes.',
           scope: 'invoices:read',
+          sdk: { call: 'invoices.events', result: 'event', print: 'event.type, event.created_at' },
           requestParams: { path: idParam('The invoice, `in_…` or UUID.', EX.invoice), query: cursorParams },
           responses: {
             '200': ok('A page of events, newest first.', page(eventOut, 'Events'), { data: eventExamples, next_cursor: null }),
@@ -1740,8 +1992,9 @@ export function buildOpenApiDocument(serverUrl: string) {
           operationId: 'listInvoiceItems',
           tag: 'Invoice items',
           summary: 'List invoice items',
-          description: 'Returns every line of one invoice, in order (not paginated). `invoice` is required.',
+          description: 'Returns every line of one invoice, in order. `invoice` is required; the result is not paginated.',
           scope: 'invoices:read',
+          sdk: { call: 'invoiceItems.list', result: 'item', print: 'item.description, item.amount', query: { invoice: EX.invoice } },
           requestParams: {
             query: z.object({
               invoice: z.string().meta({ description: 'The invoice, `in_…` or UUID.', examples: [EX.invoice] }),
@@ -1765,8 +2018,9 @@ export function buildOpenApiDocument(serverUrl: string) {
           tag: 'Invoice items',
           summary: 'Add an invoice item',
           description:
-            'Appends one line to a draft: either a `price`, or `description` + `unit_amount`. Totals are recomputed, so the response is the whole invoice; every line gets a new id. Finalized invoices return `409`. Emits `invoice.updated`.',
+            'Appends a line to a draft: a `price`, or `description` + `unit_amount`. Returns the whole recomputed invoice; every line gets a new id. Finalized invoices return `409`. Emits `invoice.updated`.',
           scope: 'invoices:write',
+          sdk: { call: 'invoiceItems.create', result: 'invoice', print: 'invoice.total' },
           alsoRequires: [{ scope: 'business:read' }],
           idempotency: 'required',
           requestBody: json(invoiceItemCreateBody, { invoice: EX.invoice, description: 'Extra review round', quantity: 1, unit_amount: 10000 }),
@@ -1792,8 +2046,9 @@ export function buildOpenApiDocument(serverUrl: string) {
           operationId: 'retrieveInvoiceItem',
           tag: 'Invoice items',
           summary: 'Retrieve an invoice item',
-          description: 'Returns one line by `ii_…` id or UUID, from any of your invoices.',
+          description: 'Returns one invoice line by `ii_…` id or UUID.',
           scope: 'invoices:read',
+          sdk: { call: 'invoiceItems.retrieve', result: 'item', print: 'item.description, item.amount' },
           requestParams: { path: idParam('The line, `ii_…` or UUID.', EX.line1) },
           responses: {
             '200': ok('The line.', single(lineItemOut, 'The line.'), { data: pricedLine }),
@@ -1806,8 +2061,9 @@ export function buildOpenApiDocument(serverUrl: string) {
           tag: 'Invoice items',
           summary: 'Remove an invoice item',
           description:
-            'Removes one line from a draft and returns the whole recomputed invoice. A draft always keeps at least one line (`409` for the last one); finalized invoices return `409`. Pass `invoice` to scope the lookup to one invoice. Emits `invoice.updated`.',
+            'Removes a line from a draft and returns the recomputed invoice. A draft keeps at least one line, and finalized invoices are frozen — both `409`. Pass `invoice` to speed up the lookup. Emits `invoice.updated`.',
           scope: 'invoices:write',
+          sdk: { call: 'invoiceItems.del', result: 'invoice', print: 'invoice.total' },
           alsoRequires: [{ scope: 'business:read' }],
           requestParams: {
             path: idParam('The line, `ii_…` or UUID.', EX.line3),
@@ -1832,8 +2088,9 @@ export function buildOpenApiDocument(serverUrl: string) {
           operationId: 'listWebhookEndpoints',
           tag: 'Webhook endpoints',
           summary: 'List webhook endpoints',
-          description: 'Returns your webhook endpoints, newest first, cursor-paginated. Signing secrets are never included — only once, at creation.',
+          description: 'Lists your webhook endpoints, newest first. Signing secrets are never included.',
           scope: 'webhooks:manage',
+          sdk: { call: 'webhookEndpoints.list', result: 'endpoint', print: 'endpoint.url, endpoint.active' },
           requestParams: { query: cursorParams },
           responses: {
             '200': ok('A page of endpoints.', page(webhookEndpointOut, 'Webhook endpoints'), { data: [webhookExample], next_cursor: null }),
@@ -1845,9 +2102,12 @@ export function buildOpenApiDocument(serverUrl: string) {
           operationId: 'createWebhookEndpoint',
           tag: 'Webhook endpoints',
           summary: 'Create a webhook endpoint',
-          description:
-            'Registers an https URL to receive events. The response carries the signing `secret` (`whsec_` + base64) — the only time it is returned, so store it. The URL must use https and must not resolve to a private, loopback or link-local address.',
+          description: [
+            'Registers a URL to receive signed invoice events. The response carries the signing `secret` (`whsec_…`) — the only time it is returned, so store it.',
+            '**URL rules:** `https` only, at most 2048 characters, no username or password, and every address it resolves to must be public — private, loopback, link-local and IPv4-embedding IPv6 ranges (NAT64, 6to4, Teredo) are rejected. The check runs again at every delivery, and redirects are not followed.',
+          ].join('\n\n'),
           scope: 'webhooks:manage',
+          sdk: { call: 'webhookEndpoints.create', result: 'endpoint', print: 'endpoint.secret', note: 'returned only once — store it' },
           idempotency: 'optional',
           requestBody: json(webhookCreateBody, {
             url: 'https://example.com/webhooks/invoice-ai',
@@ -1869,7 +2129,7 @@ export function buildOpenApiDocument(serverUrl: string) {
               'optional',
             ),
             '409': problem('A request with the same Idempotency-Key is still running.', [IN_FLIGHT]),
-            '422': validationFailed('The URL is invalid, not https or private, or an event type is unknown.', [
+            '422': validationFailed('The URL breaks a rule above (not https, too long, has credentials, or resolves to a non-public address), or an event type is unknown.', [
               { detail: 'Webhook URLs must use https.', errors: [{ path: 'url', message: 'Webhook URLs must use https.' }] },
               { detail: 'Unknown event type: invoice.overdue.', errors: [{ path: 'events', message: `Valid types are ${WEBHOOK_EVENTS.join(', ')}.` }] },
             ]),
@@ -1883,9 +2143,9 @@ export function buildOpenApiDocument(serverUrl: string) {
           operationId: 'deleteWebhookEndpoint',
           tag: 'Webhook endpoints',
           summary: 'Delete a webhook endpoint',
-          description:
-            'Permanently deletes the endpoint; no further deliveries are made to it. Deleting it again is a `404`, not a silent success — that usually means you are working from a stale list.',
+          description: 'Permanently deletes an endpoint; no further deliveries are made to it. Deleting it again is a `404`.',
           scope: 'webhooks:manage',
+          sdk: { call: 'webhookEndpoints.del' },
           requestParams: { path: idParam('The endpoint id (UUID).', EX.webhook) },
           responses: {
             '204': noContentResponse('Deleted. No body.'),
@@ -1894,7 +2154,7 @@ export function buildOpenApiDocument(serverUrl: string) {
           },
         }),
       },
-    },
+    }, serverUrl),
   })
 }
 

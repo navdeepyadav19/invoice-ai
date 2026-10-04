@@ -1,49 +1,49 @@
 ---
 title: "Scripting & CI"
-description: "Use the CLI from shell scripts and CI jobs: an API key from the environment, JSON output and exit codes."
+description: "Run the CLI in scripts and CI with an API key, JSON output and exit codes."
 icon: "gears"
 ---
 
-## Authenticate with an environment variable
+## Authenticate
 
-In CI, don't run `invoice-ai login`. Set `INVOICE_AI_API_KEY` instead:
+In CI, skip `invoice-ai login` and set `INVOICE_AI_API_KEY`:
 
 ```bash
 export INVOICE_AI_API_KEY=inv_live_...
 invoice-ai whoami
 ```
 
-The CLI picks a key in this order: the `--api-key` flag, then `INVOICE_AI_API_KEY`, then your saved profile. Give the CI key only the scopes the job needs.
+The CLI uses the first key it finds: `--api-key`, then `INVOICE_AI_API_KEY`, then the saved profile. Give a CI key only the scopes the job needs.
 
 ## JSON output
 
-Output is a table in a terminal and JSON when piped. Add `--json` to always get JSON, for example to use with `jq`:
+Output is a table in a terminal and JSON when piped. Pass `--json` to force JSON, or `--format csv`.
 
 ```bash
 invoice-ai invoices list --status overdue --all --json | jq -r '.data[].number'
 ```
 
-A single object prints as the object itself. A list prints as `{ "data": [...], "next_cursor": ... }`. Messages and errors go to stderr, so stdout stays valid JSON.
+A single object prints as the object. A list prints as `{ "data": [...], "next_cursor": ... }`. Messages and errors go to stderr, so stdout stays valid JSON.
 
-## Never prompt
+## No prompts
 
-- Commands that ask for confirmation (`send`, `void`, `delete`, `archive`) need `--yes` when there's no terminal.
-- `invoices create` starts a wizard in a terminal. Pass flags (`--customer`, `--price`) and `--no-interactive` to skip it.
-- With `CI` set, the CLI never prompts. A command that would need a prompt fails with exit code `2`.
+- `send`, `void`, `delete` and `archive` ask for confirmation. Pass `--yes` to skip it.
+- `invoices create` starts a wizard in a terminal. Pass `--no-interactive` with flags such as `--customer` and `--price`.
+- When `CI` is set or there's no terminal, the CLI never prompts. A command that needs a prompt exits with code `2`.
 
 ## Exit codes
 
 | Code | Meaning |
 |---|---|
 | `0` | Success |
-| `1` | API or runtime error, such as `invalid_state`, `not_found` or a network failure |
-| `2` | Usage error: a bad flag or argument, or a prompt was needed without a terminal |
-| `3` | Auth error: the key is missing or invalid (`401`), or it lacks a scope (`403`) |
-| `4` | Rate limited (`429`), after the automatic retries |
+| `1` | API or runtime error, such as `invalid_state` or a network failure |
+| `2` | Usage error, or a prompt was needed without a terminal |
+| `3` | Auth error: missing or invalid key (`401`), or a missing scope (`403`) |
+| `4` | Rate limited (`429`) after retries |
 
 ## GitHub Actions example
 
-This job emails every draft invoice each Monday:
+Send every draft invoice each Monday:
 
 ```yaml .github/workflows/send-invoices.yml
 name: Send draft invoices
@@ -66,4 +66,4 @@ jobs:
           done
 ```
 
-The key needs `invoices:read` and `invoices:send`. Sending is limited to 10 per hour per key, so a large batch ends with exit code `4`.
+The key needs `invoices:read` and `invoices:send`. Sending is capped at 10 emails per hour per key and 50 per account, so a large batch stops with exit code `4`.

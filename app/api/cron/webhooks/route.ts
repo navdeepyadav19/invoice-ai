@@ -6,7 +6,18 @@ import { systemDb } from '@/lib/db/system'
 import { deliver, nextAttemptAt } from '@/lib/webhooks/deliver'
 import type { WebhookDeliveryRow, WebhookEndpointRow } from '@/lib/database.types'
 
-export const maxDuration = 60
+export const maxDuration = 300
+
+/** Rows claimed per round trip. Claiming pushes each row an hour out. */
+const BATCH_SIZE = 50
+
+/**
+ * Stop claiming new work after this long. One delivery can take up to its 10s
+ * timeout, so the margin under maxDuration covers the batch in flight. Rows
+ * claimed but not reached are retried by a later run (claiming moved them an
+ * hour out), so running out of time loses nothing.
+ */
+const TIME_BUDGET_MS = 240_000
 
 /**
  * The webhook delivery worker.
@@ -18,7 +29,9 @@ export const maxDuration = 60
  * The schedule is DAILY because Vercel's Hobby plan allows only one cron run
  * per day — a tighter schedule is rejected at deploy time. On Pro, change it to
  * run every 5 minutes; until then a failed webhook can wait up to 24h for its retry,
- * which makes webhooks close to unusable for anything time-sensitive. (This
+ * which makes webhooks close to unusable for anything time-sensitive. Each run
+ * keeps claiming batches until the outbox is empty or the time budget is spent,
+ * so a busy day is drained in one run rather than 50 deliveries at a time. (This
  * note lives here because vercel.json's schema rejects extra keys like
  * "comment" and fails the build.)
  *
@@ -48,34 +61,52 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const admin = systemDb()
+  const deadline = Date.now() + TIME_BUDGET_MS
+  const totals = { claimed: 0, succeeded: 0, dead: 0 }
 
-  let deliveries: WebhookDeliveryRow[]
-  try {
-    deliveries = (await claimDueWebhookDeliveries(admin, 50)) as unknown as WebhookDeliveryRow[]
-  } catch (cause) {
-    console.error('[webhooks] could not claim deliveries', cause)
-    return Response.json({ error: 'Could not claim deliveries.' }, { status: 500 })
+  while (Date.now() < deadline) {
+    let deliveries: WebhookDeliveryRow[]
+    try {
+      deliveries = (await claimDueWebhookDeliveries(admin, BATCH_SIZE)) as unknown as WebhookDeliveryRow[]
+    } catch (cause) {
+      console.error('[webhooks] could not claim deliveries', cause)
+      return Response.json({ error: 'Could not claim deliveries.', ...totals }, { status: 500 })
+    }
+
+    if (!deliveries.length) break
+    totals.claimed += deliveries.length
+
+    const batch = await deliverBatch(admin, deliveries, deadline)
+    if (!batch.ok) return Response.json({ error: batch.error, ...totals }, { status: 500 })
+
+    totals.succeeded += batch.succeeded
+    totals.dead += batch.dead
+    if (deliveries.length < BATCH_SIZE) break
   }
 
-  if (!deliveries.length) return Response.json({ claimed: 0, succeeded: 0, dead: 0 })
+  return Response.json(totals)
+}
 
-  // Endpoints are fetched once rather than per delivery: a burst of events for
-  // one subscriber is the normal case, not the exception.
+async function deliverBatch(
+  admin: Db,
+  deliveries: WebhookDeliveryRow[],
+  deadline: number,
+): Promise<{ ok: true; succeeded: number; dead: number } | { ok: false; error: string }> {
+  // Endpoints are fetched once per batch rather than per delivery: a burst of
+  // events for one subscriber is the normal case, not the exception.
   const endpointIds = [...new Set(deliveries.map((d) => d.endpoint_id))]
   let endpointRows: WebhookEndpointRow[] = []
   try {
-    endpointRows = endpointIds.length
-      ? ((await admin
-          .selectFrom('webhook_endpoints')
-          .selectAll()
-          .where('id', 'in', endpointIds)
-          .execute()) as unknown as WebhookEndpointRow[])
-      : []
+    endpointRows = (await admin
+      .selectFrom('webhook_endpoints')
+      .selectAll()
+      .where('id', 'in', endpointIds)
+      .execute()) as unknown as WebhookEndpointRow[]
   } catch (cause) {
     // Nothing has been sent yet. Claiming only pushed next_attempt_at an hour
     // out, so these rows are picked up again by a later run.
     console.error('[webhooks] could not load endpoints', cause)
-    return Response.json({ error: 'Could not load endpoints.' }, { status: 500 })
+    return { ok: false, error: 'Could not load endpoints.' }
   }
 
   const endpoints = new Map(endpointRows.map((row) => [row.id, row]))
@@ -86,6 +117,9 @@ export async function POST(request: Request): Promise<Response> {
   // Sequential on purpose. Firing 50 concurrent requests at a handful of
   // subscribers is indistinguishable from a small DoS from their side.
   for (const delivery of deliveries) {
+    // Out of time: leave the rest claimed. They come due again in an hour.
+    if (Date.now() >= deadline) break
+
     const endpoint = endpoints.get(delivery.endpoint_id)
 
     if (!endpoint || endpoint.disabled_at || !endpoint.active) {
@@ -107,13 +141,14 @@ export async function POST(request: Request): Promise<Response> {
     if (next) {
       await finish(admin, delivery.id, 'pending', result.status ?? null, result.error ?? null, next)
     } else {
-      // Ladder exhausted — roughly 35 hours of trying.
+      // Ladder exhausted: seven attempts. On a daily schedule that is about a
+      // week of trying; on a 5-minute schedule, about 35 hours.
       await finish(admin, delivery.id, 'dead', result.status ?? null, result.error ?? null, null)
       dead += 1
     }
   }
 
-  return Response.json({ claimed: deliveries.length, succeeded, dead })
+  return { ok: true, succeeded, dead }
 }
 
 /** Vercel Cron issues GET. Same work either way. */

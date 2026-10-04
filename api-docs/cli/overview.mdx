@@ -1,31 +1,46 @@
 ---
-title: "Install & login"
-description: "Manage invoices from your terminal."
+title: "Overview"
+description: "Install the invoice-ai CLI, log in with your browser, and manage invoices from your terminal."
 icon: "terminal"
 ---
 
-## Install and log in
+## Install
 
-Requires **Node 20+**.
+Requires Node 20 or later.
 
 ```bash
 npm install -g @horizonpay/invoice-ai-cli
+```
+
+Or run it once without installing: `npx @horizonpay/invoice-ai-cli invoices list`.
+
+## Log in
+
+```bash
 invoice-ai login
 ```
 
-`login` opens your browser. Approve the request, and the CLI saves a key to your OS keychain. In CI, set `INVOICE_AI_API_KEY` instead. See [Scripting & CI](/cli/scripting-and-ci).
+The CLI shows a one-time code and opens your browser. Approve the device there. The CLI gets a new API key for this machine and stores it in your OS keychain.
+
+- `invoice-ai whoami` shows the account, key and profile in use.
+- `invoice-ai logout` revokes the key and forgets it.
+- `invoice-ai login --no-browser` prints the login URL instead of opening a browser.
+- `invoice-ai login --api-key inv_live_...` stores an existing key.
+- `invoice-ai login --profile work` adds another account. Switch with `invoice-ai switch work`, or pass `--profile work` to any command.
 
 ## Everyday commands
 
 ```bash
-invoice-ai whoami                          # who am I logged in as
-invoice-ai customers list                  # table in a terminal, JSON when piped
-invoice-ai invoices create                 # guided wizard
-invoice-ai invoices send in_…              # email it
-invoice-ai invoices pdf in_… --open        # download and open the PDF
-invoice-ai api GET /business               # call any endpoint
+invoice-ai customers create --name "Acme Ltd" --email billing@acme.example
+invoice-ai invoices create                     # guided wizard
+invoice-ai invoices create --customer cus_Nf3kQ8pR2mX7vB1cT9wL4sZ6 --price price_... --send
+invoice-ai invoices list --status open
+invoice-ai invoices send in_Pb2Xk7Mv4Qs9Lr1Wd6Tn3Fh8
+invoice-ai invoices pdf in_Pb2Xk7Mv4Qs9Lr1Wd6Tn3Fh8 --open
+invoice-ai webhooks test http://localhost:3000/api/webhooks/invoice-ai --secret whsec_...
+invoice-ai api GET /business                   # call any endpoint
 ```
 
-Add `--json` for scripts, `--yes` to skip confirmations, and `--profile` to switch accounts.
+Global flags: `--json` for JSON output, `--yes` to skip confirmations, `--profile` to pick an account, `--debug` to log each request.
 
 See the [command reference](/cli/commands) for every command and flag.

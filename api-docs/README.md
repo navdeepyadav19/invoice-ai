@@ -5,15 +5,19 @@ Source for the developer docs site at **docs.horizonpay.co**, built with
 
 ```
 api-docs/
-├── docs.json                 # site config: theme, colors, navbar, navigation, API playground
+├── docs.json                 # site config: theme, colors, navbar, navigation, redirects, API playground
 ├── openapi.json              # GENERATED — the API reference is built from this. Never hand-edit.
-├── introduction.mdx …        # "Docs" tab pages (guides/ holds tutorials)
-├── sdks/ cli/                # "SDKs" and "CLI" tabs
+├── introduction.mdx …        # "Docs" tab: Get started, Basics and Webhooks pages
+├── sdks/                     # "SDKs" tab: node.mdx, python.mdx
+├── cli/                      # "CLI" tab. commands.mdx is synced from the SDK repo; don't edit it here.
 ├── api-reference/            # "API reference" tab overview page
 ├── changelog.mdx postman.mdx # linked from the footer, not the sidebar
 ├── logo/ favicon.svg         # branding
 └── .mintignore               # keeps this README out of the published site
 ```
+
+When you remove or rename a page, add an entry to `redirects` in `docs.json`
+so old links keep working.
 
 ## Run locally
 
@@ -51,7 +55,9 @@ without touching `docs.json`.
 The hand-written guides (`*.mdx`) describe behaviour in `lib/api/*`,
 `lib/services/*`, `lib/webhooks/*` and `lib/auth/scopes.ts`. If you change
 rate limits, scopes, error codes, idempotency rules, webhook events or the
-retry schedule, update the matching page too.
+retry schedule, update the matching page too. Code samples use the SDKs in
+the separate `invoice-ai-sdk` repository; keep them in step with its method
+names.
 
 ## Deploy
 

@@ -305,3 +305,126 @@ describe('OpenAPI document', () => {
     }
   })
 })
+
+// ---------------------------------------------------------------------------
+// Code samples
+// ---------------------------------------------------------------------------
+
+/**
+ * Every SDK call, copied from the published SDKs' own operation tables
+ * (navdeepyadav19/invoice-ai-sdk, v0.1.0): packages/sdk-ts/src/generated/operations.ts
+ * and packages/sdk-python/invoice_ai/_operations.py. A sample naming anything
+ * else would not run. Update this when the SDKs add or rename a method.
+ */
+const SDK_CALLS: Record<string, { node: string; python: string }> = {
+  getBusiness: { node: 'business.retrieve', python: 'business.retrieve' },
+  listCustomers: { node: 'customers.list', python: 'customers.list' },
+  createCustomer: { node: 'customers.create', python: 'customers.create' },
+  retrieveCustomer: { node: 'customers.retrieve', python: 'customers.retrieve' },
+  updateCustomer: { node: 'customers.update', python: 'customers.update' },
+  deleteCustomer: { node: 'customers.del', python: 'customers.delete' },
+  listProducts: { node: 'products.list', python: 'products.list' },
+  createProduct: { node: 'products.create', python: 'products.create' },
+  retrieveProduct: { node: 'products.retrieve', python: 'products.retrieve' },
+  updateProduct: { node: 'products.update', python: 'products.update' },
+  archiveProduct: { node: 'products.archive', python: 'products.archive' },
+  listPrices: { node: 'prices.list', python: 'prices.list' },
+  createPrice: { node: 'prices.create', python: 'prices.create' },
+  retrievePrice: { node: 'prices.retrieve', python: 'prices.retrieve' },
+  updatePrice: { node: 'prices.update', python: 'prices.update' },
+  archivePrice: { node: 'prices.archive', python: 'prices.archive' },
+  listInvoices: { node: 'invoices.list', python: 'invoices.list' },
+  createInvoice: { node: 'invoices.create', python: 'invoices.create' },
+  retrieveInvoice: { node: 'invoices.retrieve', python: 'invoices.retrieve' },
+  updateInvoice: { node: 'invoices.update', python: 'invoices.update' },
+  deleteInvoice: { node: 'invoices.del', python: 'invoices.delete' },
+  finalizeInvoice: { node: 'invoices.finalize', python: 'invoices.finalize' },
+  sendInvoice: { node: 'invoices.send', python: 'invoices.send' },
+  payInvoice: { node: 'invoices.pay', python: 'invoices.pay' },
+  voidInvoice: { node: 'invoices.void', python: 'invoices.void' },
+  retrieveInvoicePdf: { node: 'invoices.pdf', python: 'invoices.pdf' },
+  listInvoiceEvents: { node: 'invoices.events', python: 'invoices.events' },
+  listInvoiceItems: { node: 'invoiceItems.list', python: 'invoice_items.list' },
+  createInvoiceItem: { node: 'invoiceItems.create', python: 'invoice_items.create' },
+  retrieveInvoiceItem: { node: 'invoiceItems.retrieve', python: 'invoice_items.retrieve' },
+  deleteInvoiceItem: { node: 'invoiceItems.del', python: 'invoice_items.delete' },
+  listWebhookEndpoints: { node: 'webhookEndpoints.list', python: 'webhook_endpoints.list' },
+  createWebhookEndpoint: { node: 'webhookEndpoints.create', python: 'webhook_endpoints.create' },
+  deleteWebhookEndpoint: { node: 'webhookEndpoints.del', python: 'webhook_endpoints.delete' },
+}
+
+type CodeSample = { lang: string; label: string; source: string }
+
+const samplesOf = (op: Operation) => (op as Operation & { 'x-codeSamples'?: CodeSample[] })['x-codeSamples'] ?? []
+
+describe('x-codeSamples', () => {
+  it('gives every operation exactly a cURL, a Node.js and a Python sample', () => {
+    for (const { key, op } of operations) {
+      expect(samplesOf(op).map(({ lang, label }) => `${label}:${lang}`), key).toEqual([
+        'cURL:bash',
+        'Node.js:node',
+        'Python:python',
+      ])
+    }
+  })
+
+  it('calls exactly the SDK method each SDK has for the operation', () => {
+    expect(Object.keys(SDK_CALLS).sort()).toEqual(operations.map(({ op }) => op.operationId).sort())
+
+    for (const { key, op } of operations) {
+      const [, node, python] = samplesOf(op)
+      const expected = SDK_CALLS[op.operationId!]
+      expect([...node.source.matchAll(/invoiceai\.(\w+\.\w+)\(/g)].map((m) => m[1]), `${key} Node.js`).toEqual([expected.node])
+      expect([...python.source.matchAll(/client\.(\w+\.\w+)\(/g)].map((m) => m[1]), `${key} Python`).toEqual([expected.python])
+      expect(node.source).toContain("import InvoiceAI from '@horizonpay/invoice-ai'")
+      expect(python.source).toContain('from invoice_ai import InvoiceAI')
+    }
+  })
+
+  it('agrees with the naming rules the SDK generators apply to this spec', async () => {
+    // scripts/sdk-gen/spec.ts is the same naming code the SDK repo generates
+    // from, so a renamed operationId or tag fails here before the SDKs change.
+    const { mkdtempSync, writeFileSync } = await import('node:fs')
+    const { tmpdir } = await import('node:os')
+    const { loadSpec } = await import('../../scripts/sdk-gen/spec')
+    const file = join(mkdtempSync(join(tmpdir(), 'openapi-')), 'openapi.json')
+    writeFileSync(file, JSON.stringify(document))
+
+    for (const op of loadSpec(file).operations) {
+      expect(SDK_CALLS[op.operationId]?.node, op.operationId).toBe(`${op.resource.property}.${op.sdkMethod}`)
+      const pyMethod = op.sdkMethod === 'del' ? 'delete' : op.sdkMethod
+      expect(SDK_CALLS[op.operationId]?.python, op.operationId).toBe(`${op.resource.snake}.${pyMethod}`)
+    }
+  })
+
+  it('sends the documented request in cURL: method, path, auth, Idempotency-Key and body', () => {
+    for (const { key, op, method, path } of operations) {
+      const curl = samplesOf(op)[0].source
+      const url = /^curl (?:-X (\w+) )?"?(\S+?)"?(?: \\|$)/m.exec(curl)
+      expect(url, key).not.toBeNull()
+      const explicit = url![1]
+      const sent = explicit ?? (curl.includes(' -d ') ? 'POST' : 'GET')
+      expect(sent, key).toBe(method.toUpperCase())
+
+      const { pathname } = new URL(url![2])
+      expect(pathname.replace(/^\/api\/v1/, ''), key).toMatch(new RegExp(`^${path.replace('{id}', '[^/]+')}$`))
+
+      expect(curl, key).toContain('-H "Authorization: Bearer $INVOICE_AI_API_KEY"')
+      const header = op.parameters?.find((p) => p.in === 'header' && p.name === 'Idempotency-Key')
+      expect(curl.includes('Idempotency-Key:'), `${key} Idempotency-Key`).toBe(Boolean(header))
+
+      const example = op.requestBody?.content?.['application/json']?.example
+      const data = /-d '([\s\S]*)'$/.exec(curl)?.[1]
+      if (example) expect(JSON.parse(data!.replace(/'\\''/g, "'")), `${key} body`).toEqual(example)
+      else expect(data, `${key} body`).toBeUndefined()
+    }
+  })
+
+  it('keeps samples short', () => {
+    for (const { key, op } of operations) {
+      for (const sample of samplesOf(op)) {
+        expect(sample.source.split('\n').length, `${key} ${sample.label}`).toBeLessThanOrEqual(22)
+      }
+    }
+  })
+})

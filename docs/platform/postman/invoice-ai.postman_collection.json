@@ -71,7 +71,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "description": "Returns the business profile invoices are issued from: legal name, address, tax id, default currency, bank details and invoice prefix. Read-only — the profile is edited in the app.\n\n**Scope:** `business:read`",
+            "description": "Returns your business profile — the issuer printed on every invoice: legal name, address, tax id, default currency, bank details and invoice prefix. Read-only over the API; edit it in Settings.\n\n**Scope:** `business:read`",
             "url": {
               "raw": "{{base_url}}/business",
               "host": [
@@ -112,7 +112,7 @@
                 "value": "application/json"
               }
             ],
-            "description": "Creates a customer you can bill. Only `name` is required. Creating does not deduplicate — two calls with the same name make two customers.\n\n**Scope:** `clients:write`\n\n**Idempotency:** `Idempotency-Key` header optional. When sent, a retry with the same key and body replays the first response with `Idempotent-Replayed: true`; the same key with a different body is a `422` `idempotency_mismatch`.",
+            "description": "Creates a customer to bill. Only `name` is required. Calls are not deduplicated: the same name twice makes two customers.\n\n**Scope:** `clients:write`\n\n**Idempotency:** `Idempotency-Key` optional. With one, a retry with the same key and body replays the first response (`Idempotent-Replayed: true`); the same key with a different body is a `422` `idempotency_mismatch`.",
             "url": {
               "raw": "{{base_url}}/customers",
               "host": [
@@ -153,7 +153,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "description": "Returns customers newest first, cursor-paginated. Archived customers are excluded unless `include_deleted=true`.\n\n**Scope:** `clients:read`",
+            "description": "Lists customers, newest first. Archived customers are left out unless `include_deleted=true`.\n\n**Scope:** `clients:read`",
             "url": {
               "raw": "{{base_url}}/customers",
               "host": [
@@ -189,7 +189,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "description": "Returns one customer by `cus_…` id or UUID, including archived ones (`deleted: true`).\n\n**Scope:** `clients:read`",
+            "description": "Returns a customer by `cus_…` id or UUID, including archived ones (`deleted: true`).\n\n**Scope:** `clients:read`",
             "url": {
               "raw": "{{base_url}}/customers/{{customer_id}}",
               "host": [
@@ -231,7 +231,7 @@
                 "value": "application/json"
               }
             ],
-            "description": "Updates the fields you send and leaves the rest unchanged. Existing invoices are not affected — each invoice keeps a snapshot of the customer as billed. Naturally idempotent, so no `Idempotency-Key` is needed.\n\n**Scope:** `clients:write`",
+            "description": "Updates the fields you send and leaves the rest unchanged. Issued invoices keep the customer details they were billed with. No `Idempotency-Key` needed — repeating the call is harmless.\n\n**Scope:** `clients:write`",
             "url": {
               "raw": "{{base_url}}/customers/{{customer_id}}",
               "host": [
@@ -277,7 +277,7 @@
                 "value": "application/json"
               }
             ],
-            "description": "Creates a product. Add one or more prices to it with `POST /prices` before billing it.\n\n**Scope:** `products:write`\n\n**Idempotency:** `Idempotency-Key` header optional. When sent, a retry with the same key and body replays the first response with `Idempotent-Replayed: true`; the same key with a different body is a `422` `idempotency_mismatch`.",
+            "description": "Creates a product. Amounts live on prices: add one with `POST /prices` before billing it.\n\n**Scope:** `products:write`\n\n**Idempotency:** `Idempotency-Key` optional. With one, a retry with the same key and body replays the first response (`Idempotent-Replayed: true`); the same key with a different body is a `422` `idempotency_mismatch`.",
             "url": {
               "raw": "{{base_url}}/products",
               "host": [
@@ -318,7 +318,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "description": "Returns products newest first, cursor-paginated. Archived products are included unless you filter with `active`.\n\n**Scope:** `products:read`",
+            "description": "Lists products, newest first. Archived products are included unless you filter with `active`.\n\n**Scope:** `products:read`",
             "url": {
               "raw": "{{base_url}}/products",
               "host": [
@@ -354,7 +354,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "description": "Returns one product by `prod_…` id or UUID, whether active or archived.\n\n**Scope:** `products:read`",
+            "description": "Returns a product by `prod_…` id or UUID, active or archived.\n\n**Scope:** `products:read`",
             "url": {
               "raw": "{{base_url}}/products/{{product_id}}",
               "host": [
@@ -396,7 +396,7 @@
                 "value": "application/json"
               }
             ],
-            "description": "Updates the fields you send and leaves the rest unchanged — omitted fields are never reset to defaults. Send `active: true` to restore an archived product. Finalized invoices keep the line descriptions they were issued with.\n\n**Scope:** `products:write`",
+            "description": "Updates the fields you send and leaves the rest unchanged. Send `active: true` to restore an archived product. Finalized invoices keep the line descriptions they were issued with.\n\n**Scope:** `products:write`",
             "url": {
               "raw": "{{base_url}}/products/{{product_id}}",
               "host": [
@@ -442,7 +442,7 @@
                 "value": "application/json"
               }
             ],
-            "description": "Adds a price to a product. `unit_amount` is integer minor units. A `recurring` price needs `recurring.interval`; it is stored for reporting — nothing auto-bills yet.\n\n**Scope:** `products:write`\n\n**Idempotency:** `Idempotency-Key` header optional. When sent, a retry with the same key and body replays the first response with `Idempotent-Replayed: true`; the same key with a different body is a `422` `idempotency_mismatch`.",
+            "description": "Adds a price to a product. `unit_amount` is in integer minor units. A `recurring` price needs `recurring.interval`; it is stored for reporting — nothing auto-bills yet.\n\n**Scope:** `products:write`\n\n**Idempotency:** `Idempotency-Key` optional. With one, a retry with the same key and body replays the first response (`Idempotent-Replayed: true`); the same key with a different body is a `422` `idempotency_mismatch`.",
             "url": {
               "raw": "{{base_url}}/prices",
               "host": [
@@ -483,7 +483,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "description": "Returns prices newest first, cursor-paginated, optionally filtered by product, active flag, currency or type. An unknown `product` is a `404`, not an empty page.\n\n**Scope:** `products:read`",
+            "description": "Lists prices, newest first, optionally filtered by `product`, `active`, `currency` or `type`. An unknown `product` is a `404`, not an empty page.\n\n**Scope:** `products:read`",
             "url": {
               "raw": "{{base_url}}/prices",
               "host": [
@@ -519,7 +519,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "description": "Returns one price by `price_…` id or UUID, whether active or archived.\n\n**Scope:** `products:read`",
+            "description": "Returns a price by `price_…` id or UUID, active or archived.\n\n**Scope:** `products:read`",
             "url": {
               "raw": "{{base_url}}/prices/{{price_id}}",
               "host": [
@@ -561,7 +561,7 @@
                 "value": "application/json"
               }
             ],
-            "description": "Updates the fields you send and leaves the rest unchanged. The parent product cannot change — sending `product` is a `422`; create a new price instead. Lines on finalized invoices keep the amount they were billed at; a draft with a line from this price picks up the change the next time it is saved.\n\n**Scope:** `products:write`",
+            "description": "Updates the fields you send and leaves the rest unchanged. A price cannot move to another product (`422`) — create a new price instead. Finalized invoices keep the amount they were billed at; a draft picks up the change the next time it is saved.\n\n**Scope:** `products:write`",
             "url": {
               "raw": "{{base_url}}/prices/{{price_id}}",
               "host": [
@@ -607,7 +607,7 @@
                 "value": "application/json"
               }
             ],
-            "description": "Registers an https URL to receive events. The response carries the signing `secret` (`whsec_` + base64) — the only time it is returned, so store it. The URL must use https and must not resolve to a private, loopback or link-local address.\n\n**Scope:** `webhooks:manage`\n\n**Idempotency:** `Idempotency-Key` header optional. When sent, a retry with the same key and body replays the first response with `Idempotent-Replayed: true`; the same key with a different body is a `422` `idempotency_mismatch`.",
+            "description": "Registers a URL to receive signed invoice events. The response carries the signing `secret` (`whsec_…`) — the only time it is returned, so store it.\n\n**URL rules:** `https` only, at most 2048 characters, no username or password, and every address it resolves to must be public — private, loopback, link-local and IPv4-embedding IPv6 ranges (NAT64, 6to4, Teredo) are rejected. The check runs again at every delivery, and redirects are not followed.\n\n**Scope:** `webhooks:manage`\n\n**Idempotency:** `Idempotency-Key` optional. With one, a retry with the same key and body replays the first response (`Idempotent-Replayed: true`); the same key with a different body is a `422` `idempotency_mismatch`.",
             "url": {
               "raw": "{{base_url}}/webhook-endpoints",
               "host": [
@@ -651,7 +651,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "description": "Returns your webhook endpoints, newest first, cursor-paginated. Signing secrets are never included — only once, at creation.\n\n**Scope:** `webhooks:manage`",
+            "description": "Lists your webhook endpoints, newest first. Signing secrets are never included.\n\n**Scope:** `webhooks:manage`",
             "url": {
               "raw": "{{base_url}}/webhook-endpoints",
               "host": [
@@ -702,7 +702,7 @@
                 "value": "{{idempotency_key}}"
               }
             ],
-            "description": "Creates a `draft` for an existing customer. Each line is either a catalog `price` (description, amount and tax rate are borrowed from it) or an ad-hoc `description` + `unit_amount`. Totals are always computed server-side from the lines. The issue date is today; `currency` defaults to your business currency.\n\nA draft has no number yet — call `POST /invoices/{id}/finalize` (or `/send`) to issue it. Emits `invoice.created`.\n\n**Scope:** `invoices:write` + `business:read` + `clients:read`\n\n**Idempotency:** `Idempotency-Key` header **required** (`428` without it). A retry with the same key and body replays the first response with `Idempotent-Replayed: true`; the same key with a different body is a `422` `idempotency_mismatch`.",
+            "description": "Creates a `draft` invoice for an existing customer. Each line is either a catalog `price` (its name, amount and tax rate fill in) or an ad-hoc `description` + `unit_amount`. Totals are computed server-side; `currency` defaults to your business currency.\n\nA draft has no number until you finalize or send it. Emits `invoice.created`.\n\n**Scope:** `invoices:write` + `business:read` + `clients:read`\n\n**Idempotency:** `Idempotency-Key` **required** (`428` without it). A retry with the same key and body replays the first response (`Idempotent-Replayed: true`); the same key with a different body is a `422` `idempotency_mismatch`.",
             "url": {
               "raw": "{{base_url}}/invoices",
               "host": [
@@ -743,7 +743,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "description": "Returns invoices newest first, cursor-paginated, without `lines`. `status=overdue` selects open invoices whose `due_date` is before today (UTC); `status=open` returns every open invoice, overdue ones included. An unknown `customer` is a `404`.\n\n**Scope:** `invoices:read` + `clients:read` (when filtering by `customer`)",
+            "description": "Lists invoices, newest first, without `lines`. `status=overdue` returns open invoices whose `due_date` is before today (UTC); `status=open` includes them. An unknown `customer` filter is a `404`.\n\n**Scope:** `invoices:read` + `clients:read` (when filtering by `customer`)",
             "url": {
               "raw": "{{base_url}}/invoices",
               "host": [
@@ -779,7 +779,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "description": "Returns one invoice by `in_…` id or UUID, with its `lines`. `status` reflects `overdue` at the moment of reading.\n\n**Scope:** `invoices:read`",
+            "description": "Returns an invoice by `in_…` id or UUID, with its `lines`. `status` reads `overdue` when an open invoice is past its due date.\n\n**Scope:** `invoices:read`",
             "url": {
               "raw": "{{base_url}}/invoices/{{invoice_id}}",
               "host": [
@@ -821,7 +821,7 @@
                 "value": "application/json"
               }
             ],
-            "description": "Drafts only. A partial update: send only the fields to change — omitted ones (`customer` included) keep their stored value, and `items`, when sent, replaces every line (omit it to keep them). Totals are recomputed and line ids change. Once finalized an invoice is frozen — the customer may already have the PDF — and this returns `409`. Emits `invoice.updated`.\n\n**Scope:** `invoices:write` + `business:read` + `clients:read`",
+            "description": "Updates a draft. Send only the fields to change; `items`, when sent, replaces every line (line ids change). Once finalized an invoice is frozen and this returns `409`. Emits `invoice.updated`.\n\n**Scope:** `invoices:write` + `business:read` + `clients:read`",
             "url": {
               "raw": "{{base_url}}/invoices/{{invoice_id}}",
               "host": [
@@ -871,7 +871,7 @@
                 "value": "{{idempotency_key}}"
               }
             ],
-            "description": "Appends one line to a draft: either a `price`, or `description` + `unit_amount`. Totals are recomputed, so the response is the whole invoice; every line gets a new id. Finalized invoices return `409`. Emits `invoice.updated`.\n\n**Scope:** `invoices:write` + `business:read`\n\n**Idempotency:** `Idempotency-Key` header **required** (`428` without it). A retry with the same key and body replays the first response with `Idempotent-Replayed: true`; the same key with a different body is a `422` `idempotency_mismatch`.",
+            "description": "Appends a line to a draft: a `price`, or `description` + `unit_amount`. Returns the whole recomputed invoice; every line gets a new id. Finalized invoices return `409`. Emits `invoice.updated`.\n\n**Scope:** `invoices:write` + `business:read`\n\n**Idempotency:** `Idempotency-Key` **required** (`428` without it). A retry with the same key and body replays the first response (`Idempotent-Replayed: true`); the same key with a different body is a `422` `idempotency_mismatch`.",
             "url": {
               "raw": "{{base_url}}/invoice-items",
               "host": [
@@ -916,7 +916,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "description": "Returns every line of one invoice, in order (not paginated). `invoice` is required.\n\n**Scope:** `invoices:read`",
+            "description": "Returns every line of one invoice, in order. `invoice` is required; the result is not paginated.\n\n**Scope:** `invoices:read`",
             "url": {
               "raw": "{{base_url}}/invoice-items?invoice={{invoice_id}}",
               "host": [
@@ -958,7 +958,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "description": "Returns one line by `ii_…` id or UUID, from any of your invoices.\n\n**Scope:** `invoices:read`",
+            "description": "Returns one invoice line by `ii_…` id or UUID.\n\n**Scope:** `invoices:read`",
             "url": {
               "raw": "{{base_url}}/invoice-items/{{invoice_item_id}}",
               "host": [
@@ -995,7 +995,7 @@
           "request": {
             "method": "DELETE",
             "header": [],
-            "description": "Removes one line from a draft and returns the whole recomputed invoice. A draft always keeps at least one line (`409` for the last one); finalized invoices return `409`. Pass `invoice` to scope the lookup to one invoice. Emits `invoice.updated`.\n\n**Scope:** `invoices:write` + `business:read`",
+            "description": "Removes a line from a draft and returns the recomputed invoice. A draft keeps at least one line, and finalized invoices are frozen — both `409`. Pass `invoice` to speed up the lookup. Emits `invoice.updated`.\n\n**Scope:** `invoices:write` + `business:read`",
             "url": {
               "raw": "{{base_url}}/invoice-items/{{invoice_item_id}}?invoice={{invoice_id}}",
               "host": [
@@ -1049,7 +1049,7 @@
                 "value": "{{idempotency_key}}"
               }
             ],
-            "description": "Assigns the next permanent number in your series (e.g. `INV-0042`) and moves the draft to `open`. The draft must have at least one line. Finalizing an invoice that already has a number returns it unchanged with the same number — a retry can never burn a second one. Does not email the customer (see `/send`). Emits `invoice.finalized`.\n\n**Scope:** `invoices:finalize`\n\n**Idempotency:** `Idempotency-Key` header **required** (`428` without it). A retry with the same key and body replays the first response with `Idempotent-Replayed: true`; the same key with a different body is a `422` `idempotency_mismatch`.",
+            "description": "Issues a draft: assigns the next number in your series (e.g. `INV-0042`) and moves it to `open`. The draft needs at least one line. Finalizing an invoice that already has a number returns it unchanged, so a retry never spends a second number. Does not email the customer — see `/send`. Emits `invoice.finalized`.\n\n**Scope:** `invoices:finalize`\n\n**Idempotency:** `Idempotency-Key` **required** (`428` without it). A retry with the same key and body replays the first response (`Idempotent-Replayed: true`); the same key with a different body is a `422` `idempotency_mismatch`.",
             "url": {
               "raw": "{{base_url}}/invoices/{{invoice_id}}/finalize",
               "host": [
@@ -1103,7 +1103,7 @@
                 "value": "{{idempotency_key}}"
               }
             ],
-            "description": "Emails the invoice PDF and a link to the public invoice page, via Resend, to `to` or else the customer email recorded on the invoice. A draft is finalized first (this scope covers that — `invoices:finalize` is not needed). Open and paid invoices can be re-sent; void ones cannot.\n\n**Rate limit:** 10 sends per hour per key — each send costs money and lands in a third party’s inbox.\n\nIf the email fails after finalizing, the response is `502` and the number stays spent; retry the send. Emits `invoice.emailed` (or `invoice.email_failed`), plus `invoice.finalized` when it finalized.\n\n**Scope:** `invoices:send`\n\n**Idempotency:** `Idempotency-Key` header **required** (`428` without it). A retry with the same key and body replays the first response with `Idempotent-Replayed: true`; the same key with a different body is a `422` `idempotency_mismatch`.",
+            "description": "Emails the invoice PDF and a link to its public page to `to`, or else the customer email on the invoice. A draft is finalized first (no `invoices:finalize` scope needed). Open and paid invoices can be re-sent; void ones cannot.\n\n**Requires a verified account email** — until then this returns `409` `invalid_state`.\n\n**Rate limits:** 10 sends per hour per API key, and 50 per hour per account across every key and the dashboard (`429` `rate_limited`, with `Retry-After`).\n\nIf the email fails after finalizing, the response is `502` `upstream_failed` and the number stays spent; retry the send. Emits `invoice.emailed` (or `invoice.email_failed`), plus `invoice.finalized` when it finalized.\n\n**Scope:** `invoices:send`\n\n**Idempotency:** `Idempotency-Key` **required** (`428` without it). A retry with the same key and body replays the first response (`Idempotent-Replayed: true`); the same key with a different body is a `422` `idempotency_mismatch`.",
             "url": {
               "raw": "{{base_url}}/invoices/{{invoice_id}}/send",
               "host": [
@@ -1145,7 +1145,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "description": "Returns the PDF bytes (not a link), rendered on demand from the current invoice, so it is always up to date. Works for drafts too (without a number). Served inline; pass `download=1` for `Content-Disposition: attachment`. Not cacheable (`Cache-Control: private, no-store`).\n\n**Scope:** `invoices:read`",
+            "description": "Returns the PDF bytes (not a link), rendered on demand from the current invoice — drafts too, without a number. Served inline; pass `download=1` for `Content-Disposition: attachment`. Not cacheable.\n\n**Scope:** `invoices:read`",
             "url": {
               "raw": "{{base_url}}/invoices/{{invoice_id}}/pdf",
               "host": [
@@ -1186,7 +1186,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "description": "Returns the history of one invoice, newest first, cursor-paginated: created, updated, finalized, emailed, viewed, downloaded, paid, voided. `invoice.viewed` and `invoice.downloaded` are recorded when the customer opens the public link — the way to tell they actually looked at it.\n\n**Scope:** `invoices:read`",
+            "description": "Lists one invoice’s history, newest first: created, updated, finalized, emailed, viewed, downloaded, paid, voided. `invoice.viewed` and `invoice.downloaded` mean the customer opened the public link; each is recorded at most once per invoice every 10 minutes.\n\n**Scope:** `invoices:read`",
             "url": {
               "raw": "{{base_url}}/invoices/{{invoice_id}}/events",
               "host": [
@@ -1233,7 +1233,7 @@
                 "value": "{{idempotency_key}}"
               }
             ],
-            "description": "Records that an `open` (or overdue) invoice was paid outside Invoice-AI — no money moves. Drafts, void and already-paid invoices return `409`. Sets `paid_at` and `amount_due: 0`. The response omits `lines`. Emits `invoice.paid`, with `reference` in the event meta.\n\n**Scope:** `payments:write`\n\n**Idempotency:** `Idempotency-Key` header **required** (`428` without it). A retry with the same key and body replays the first response with `Idempotent-Replayed: true`; the same key with a different body is a `422` `idempotency_mismatch`.",
+            "description": "Marks an `open` (or overdue) invoice paid outside Invoice-AI — no money moves. `paid_on` is an ISO 8601 date or timestamp (defaults to now); `reference` is up to 200 characters. Drafts, void and already-paid invoices return `409`. The response omits `lines`. Emits `invoice.paid`, with `reference` in its meta.\n\n**Scope:** `payments:write`\n\n**Idempotency:** `Idempotency-Key` **required** (`428` without it). A retry with the same key and body replays the first response (`Idempotent-Replayed: true`); the same key with a different body is a `422` `idempotency_mismatch`.",
             "url": {
               "raw": "{{base_url}}/invoices/{{invoice_id}}/pay",
               "host": [
@@ -1290,7 +1290,7 @@
                 "value": "{{idempotency_key}}"
               }
             ],
-            "description": "Creates a `draft` for an existing customer. Each line is either a catalog `price` (description, amount and tax rate are borrowed from it) or an ad-hoc `description` + `unit_amount`. Totals are always computed server-side from the lines. The issue date is today; `currency` defaults to your business currency.\n\nA draft has no number yet — call `POST /invoices/{id}/finalize` (or `/send`) to issue it. Emits `invoice.created`.\n\n**Scope:** `invoices:write` + `business:read` + `clients:read`\n\n**Idempotency:** `Idempotency-Key` header **required** (`428` without it). A retry with the same key and body replays the first response with `Idempotent-Replayed: true`; the same key with a different body is a `422` `idempotency_mismatch`.",
+            "description": "Creates a `draft` invoice for an existing customer. Each line is either a catalog `price` (its name, amount and tax rate fill in) or an ad-hoc `description` + `unit_amount`. Totals are computed server-side; `currency` defaults to your business currency.\n\nA draft has no number until you finalize or send it. Emits `invoice.created`.\n\n**Scope:** `invoices:write` + `business:read` + `clients:read`\n\n**Idempotency:** `Idempotency-Key` **required** (`428` without it). A retry with the same key and body replays the first response (`Idempotent-Replayed: true`); the same key with a different body is a `422` `idempotency_mismatch`.",
             "url": {
               "raw": "{{base_url}}/invoices",
               "host": [
@@ -1331,7 +1331,7 @@
           "request": {
             "method": "DELETE",
             "header": [],
-            "description": "Permanently deletes a draft. A finalized invoice can never be deleted — its number belongs to a consecutive series, and a gap reads as a hidden sale. Void it instead.\n\n**Scope:** `invoices:write`",
+            "description": "Permanently deletes a draft. A finalized invoice cannot be deleted (`409`) — its number belongs to a gap-free series. Void it instead.\n\n**Scope:** `invoices:write`",
             "url": {
               "raw": "{{base_url}}/invoices/{{invoice_id}}",
               "host": [
@@ -1377,7 +1377,7 @@
                 "value": "{{idempotency_key}}"
               }
             ],
-            "description": "Creates a `draft` for an existing customer. Each line is either a catalog `price` (description, amount and tax rate are borrowed from it) or an ad-hoc `description` + `unit_amount`. Totals are always computed server-side from the lines. The issue date is today; `currency` defaults to your business currency.\n\nA draft has no number yet — call `POST /invoices/{id}/finalize` (or `/send`) to issue it. Emits `invoice.created`.\n\n**Scope:** `invoices:write` + `business:read` + `clients:read`\n\n**Idempotency:** `Idempotency-Key` header **required** (`428` without it). A retry with the same key and body replays the first response with `Idempotent-Replayed: true`; the same key with a different body is a `422` `idempotency_mismatch`.",
+            "description": "Creates a `draft` invoice for an existing customer. Each line is either a catalog `price` (its name, amount and tax rate fill in) or an ad-hoc `description` + `unit_amount`. Totals are computed server-side; `currency` defaults to your business currency.\n\nA draft has no number until you finalize or send it. Emits `invoice.created`.\n\n**Scope:** `invoices:write` + `business:read` + `clients:read`\n\n**Idempotency:** `Idempotency-Key` **required** (`428` without it). A retry with the same key and body replays the first response (`Idempotent-Replayed: true`); the same key with a different body is a `422` `idempotency_mismatch`.",
             "url": {
               "raw": "{{base_url}}/invoices",
               "host": [
@@ -1423,7 +1423,7 @@
                 "value": "{{idempotency_key}}"
               }
             ],
-            "description": "Assigns the next permanent number in your series (e.g. `INV-0042`) and moves the draft to `open`. The draft must have at least one line. Finalizing an invoice that already has a number returns it unchanged with the same number — a retry can never burn a second one. Does not email the customer (see `/send`). Emits `invoice.finalized`.\n\n**Scope:** `invoices:finalize`\n\n**Idempotency:** `Idempotency-Key` header **required** (`428` without it). A retry with the same key and body replays the first response with `Idempotent-Replayed: true`; the same key with a different body is a `422` `idempotency_mismatch`.",
+            "description": "Issues a draft: assigns the next number in your series (e.g. `INV-0042`) and moves it to `open`. The draft needs at least one line. Finalizing an invoice that already has a number returns it unchanged, so a retry never spends a second number. Does not email the customer — see `/send`. Emits `invoice.finalized`.\n\n**Scope:** `invoices:finalize`\n\n**Idempotency:** `Idempotency-Key` **required** (`428` without it). A retry with the same key and body replays the first response (`Idempotent-Replayed: true`); the same key with a different body is a `422` `idempotency_mismatch`.",
             "url": {
               "raw": "{{base_url}}/invoices/{{invoice_id}}/finalize",
               "host": [
@@ -1477,7 +1477,7 @@
                 "value": "{{idempotency_key}}"
               }
             ],
-            "description": "Voids an `open` (or overdue) invoice with a reason. The number stays on the record — an auditor seeing 0041 then 0043 needs to find 0042 voided, not missing. A paid invoice cannot be voided (it needs a credit note); a draft should be deleted instead. The response omits `lines`. Emits `invoice.voided`.\n\n**Scope:** `invoices:finalize`\n\n**Idempotency:** `Idempotency-Key` header **required** (`428` without it). A retry with the same key and body replays the first response with `Idempotent-Replayed: true`; the same key with a different body is a `422` `idempotency_mismatch`.",
+            "description": "Voids an `open` (or overdue) invoice. `reason` is required, up to 500 characters. The number stays on record, so the series has no gaps. A paid invoice cannot be voided (it needs a credit note) and a draft should be deleted instead — both `409`. The response omits `lines`. Emits `invoice.voided`.\n\n**Scope:** `invoices:finalize`\n\n**Idempotency:** `Idempotency-Key` **required** (`428` without it). A retry with the same key and body replays the first response (`Idempotent-Replayed: true`); the same key with a different body is a `422` `idempotency_mismatch`.",
             "url": {
               "raw": "{{base_url}}/invoices/{{invoice_id}}/void",
               "host": [
@@ -1525,7 +1525,7 @@
           "request": {
             "method": "DELETE",
             "header": [],
-            "description": "Permanently deletes the endpoint; no further deliveries are made to it. Deleting it again is a `404`, not a silent success — that usually means you are working from a stale list.\n\n**Scope:** `webhooks:manage`",
+            "description": "Permanently deletes an endpoint; no further deliveries are made to it. Deleting it again is a `404`.\n\n**Scope:** `webhooks:manage`",
             "url": {
               "raw": "{{base_url}}/webhook-endpoints/{{webhook_endpoint_id}}",
               "host": [
@@ -1562,7 +1562,7 @@
           "request": {
             "method": "DELETE",
             "header": [],
-            "description": "Sets `active: false`. The price is not deleted, because invoice lines may reference it. Archiving an archived price succeeds and changes nothing. Restore with `PATCH` and `active: true`.\n\n**Scope:** `products:write`",
+            "description": "Archives a price (`active: false`). It is kept because invoice lines may reference it; archiving twice changes nothing. Restore with `PATCH` and `active: true`.\n\n**Scope:** `products:write`",
             "url": {
               "raw": "{{base_url}}/prices/{{price_id}}",
               "host": [
@@ -1599,7 +1599,7 @@
           "request": {
             "method": "DELETE",
             "header": [],
-            "description": "Sets `active: false`. The product is not deleted — its prices and the invoice lines that reference it stay intact. Archiving an archived product succeeds and changes nothing. Restore with `PATCH` and `active: true`.\n\n**Scope:** `products:write`",
+            "description": "Archives a product (`active: false`). Its prices and the invoice lines that use it stay intact; archiving twice changes nothing. Restore with `PATCH` and `active: true`.\n\n**Scope:** `products:write`",
             "url": {
               "raw": "{{base_url}}/products/{{product_id}}",
               "host": [
@@ -1636,7 +1636,7 @@
           "request": {
             "method": "DELETE",
             "header": [],
-            "description": "Archives the customer (`deleted: true`) instead of deleting it: issued invoices reference customers and must keep naming who they were billed to. Archived customers drop out of `GET /customers` but stay readable by id. Archiving an archived customer succeeds and changes nothing.\n\n**Scope:** `clients:write`",
+            "description": "Archives a customer (`deleted: true`). Customers are never hard-deleted, because issued invoices must keep naming who they billed. Archived customers drop out of `GET /customers` but stay readable by id; archiving twice changes nothing.\n\n**Scope:** `clients:write`",
             "url": {
               "raw": "{{base_url}}/customers/{{customer_id}}",
               "host": [

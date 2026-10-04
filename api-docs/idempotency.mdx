@@ -1,0 +1,57 @@
+---
+title: "Idempotency"
+description: "Retry writes safely with an Idempotency-Key header."
+icon: "repeat"
+---
+
+Send an `Idempotency-Key` header with a write. If you retry with the **same key and the same body**, you get the original response back and the work doesn't run twice. This stops a retried finalize from spending a second invoice number.
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://invoice.horizonpay.co/api/v1/invoices/in_Pb2Xk7Mv4Qs9Lr1Wd6Tn3Fh8/finalize \
+  -H "Authorization: Bearer $INVOICE_AI_API_KEY" \
+  -H "Idempotency-Key: 8e0f4b1c-6f55-4c37-9d0b-2a7f5f0c9e21"
+```
+
+```ts Node.js
+// The SDK adds a key to every POST and reuses it on retries.
+// Pass your own to make a call safe across process restarts:
+await invoiceai.invoices.finalize('in_Pb2Xk7Mv4Qs9Lr1Wd6Tn3Fh8', {
+  idempotencyKey: 'finalize-order-1234',
+})
+```
+
+```python Python
+# The SDK adds a key to every POST and reuses it on retries.
+# Pass your own to make a call safe across process restarts:
+client.invoices.finalize(
+    "in_Pb2Xk7Mv4Qs9Lr1Wd6Tn3Fh8",
+    idempotency_key="finalize-order-1234",
+)
+```
+</CodeGroup>
+
+## Where it's needed
+
+| Endpoint | `Idempotency-Key` |
+|---|---|
+| `POST /invoices`, `POST /invoice-items` | Required |
+| `POST /invoices/{id}/finalize`, `/send`, `/pay`, `/void` | Required |
+| Other `POST` endpoints | Optional |
+| `GET`, `PATCH`, `DELETE` | Ignored |
+
+## What happens on a retry
+
+| Situation | Result |
+|---|---|
+| Required but not sent | `428 idempotency_key_required`. Nothing runs. |
+| Same key and body, first request succeeded | The stored response, with `Idempotent-Replayed: true`. |
+| Same key, first request still running | `409 conflict`. Retry shortly. |
+| Same key, different method, path or body | `422 idempotency_mismatch` |
+| Same key, first request failed | The request runs again. Failures aren't stored. |
+
+## Rules
+
+- Create one key per operation, before your retry loop. A UUID v4 works well.
+- Keys can be up to 255 characters.
+- Keys are kept for 24 hours and shared across all your API keys.

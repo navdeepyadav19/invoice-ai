@@ -1,0 +1,169 @@
+---
+title: "Verify signatures"
+description: "Check that a webhook came from Invoice-AI, respond correctly, and handle retries."
+icon: "shield-check"
+---
+
+Every delivery is signed with [Standard Webhooks](https://www.standardwebhooks.com/) using your endpoint's `whsec_…` secret. Verify the signature before you trust the payload.
+
+<Warning>
+  Verify the **raw request body**, before any JSON parsing. A parsed and re-serialized body won't match the signature.
+</Warning>
+
+## With the SDK
+
+The SDK checks the signature and the timestamp, then returns the parsed event. It throws `WebhookVerificationError` if either check fails.
+
+<CodeGroup>
+```ts Next.js
+// app/api/webhooks/invoice-ai/route.ts
+import { Webhooks, WebhookVerificationError } from '@horizonpay/invoice-ai'
+
+const webhooks = new Webhooks(process.env.INVOICE_AI_WEBHOOK_SECRET)
+
+export async function POST(req: Request) {
+  let event
+  try {
+    event = await webhooks.constructEvent(await req.text(), req.headers)
+  } catch (err) {
+    if (err instanceof WebhookVerificationError) return new Response('invalid signature', { status: 400 })
+    throw err
+  }
+
+  if (event.type === 'invoice.paid') {
+    console.log(`${event.data.object.number} was paid`)
+  }
+  return new Response(null, { status: 204 })
+}
+```
+
+```ts Express
+import express from 'express'
+import { Webhooks } from '@horizonpay/invoice-ai'
+
+const webhooks = new Webhooks(process.env.INVOICE_AI_WEBHOOK_SECRET)
+const app = express()
+
+// express.raw keeps the body as bytes. Don't use express.json() on this route.
+app.post('/webhooks/invoice-ai', express.raw({ type: 'application/json' }), async (req, res) => {
+  let event
+  try {
+    event = await webhooks.constructEvent(req.body, req.headers)
+  } catch {
+    return res.sendStatus(400)
+  }
+
+  if (event.type === 'invoice.paid') console.log(`${event.data.object.number} was paid`)
+  res.sendStatus(204)
+})
+```
+
+```python FastAPI
+import os
+
+from fastapi import FastAPI, HTTPException, Request, Response
+from invoice_ai import Webhook, WebhookVerificationError
+
+app = FastAPI()
+webhook = Webhook(os.environ["INVOICE_AI_WEBHOOK_SECRET"])
+
+
+@app.post("/webhooks/invoice-ai")
+async def invoice_ai_webhook(request: Request):
+    try:
+        event = webhook.verify(await request.body(), request.headers)
+    except WebhookVerificationError:
+        raise HTTPException(status_code=400)
+
+    if event.type == "invoice.paid":
+        print(f"{event.data.object.number} was paid")
+    return Response(status_code=204)
+```
+</CodeGroup>
+
+## Without the SDK
+
+1. Build the signed content: `{webhook-id}.{webhook-timestamp}.{raw body}`.
+2. Strip `whsec_` from the secret and base64-decode the rest to get the key.
+3. Compute HMAC-SHA256 of the signed content and base64-encode it.
+4. Compare `v1,<result>` with each space-separated value in `webhook-signature`, in constant time.
+5. Reject the request if `webhook-timestamp` is more than 5 minutes from your clock.
+
+<CodeGroup>
+```js Node.js
+import crypto from 'node:crypto'
+
+export function verify(headers, rawBody, secret) {
+  const id = headers['webhook-id']
+  const timestamp = headers['webhook-timestamp']
+  const signatures = (headers['webhook-signature'] ?? '').split(' ')
+  if (!id || !timestamp) return false
+  if (Math.abs(Date.now() / 1000 - Number(timestamp)) > 300) return false
+
+  // Buffer's base64 decoder also accepts older base64url secrets.
+  const key = Buffer.from(secret.replace(/^whsec_/, ''), 'base64')
+  const expected = Buffer.from(
+    'v1,' + crypto.createHmac('sha256', key).update(`${id}.${timestamp}.${rawBody}`).digest('base64'),
+  )
+
+  return signatures.some((candidate) => {
+    const given = Buffer.from(candidate)
+    return given.length === expected.length && crypto.timingSafeEqual(given, expected)
+  })
+}
+```
+
+```python Python
+import base64, hashlib, hmac, time
+
+
+def verify(headers, raw_body: bytes, secret: str) -> bool:
+    msg_id = headers.get("webhook-id")
+    timestamp = headers.get("webhook-timestamp")
+    signatures = headers.get("webhook-signature", "").split()
+    if not msg_id or not timestamp or not timestamp.isdigit():
+        return False
+    if abs(time.time() - int(timestamp)) > 300:
+        return False
+
+    # Map base64url to base64 so older secrets still work.
+    raw = secret.removeprefix("whsec_").replace("-", "+").replace("_", "/").rstrip("=")
+    key = base64.b64decode(raw + "=" * (-len(raw) % 4))
+    digest = hmac.new(key, f"{msg_id}.{timestamp}.".encode() + raw_body, hashlib.sha256).digest()
+    expected = "v1," + base64.b64encode(digest).decode()
+
+    return any(hmac.compare_digest(candidate, expected) for candidate in signatures)
+```
+</CodeGroup>
+
+Off-the-shelf [Standard Webhooks libraries](https://github.com/standard-webhooks/standard-webhooks) work too.
+
+## Test locally
+
+Send a correctly signed sample event to your handler with the [CLI](/cli/overview). Any `whsec_` plus base64 value works as a test secret.
+
+```bash
+invoice-ai webhooks test http://localhost:3000/api/webhooks/invoice-ai \
+  --secret whsec_dGVzdC1zZWNyZXQ= --event invoice.paid
+```
+
+## Respond and retry
+
+- Return any `2xx` within **10 seconds**. Do slow work after you respond.
+- Anything else is a failure: `3xx` (redirects aren't followed), `4xx`, `5xx`, a timeout, or a URL that now resolves to a private address.
+- Deliveries can repeat. Deduplicate on the `webhook-id` header, which stays the same across retries.
+- Order isn't guaranteed. Use the event's `created_at`, or fetch the invoice.
+
+A failed delivery is retried at most 6 times. Each retry waits at least this long after the failed attempt:
+
+| Retry | 1 | 2 | 3 | 4 | 5 | 6 |
+|---|---|---|---|---|---|---|
+| Wait | 1 min | 5 min | 30 min | 2 h | 8 h | 24 h |
+
+After the sixth retry fails, the delivery is dropped.
+
+<Note>
+  Deliveries currently go out once a day at 03:00 UTC, so in practice each retry happens on the next daily run, about a day apart.
+</Note>
+
+After 20 dropped deliveries in a row, the endpoint is disabled: it shows `"active": false` and a `disabled_at` time, and stops receiving events. Any successful delivery resets the count. To start again, delete the endpoint and register it again.

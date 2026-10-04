@@ -1,102 +1,84 @@
 ---
 title: "Pagination"
-description: "Walk list endpoints with an opaque cursor that stays correct while new records are created."
+description: "Page through list endpoints with a cursor."
 icon: "list"
 ---
 
-List endpoints return results newest first and page through them with a **cursor**, not page numbers. A cursor marks a position ("everything older than this record"), so records created while you're paging can't shift rows across a page boundary and make you miss one.
-
-## Paginated endpoints
-
-| Endpoint | Filters |
-|---|---|
-| `GET /customers` | `query` (case-insensitive name match), `include_deleted` (`true` to include archived customers) |
-| `GET /products` | `query` (name match), `active` (`true` or `false`) |
-| `GET /prices` | `product` (`prod_…` or UUID), `active`, `currency` (for example `USD`), `type` (`one_time` or `recurring`) |
-| `GET /invoices` | `status` (`draft`, `open`, `paid`, `overdue` or `void`), `customer` (`cus_…` or UUID), `from` and `to` (inclusive `YYYY-MM-DD` bounds on the issue date) |
-| `GET /invoices/{id}/events` | None |
-| `GET /webhook-endpoints` | None |
-
-`GET /invoice-items?invoice=…` returns all of an invoice's lines in one response, with no cursor.
-
-## Parameters
+List endpoints return records newest first. Pass `next_cursor` back as `cursor` to get the next page.
 
 <ParamField query="limit" type="integer" default="25">
-  How many records to return, from `1` to `100`. Larger values are capped at `100`. A missing, zero or non-numeric value gives the default of `25`.
+  Records per page, from `1` to `100`. Larger values are capped at `100`.
 </ParamField>
 
 <ParamField query="cursor" type="string">
-  The `next_cursor` from the previous page. Leave it out to get the first page.
+  The `next_cursor` from the previous page. Leave it out for the first page.
 </ParamField>
 
-## Response
-
-```json
+```json Response
 {
   "data": [
-    { "id": "in_3f9a1c2b4d5e6f708192a3b4", "object": "invoice", "status": "open" },
-    { "id": "in_8c7b6a5f4e3d2c1b0a9f8e7d", "object": "invoice", "status": "paid" }
+    { "id": "in_Pb2Xk7Mv4Qs9Lr1Wd6Tn3Fh8", "object": "invoice", "status": "open" },
+    { "id": "in_Hc8Wq2Lp5Zr7Ty3Mn9Kd4Bv6", "object": "invoice", "status": "paid" }
   ],
   "next_cursor": "MjAyNi0wOS0xN1QwOToxMjo0NC4wMDBafDdmM2M..."
 }
 ```
 
-<ResponseField name="data" type="array">
-  The records on this page, ordered by creation time, newest first. Records created at the same moment are ordered by id.
-</ResponseField>
-<ResponseField name="next_cursor" type="string | null">
-  Pass this back as `cursor` to get the next page. It's `null` on the last page.
-</ResponseField>
+`next_cursor` is `null` on the last page.
 
-## Fetching every page
+## Fetch every page
 
 <CodeGroup>
-```bash curl
+```bash cURL
 curl "https://invoice.horizonpay.co/api/v1/invoices?status=open&limit=100" \
   -H "Authorization: Bearer $INVOICE_AI_API_KEY"
 
-# then, with the next_cursor from that response:
+# Repeat with the next_cursor from each response until it's null
 curl "https://invoice.horizonpay.co/api/v1/invoices?status=open&limit=100&cursor=MjAyNi0wOS0xN..." \
   -H "Authorization: Bearer $INVOICE_AI_API_KEY"
 ```
 
-```javascript JavaScript
-async function* listAll(path, params = {}) {
-  let cursor = null;
-  do {
-    const qs = new URLSearchParams({ ...params, limit: "100", ...(cursor && { cursor }) });
-    const page = await fetch(`${BASE}${path}?${qs}`, { headers }).then((r) => r.json());
-    yield* page.data;
-    cursor = page.next_cursor;
-  } while (cursor);
+```ts Node.js
+// for await fetches the next page for you
+for await (const invoice of invoiceai.invoices.list({ status: 'open', limit: 100 })) {
+  console.log(invoice.number, invoice.amount_due)
 }
 
-for await (const invoice of listAll("/invoices", { status: "open" })) {
-  console.log(invoice.number, invoice.amount_due);
-}
+// Or take one page at a time
+const page = await invoiceai.invoices.list({ status: 'open' })
+page.data            // this page
+page.nextCursor      // null on the last page
 ```
 
 ```python Python
-def list_all(path, **params):
-    cursor = None
-    while True:
-        query = {**params, "limit": 100, **({"cursor": cursor} if cursor else {})}
-        page = session.get(f"{BASE}{path}", params=query).json()
-        yield from page["data"]
-        cursor = page["next_cursor"]
-        if not cursor:
-            break
+# Iterating fetches the next page for you
+for invoice in client.invoices.list(status="open", limit=100):
+    print(invoice.number, invoice.amount_due)
 
-for invoice in list_all("/invoices", status="open"):
-    print(invoice["number"], invoice["amount_due"])
+# Or take one page at a time
+page = client.invoices.list(status="open")
+page.data         # this page
+page.next_cursor  # None on the last page
 ```
 </CodeGroup>
 
-## Things to know
+## Filters
 
-- **Treat cursors as opaque.** Don't build, parse or change them. Their encoding can change.
-- **Keep the same filters** on every page of a walk. A cursor is a position, not a saved query.
-- **An invalid cursor is a `422`.** A cursor we didn't issue returns `validation` with an error on `cursor`, never the first page again. Pass back exactly the `next_cursor` you received.
-- **`status=overdue` pages like any other filter.** It selects `open` invoices whose `due_date` is before today (UTC). `status=open` includes overdue invoices too.
-- **Unknown filter values are ignored.** An unrecognised `status` or `type` returns an unfiltered list rather than an error, and any `active` value other than `true` counts as `false`.
-- **Id filters must exist.** A `customer` or `product` filter that doesn't match one of your records returns `404`, not an empty page.
+| Endpoint | Filters |
+|---|---|
+| `GET /customers` | `query` (name contains), `include_deleted` |
+| `GET /products` | `query`, `active` |
+| `GET /prices` | `product`, `active`, `currency`, `type` (`one_time` or `recurring`) |
+| `GET /invoices` | `status` (`draft`, `open`, `paid`, `overdue`, `void`), `customer`, `from`, `to` (`YYYY-MM-DD`, on the issue date) |
+| `GET /invoices/{id}/events` | None |
+| `GET /webhook-endpoints` | None |
+
+`GET /invoice-items?invoice=in_...` returns every line of an invoice in one response.
+
+## Rules
+
+- Treat cursors as opaque strings. Don't build or edit them.
+- Send the same filters on every page.
+- A cursor we didn't issue returns `422 validation`.
+- A `customer` or `product` filter that matches nothing of yours returns `404`.
+- Unknown `status` or `type` values are ignored, and the list comes back unfiltered.

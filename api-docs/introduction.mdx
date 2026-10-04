@@ -1,32 +1,31 @@
 ---
 title: "Introduction"
-description: "Create and send invoices from your own code."
+description: "Create, send and track invoices from your own code."
 icon: "book-open"
 ---
 
 The Invoice-AI API lets your code do what you do in the [Invoice-AI app](https://invoice.horizonpay.co): add customers, create invoices, email them and mark them paid.
 
+- **Base URL:** `https://invoice.horizonpay.co/api/v1`
+- **Auth:** send an API key as a Bearer token. Create one in [Settings → API keys](https://invoice.horizonpay.co/settings/api-keys).
+- **Money:** integers in minor units, so `2500` is $25.00.
+
 ```bash
 curl https://invoice.horizonpay.co/api/v1/business \
-  -H "Authorization: Bearer inv_live_…"
+  -H "Authorization: Bearer $INVOICE_AI_API_KEY"
 ```
 
-## Three things to know
-
-1. **Base URL:** `https://invoice.horizonpay.co/api/v1`
-2. **Auth:** send your API key as a Bearer token. Create one in [Settings → API keys](https://invoice.horizonpay.co/settings/api-keys).
-3. **Money** is in the smallest unit, so `2500` means $25.00.
-
-## Start here
-
-<CardGroup cols={3}>
+<CardGroup cols={2}>
   <Card title="Quickstart" icon="bolt" href="/quickstart">
     Send your first invoice in 5 minutes.
   </Card>
   <Card title="API reference" icon="code" href="/api-reference/introduction">
-    Every endpoint. Try them in the browser.
+    Every endpoint, with a playground.
   </Card>
-  <Card title="SDKs & CLI" icon="cube" href="/sdks/overview">
-    TypeScript, Python and a terminal CLI.
+  <Card title="SDKs" icon="cube" href="/sdks/node">
+    Node.js and Python libraries.
+  </Card>
+  <Card title="CLI" icon="terminal" href="/cli/overview">
+    Manage invoices from your terminal.
   </Card>
 </CardGroup>
