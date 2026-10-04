@@ -4,6 +4,14 @@ description: "Changes to the Invoice-AI API, SDKs and CLI."
 icon: "clock-rotate-left"
 ---
 
+<Update label="October 2026" description="SDKs & CLI 0.1.0 (beta) published">
+  - `npm install @horizonpay/invoice-ai` and `pip install horizonpay-invoice-ai`: typed clients with retries, idempotency keys, pagination and webhook verification. See [Node.js](/sdks/node) and [Python](/sdks/python).
+  - `npm install -g @horizonpay/invoice-ai-cli`: the `invoice-ai` command with browser login. See [CLI](/cli/overview).
+  - npm releases are built and published by GitHub Actions with [provenance](https://docs.npmjs.com/generating-provenance-statements), so you can verify where each version came from.
+  - Every API reference page now shows cURL, Node.js and Python examples, and the whole API is one click away with [Run in Postman](/postman).
+  - `0.x` is a beta, so minor releases may break. Pin the minor version.
+</Update>
+
 <Update label="October 2026" description="Sending and webhook hardening">
   - `POST /invoices/{id}/send` requires a verified account email. Otherwise it returns `409 invalid_state`.
   - Invoice emails are capped at 50 per hour per account, across all keys and the dashboard, on top of 10 per hour per key. See [Rate limits](/rate-limits).
@@ -12,11 +20,6 @@ icon: "clock-rotate-left"
   - Unexpected database errors return `502 upstream_failed` with a generic `detail`.
 </Update>
 
-<Update label="September 2026" description="SDKs & CLI 0.1.0 (beta)">
-  - `@horizonpay/invoice-ai` (npm) and `horizonpay-invoice-ai` (PyPI): typed clients with retries, idempotency keys, pagination and webhook verification. See [Node.js](/sdks/node) and [Python](/sdks/python).
-  - `@horizonpay/invoice-ai-cli`: the `invoice-ai` command with browser login. See [CLI](/cli/overview).
-  - `0.x` is a beta, so minor releases may break. Pin the minor version.
-</Update>
 
 <Update label="September 2026" description="v1">
   The first public version of the API, at `https://invoice.horizonpay.co/api/v1`.
