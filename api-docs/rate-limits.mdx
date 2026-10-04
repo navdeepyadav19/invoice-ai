@@ -1,0 +1,42 @@
+---
+title: "Rate limits"
+description: "Request limits, invoice email caps, and how to handle a 429."
+icon: "gauge"
+---
+
+| Limit | Applies to | Counted per |
+|---|---|---|
+| 120 requests per 60 seconds | Every endpoint except `send` | API key |
+| 10 emails per hour | `POST /invoices/{id}/send` | API key |
+| 50 emails per hour | Every invoice email, from the API or the dashboard | Account |
+
+Every authenticated response includes these headers for the key's bucket:
+
+| Header | Value |
+|---|---|
+| `RateLimit-Limit` | The limit for this bucket |
+| `RateLimit-Remaining` | Requests left in the current window |
+| `RateLimit-Reset` | When the window resets, as a Unix timestamp in seconds |
+
+## Handle a 429
+
+Over a limit, you get `429 rate_limited` with a `Retry-After` header in seconds. Wait that long, then retry with the same [`Idempotency-Key`](/idempotency).
+
+```json
+{
+  "type": "https://invoice.horizonpay.co/problems/rate-limited",
+  "title": "Too many requests",
+  "status": 429,
+  "detail": "Too many invoices emailed in the last hour. Try again in 42 min.",
+  "instance": "req_4f0c2a9e8b7d4c1fa3e2b6d9c0e1f2a3",
+  "code": "rate_limited"
+}
+```
+
+The SDKs wait and retry automatically when `Retry-After` is 60 seconds or less. For longer waits they raise `RateLimitError` with `retryAfter` (Node.js) or `retry_after` (Python).
+
+## Stay under the limits
+
+- Use `limit=100` on list endpoints.
+- Use [webhooks](/webhooks) or the `GET /invoices?status=...` filters instead of polling single invoices.
+- Spread large email batches over several hours.

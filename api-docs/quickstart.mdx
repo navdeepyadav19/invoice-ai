@@ -1,317 +1,187 @@
 ---
 title: "Quickstart"
-description: "Create an API key, make your first request, and take an invoice from draft to paid."
+description: "Create a customer, invoice them and email the invoice in under 5 minutes."
 icon: "bolt"
 ---
 
-This walkthrough takes one invoice through its whole life: customer → product → price → draft invoice → finalize → email → mark paid. Every request runs against your real workspace, so the invoice and email are real too.
-
 <Note>
-  You'll need an Invoice-AI account with a finished business profile. Guest accounts can't hold API keys. Add an email and password to your account first.
+  Before you start, finish your business profile and verify your email address in the [Invoice-AI app](https://invoice.horizonpay.co). Sending invoice emails requires a verified address.
 </Note>
 
 <Steps>
-  <Step title="Create an API key">
-    Open [**Settings → API keys**](https://invoice.horizonpay.co/settings/api-keys) and create a key.
-
-    - **What is it for?** A name you'll recognise later, like "Quickstart".
-    - **Scopes:** pick **Custom** and tick `business:read`, `clients:read`, `clients:write`, `products:read`, `products:write`, `invoices:read`, `invoices:write`, `invoices:finalize`, `invoices:send` and `payments:write`. The **Raise and send invoices** preset covers everything except the two `products:*` scopes this guide needs.
-    - **Expires after (days):** `0` means the key never expires. For a throwaway key, `1` works.
-
-    Copy the key right away. It looks like `inv_live_ab12cd34_…` and **is shown only once**. Then export it:
+  <Step title="Get an API key">
+    In [Settings → API keys](https://invoice.horizonpay.co/settings/api-keys), create a key with the **Raise and send invoices** preset. Copy it now. It's shown only once.
 
     ```bash
     export INVOICE_AI_API_KEY="inv_live_..."
     ```
 
-    <Warning>
-      Treat the key like a password. Keep it on your server or in a secrets manager, and never ship it to a browser or a mobile app. See [Authentication](/authentication).
-    </Warning>
-  </Step>
-
-  <Step title="Make your first request">
-    Read your business profile. It's a harmless read that proves the key works.
+    To use an SDK, install it:
 
     <CodeGroup>
-    ```bash curl
-    curl https://invoice.horizonpay.co/api/v1/business \
-      -H "Authorization: Bearer $INVOICE_AI_API_KEY"
+    ```bash Node.js
+    npm install @horizonpay/invoice-ai
     ```
 
-    ```javascript JavaScript
-    const BASE = "https://invoice.horizonpay.co/api/v1";
-    const headers = {
-      Authorization: `Bearer ${process.env.INVOICE_AI_API_KEY}`,
-      "Content-Type": "application/json",
-    };
+    ```bash Python
+    pip install horizonpay-invoice-ai
+    ```
+    </CodeGroup>
+  </Step>
 
-    const res = await fetch(`${BASE}/business`, { headers });
-    const { data: business } = await res.json();
-    console.log(business.legal_name, business.currency);
+  <Step title="Create a customer">
+    Use an email address you control, so the invoice lands in your own inbox.
+
+    <CodeGroup>
+    ```bash cURL
+    curl https://invoice.horizonpay.co/api/v1/customers \
+      -H "Authorization: Bearer $INVOICE_AI_API_KEY" \
+      -H "Content-Type: application/json" \
+      -d '{ "name": "Acme Ltd", "email": "billing@acme.example" }'
+    ```
+
+    ```ts Node.js
+    import InvoiceAI from '@horizonpay/invoice-ai'
+
+    const invoiceai = new InvoiceAI() // reads INVOICE_AI_API_KEY
+
+    const customer = await invoiceai.customers.create({
+      name: 'Acme Ltd',
+      email: 'billing@acme.example',
+    })
     ```
 
     ```python Python
-    import os, uuid, requests
+    from invoice_ai import InvoiceAI
 
-    BASE = "https://invoice.horizonpay.co/api/v1"
-    session = requests.Session()
-    session.headers["Authorization"] = f"Bearer {os.environ['INVOICE_AI_API_KEY']}"
+    client = InvoiceAI()  # reads INVOICE_AI_API_KEY
 
-    business = session.get(f"{BASE}/business").json()["data"]
-    print(business["legal_name"], business["currency"])
+    customer = client.customers.create(name="Acme Ltd", email="billing@acme.example")
+    ```
+    </CodeGroup>
+
+    Keep the customer's `id`. It looks like `cus_Nf3kQ8pR2mX7vB1cT9wL4sZ6`.
+  </Step>
+
+  <Step title="Create a draft invoice">
+    Add one line. `unit_amount` is in minor units, so `150000` is $1,500.00.
+
+    <CodeGroup>
+    ```bash cURL
+    curl https://invoice.horizonpay.co/api/v1/invoices \
+      -H "Authorization: Bearer $INVOICE_AI_API_KEY" \
+      -H "Content-Type: application/json" \
+      -H "Idempotency-Key: $(uuidgen)" \
+      -d '{
+        "customer": "cus_Nf3kQ8pR2mX7vB1cT9wL4sZ6",
+        "currency": "USD",
+        "days_until_due": 14,
+        "items": [{ "description": "Design retainer", "quantity": 1, "unit_amount": 150000 }]
+      }'
+    ```
+
+    ```ts Node.js
+    const invoice = await invoiceai.invoices.create({
+      customer: customer.id,
+      currency: 'USD',
+      days_until_due: 14,
+      items: [{ description: 'Design retainer', quantity: 1, unit_amount: 150000 }],
+    })
+    ```
+
+    ```python Python
+    invoice = client.invoices.create(
+        customer=customer.id,
+        currency="USD",
+        days_until_due=14,
+        items=[{"description": "Design retainer", "quantity": 1, "unit_amount": 150000}],
+    )
     ```
     </CodeGroup>
 
     ```json Response (abridged)
     {
       "data": {
-        "id": "5b0c8e0e-2f4e-4a51-9d0e-6c0f5c1e7a11",
-        "legal_name": "Acme Studio LLC",
+        "id": "in_Pb2Xk7Mv4Qs9Lr1Wd6Tn3Fh8",
+        "object": "invoice",
+        "status": "draft",
+        "number": null,
+        "customer": "cus_Nf3kQ8pR2mX7vB1cT9wL4sZ6",
         "currency": "USD",
-        "country_code": "US",
-        "invoice_prefix": "INV",
-        "created_at": "2026-09-01T10:00:00.000Z"
+        "total": 150000,
+        "amount_due": 0
       }
     }
     ```
 
-    A `401` means the key is missing, mistyped, revoked or expired. A `404` with `"No business profile yet"` means onboarding isn't finished in the web app.
-  </Step>
-
-  <Step title="Create a customer">
-    The customer needs an `email` if you want to email the invoice to them later.
-
-    <CodeGroup>
-    ```bash curl
-    curl https://invoice.horizonpay.co/api/v1/customers \
-      -H "Authorization: Bearer $INVOICE_AI_API_KEY" \
-      -H "Content-Type: application/json" \
-      -d '{
-        "name": "Globex Corporation",
-        "email": "billing@globex.example",
-        "address": { "line1": "1 Globex Way", "city": "Springfield", "country": "US" }
-      }'
-    ```
-
-    ```javascript JavaScript
-    const customer = await fetch(`${BASE}/customers`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        name: "Globex Corporation",
-        email: "billing@globex.example",
-        address: { line1: "1 Globex Way", city: "Springfield", country: "US" },
-      }),
-    }).then((r) => r.json()).then((b) => b.data);
-    ```
-
-    ```python Python
-    customer = session.post(f"{BASE}/customers", json={
-        "name": "Globex Corporation",
-        "email": "billing@globex.example",
-        "address": {"line1": "1 Globex Way", "city": "Springfield", "country": "US"},
-    }).json()["data"]
-    ```
-    </CodeGroup>
-
-    The response is `201` with the new customer. Keep its `id` (`cus_…`).
-  </Step>
-
-  <Step title="Create a product and a price">
-    A product names what you sell, and a price says how much it costs. `unit_amount` is in **minor units**, so `150000` is 1,500.00.
-
-    <CodeGroup>
-    ```bash curl
-    curl https://invoice.horizonpay.co/api/v1/products \
-      -H "Authorization: Bearer $INVOICE_AI_API_KEY" \
-      -H "Content-Type: application/json" \
-      -d '{ "name": "Design retainer", "description": "Monthly design support" }'
-
-    # use the prod_… id from the response
-    curl https://invoice.horizonpay.co/api/v1/prices \
-      -H "Authorization: Bearer $INVOICE_AI_API_KEY" \
-      -H "Content-Type: application/json" \
-      -d '{ "product": "prod_...", "unit_amount": 150000, "currency": "USD", "tax_rate": 0 }'
-    ```
-
-    ```javascript JavaScript
-    const product = await fetch(`${BASE}/products`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ name: "Design retainer", description: "Monthly design support" }),
-    }).then((r) => r.json()).then((b) => b.data);
-
-    const price = await fetch(`${BASE}/prices`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ product: product.id, unit_amount: 150000, currency: "USD", tax_rate: 0 }),
-    }).then((r) => r.json()).then((b) => b.data);
-    ```
-
-    ```python Python
-    product = session.post(f"{BASE}/products", json={
-        "name": "Design retainer",
-        "description": "Monthly design support",
-    }).json()["data"]
-
-    price = session.post(f"{BASE}/prices", json={
-        "product": product["id"],
-        "unit_amount": 150000,
-        "currency": "USD",
-        "tax_rate": 0,
-    }).json()["data"]
-    ```
-    </CodeGroup>
-
-    Prices default to `"type": "one_time"`. Use your own business currency here. A priced line can only go on an invoice in the **same currency** as the price.
-  </Step>
-
-  <Step title="Create a draft invoice">
-    Creating an invoice **requires an `Idempotency-Key` header**. Generate a fresh one for each new invoice, and reuse it only when you retry that same request. See [Idempotency](/errors#idempotency).
-
-    <CodeGroup>
-    ```bash curl
-    curl https://invoice.horizonpay.co/api/v1/invoices \
-      -H "Authorization: Bearer $INVOICE_AI_API_KEY" \
-      -H "Content-Type: application/json" \
-      -H "Idempotency-Key: $(uuidgen)" \
-      -d '{
-        "customer": "cus_...",
-        "currency": "USD",
-        "days_until_due": 14,
-        "items": [{ "price": "price_...", "quantity": 2 }]
-      }'
-    ```
-
-    ```javascript JavaScript
-    const invoice = await fetch(`${BASE}/invoices`, {
-      method: "POST",
-      headers: { ...headers, "Idempotency-Key": crypto.randomUUID() },
-      body: JSON.stringify({
-        customer: customer.id,
-        currency: "USD",
-        days_until_due: 14,
-        items: [{ price: price.id, quantity: 2 }],
-      }),
-    }).then((r) => r.json()).then((b) => b.data);
-    ```
-
-    ```python Python
-    invoice = session.post(
-        f"{BASE}/invoices",
-        headers={"Idempotency-Key": str(uuid.uuid4())},
-        json={
-            "customer": customer["id"],
-            "currency": "USD",
-            "days_until_due": 14,
-            "items": [{"price": price["id"], "quantity": 2}],
-        },
-    ).json()["data"]
-    ```
-    </CodeGroup>
-
-    The response is `201` with `"status": "draft"` and `"number": null`. A draft has no number yet, because none has been spent. You can still edit it, add or remove lines, or delete it.
+    Creating an invoice needs an [`Idempotency-Key`](/idempotency) header. The SDKs add one for you.
   </Step>
 
   <Step title="Finalize it">
-    Finalizing assigns the next number in your series and moves the invoice to `open`. The number is permanent, which is why this endpoint also requires an `Idempotency-Key`.
+    Finalizing gives the invoice its permanent number and moves it to `open`.
 
     <CodeGroup>
-    ```bash curl
-    curl -X POST https://invoice.horizonpay.co/api/v1/invoices/in_.../finalize \
+    ```bash cURL
+    curl -X POST https://invoice.horizonpay.co/api/v1/invoices/in_Pb2Xk7Mv4Qs9Lr1Wd6Tn3Fh8/finalize \
       -H "Authorization: Bearer $INVOICE_AI_API_KEY" \
       -H "Idempotency-Key: $(uuidgen)"
     ```
 
-    ```javascript JavaScript
-    const finalized = await fetch(`${BASE}/invoices/${invoice.id}/finalize`, {
-      method: "POST",
-      headers: { ...headers, "Idempotency-Key": crypto.randomUUID() },
-    }).then((r) => r.json()).then((b) => b.data);
-
-    console.log(finalized.number, finalized.status); // e.g. "INV-0042", "open"
+    ```ts Node.js
+    const finalized = await invoiceai.invoices.finalize(invoice.id)
+    console.log(finalized.number) // "INV-0042"
     ```
 
     ```python Python
-    finalized = session.post(
-        f"{BASE}/invoices/{invoice['id']}/finalize",
-        headers={"Idempotency-Key": str(uuid.uuid4())},
-    ).json()["data"]
-    print(finalized["number"], finalized["status"])
+    finalized = client.invoices.finalize(invoice.id)
+    print(finalized.number)  # "INV-0042"
     ```
     </CodeGroup>
 
-    <Tip>
-      You can skip this step. `POST /invoices/{id}/send` finalizes a draft before it emails it.
-    </Tip>
+    You can skip this step. `send` finalizes a draft before emailing it.
   </Step>
 
-  <Step title="Email it, then mark it paid">
-    `send` emails the PDF to the customer's stored address. Pass `to` to use a different address. It's limited to **10 sends per hour** per key.
+  <Step title="Send it">
+    This emails the PDF and a link to view the invoice online to the customer's email.
 
     <CodeGroup>
-    ```bash curl
-    curl -X POST https://invoice.horizonpay.co/api/v1/invoices/in_.../send \
+    ```bash cURL
+    curl -X POST https://invoice.horizonpay.co/api/v1/invoices/in_Pb2Xk7Mv4Qs9Lr1Wd6Tn3Fh8/send \
       -H "Authorization: Bearer $INVOICE_AI_API_KEY" \
-      -H "Content-Type: application/json" \
-      -H "Idempotency-Key: $(uuidgen)" \
-      -d '{}'
-
-    # later, when the money arrives
-    curl -X POST https://invoice.horizonpay.co/api/v1/invoices/in_.../pay \
-      -H "Authorization: Bearer $INVOICE_AI_API_KEY" \
-      -H "Content-Type: application/json" \
-      -H "Idempotency-Key: $(uuidgen)" \
-      -d '{ "paid_on": "2026-09-30", "reference": "Wire 88213" }'
+      -H "Idempotency-Key: $(uuidgen)"
     ```
 
-    ```javascript JavaScript
-    const sent = await fetch(`${BASE}/invoices/${invoice.id}/send`, {
-      method: "POST",
-      headers: { ...headers, "Idempotency-Key": crypto.randomUUID() },
-      body: JSON.stringify({}),
-    }).then((r) => r.json());
-    // { data: Invoice, emailed_to: "ap@…" }
-
-    const paid = await fetch(`${BASE}/invoices/${invoice.id}/pay`, {
-      method: "POST",
-      headers: { ...headers, "Idempotency-Key": crypto.randomUUID() },
-      body: JSON.stringify({ paid_on: "2026-09-30", reference: "Wire 88213" }),
-    }).then((r) => r.json()).then((b) => b.data);
+    ```ts Node.js
+    const { emailed_to } = await invoiceai.invoices.send(invoice.id)
     ```
 
     ```python Python
-    sent = session.post(
-        f"{BASE}/invoices/{invoice['id']}/send",
-        headers={"Idempotency-Key": str(uuid.uuid4())},
-        json={},
-    ).json()["data"]
-
-    paid = session.post(
-        f"{BASE}/invoices/{invoice['id']}/pay",
-        headers={"Idempotency-Key": str(uuid.uuid4())},
-        json={"paid_on": "2026-09-30", "reference": "Wire 88213"},
-    ).json()["data"]
+    sent = client.invoices.send(invoice.id)
+    print(sent.emailed_to)
     ```
     </CodeGroup>
 
-    The paid invoice comes back with `"status": "paid"` and `"amount_due": 0`.
+    The response is `{ "data": Invoice, "emailed_to": "billing@acme.example" }`. Pass `{ "to": "..." }` to send to a different address.
+
+    Sending is limited to 10 emails per hour per key and 50 per hour per account. See [Rate limits](/rate-limits).
   </Step>
 </Steps>
 
-## What's next
+When the customer pays, call `POST /invoices/{id}/pay` to mark the invoice paid. See [Invoice lifecycle](/invoice-lifecycle).
+
+## Next steps
 
 <CardGroup cols={2}>
-  <Card title="Build your first integration" icon="hammer" href="/guides/build-your-first-integration">
-    A small Next.js app that lists invoices and handles `invoice.paid`.
+  <Card title="Webhooks" icon="webhook" href="/webhooks">
+    Get notified when an invoice is viewed or paid.
   </Card>
-  <Card title="Handle errors" icon="triangle-exclamation" href="/errors">
-    Branch on the stable `code` field, and retry safely.
-  </Card>
-  <Card title="Listen for events" icon="webhook" href="/webhooks">
-    Get notified when a customer views or downloads an invoice, or when it's paid.
+  <Card title="Errors" icon="triangle-exclamation" href="/errors">
+    Error codes, and which ones to retry.
   </Card>
   <Card title="Invoice lifecycle" icon="diagram-project" href="/invoice-lifecycle">
-    See which calls each state allows.
+    Pay, void and edit invoices.
+  </Card>
+  <Card title="API reference" icon="code" href="/api-reference/introduction">
+    Every endpoint and field.
   </Card>
 </CardGroup>

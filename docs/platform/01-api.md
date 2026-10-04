@@ -305,7 +305,7 @@ Receivers recompute the HMAC and **reject timestamps older than 5 minutes** (rep
 **Delivery:**
 - Planned: the first attempt runs right after the request (Next.js `after()`). **As built**, every attempt, the first included, runs from the Vercel Cron route `app/api/cron/webhooks/route.ts`.
 - Retries back off at 1m, 5m, 30m, 2h, 8h and 24h (`lib/webhooks/deliver.ts`), then the delivery is marked `dead`. The cron in `vercel.json` runs **daily** (Hobby plan limit), so in practice a delivery can wait up to 24h; on Pro, run it every few minutes.
-- An endpoint is disabled after 20 consecutive failed deliveries (`finish_webhook_delivery`). Emailing the owner when that happens is not built.
+- An endpoint is disabled after 20 deliveries in a row that used up every retry and were marked dead (`finish_webhook_delivery`); single failed attempts do not count. Emailing the owner when that happens is not built.
 
 ### 3.10 Rate limits and audit
 

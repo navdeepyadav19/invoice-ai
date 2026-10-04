@@ -1,0 +1,138 @@
+---
+title: "Node.js"
+description: "The official TypeScript SDK for Node.js, Bun, Deno and edge runtimes."
+icon: "node-js"
+---
+
+## Install
+
+Requires Node 20 or later.
+
+```bash
+npm install @horizonpay/invoice-ai
+```
+
+## Configure
+
+```ts
+import InvoiceAI from '@horizonpay/invoice-ai'
+// CommonJS: const { InvoiceAI } = require('@horizonpay/invoice-ai')
+
+const invoiceai = new InvoiceAI() // reads INVOICE_AI_API_KEY
+```
+
+| Option | Env var | Default |
+|---|---|---|
+| `apiKey` | `INVOICE_AI_API_KEY` | none |
+| `baseURL` | `INVOICE_AI_BASE_URL` | `https://invoice.horizonpay.co/api/v1` |
+| `timeout` | | `60000` (milliseconds, per attempt) |
+| `maxRetries` | | `2` |
+| `logLevel` | `INVOICE_AI_LOG` | `warn`. `debug` logs each request with secrets redacted. |
+| `fetch` | | the global `fetch` |
+
+Use the SDK only in server code. Never import it into browser code, or your key ships with it.
+
+## Create and send an invoice
+
+```ts
+const customer = await invoiceai.customers.create({ name: 'Acme Ltd', email: 'billing@acme.example' })
+
+const invoice = await invoiceai.invoices.create({
+  customer: customer.id,
+  currency: 'USD',
+  items: [{ description: 'Design retainer', quantity: 1, unit_amount: 150000 }],
+})
+
+const { data: sent, emailed_to } = await invoiceai.invoices.send(invoice.id) // finalizes, then emails
+console.log(sent.number, emailed_to)
+```
+
+Every method takes request options as its last argument: `{ idempotencyKey, timeout, maxRetries, signal, headers }`.
+
+## Errors and retries
+
+Failed calls are retried up to `maxRetries` times with exponential backoff. The SDK retries network errors, timeouts, `408`, `409 conflict`, `429` and `5xx`. Every `POST` gets an `Idempotency-Key` that's reused on retries, so a retried create never runs twice. On a `429`, it waits for `Retry-After` when that's 60 seconds or less.
+
+```ts
+import { InvalidStateError, RateLimitError, ValidationError } from '@horizonpay/invoice-ai'
+
+try {
+  await invoiceai.invoices.void('in_Pb2Xk7Mv4Qs9Lr1Wd6Tn3Fh8', { reason: 'Duplicate' })
+} catch (err) {
+  if (err instanceof InvalidStateError) console.log(err.detail)
+  else if (err instanceof ValidationError) console.log(err.fields)
+  else if (err instanceof RateLimitError) console.log(`retry in ${err.retryAfter}s`)
+  else throw err
+}
+```
+
+| Class | `code` |
+|---|---|
+| `AuthenticationError` | `unauthorized` (401) |
+| `PermissionError` | `forbidden` (403). `requiredScope` names the missing scope. |
+| `NotFoundError` | `not_found` (404) |
+| `InvalidStateError` | `invalid_state` (409) |
+| `ConflictError` | `conflict` (409) |
+| `ValidationError` | `validation` (422). See `fields`. |
+| `IdempotencyError` | `idempotency_mismatch` (422) |
+| `RateLimitError` | `rate_limited` (429). See `retryAfter`. |
+| `InternalServerError` | `internal_error` (500) |
+| `UpstreamError` | `upstream_failed` (502) |
+| `APIConnectionError` | No response. `APITimeoutError` for timeouts. |
+
+API errors extend `APIError` and carry `status`, `code`, `detail` and `requestId`.
+
+## Pagination
+
+```ts
+// Every open invoice, across all pages
+for await (const invoice of invoiceai.invoices.list({ status: 'open' })) {
+  console.log(invoice.number)
+}
+
+// One page
+const page = await invoiceai.invoices.list({ limit: 100 })
+page.data; page.nextCursor; page.hasMore
+
+// Up to 500 items
+const invoices = await invoiceai.invoices.list().toArray({ limit: 500 })
+```
+
+## Webhooks
+
+```ts
+import { Webhooks } from '@horizonpay/invoice-ai'
+
+const webhooks = new Webhooks(process.env.INVOICE_AI_WEBHOOK_SECRET)
+const event = await webhooks.constructEvent(rawBody, headers) // throws WebhookVerificationError
+```
+
+See [Verify signatures](/verify-webhooks) for full handlers.
+
+## Response headers
+
+```ts
+const { data, response } = await invoiceai.invoices.retrieve('in_Pb2Xk7Mv4Qs9Lr1Wd6Tn3Fh8').withResponse()
+response.requestId
+response.rateLimit.remaining
+```
+
+For an endpoint the SDK doesn't wrap yet, call `invoiceai.request('GET', '/business')`.
+
+## Testing
+
+There's no sandbox, so don't point tests at your live account. Instead:
+
+- Pass a fake `fetch` to `new InvoiceAI({ apiKey: 'inv_live_test', fetch })` and return canned responses.
+- Run a mock server from the spec, then set `INVOICE_AI_BASE_URL`:
+
+  ```bash
+  npx @stoplight/prism-cli mock https://invoice.horizonpay.co/api/v1/openapi.json
+  export INVOICE_AI_BASE_URL=http://127.0.0.1:4010
+  ```
+
+- Sign test webhook bodies with `await new Webhooks(secret).sign(body)`, which returns the three signature headers.
+
+## Versioning
+
+The SDK is in beta (`0.x`). A minor release can include breaking changes, so pin the minor version: `"@horizonpay/invoice-ai": "~0.1.0"`. Release notes are on [GitHub](https://github.com/navdeepyadav19/invoice-ai-sdk/releases).

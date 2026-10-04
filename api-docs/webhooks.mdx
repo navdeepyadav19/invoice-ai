@@ -1,114 +1,101 @@
 ---
 title: "Webhooks"
-description: "Receive signed Standard Webhooks notifications when invoices are created, finalized, emailed, viewed, paid or voided."
+description: "Get a signed POST when an invoice is created, finalized, emailed, viewed, paid or voided."
 icon: "webhook"
 ---
 
-Webhooks let your systems hear about invoice activity without polling. When something happens to an invoice, Invoice-AI sends a signed `POST` to every endpoint you've registered for that event.
-
-Deliveries are queued by the database in the same transaction that records the invoice event, so every recorded event reaches every subscribed endpoint. That includes `invoice.viewed` and `invoice.downloaded`, which your customer triggers from the public invoice link and which never pass through the API.
-
 ## Register an endpoint
 
-Register an endpoint with the API (scope `webhooks:manage`), or in the web app under **Settings → Webhooks**.
+Needs the `webhooks:manage` scope. You can also register endpoints in **Settings → Webhooks**.
 
 <CodeGroup>
-```bash curl
+```bash cURL
 curl https://invoice.horizonpay.co/api/v1/webhook-endpoints \
   -H "Authorization: Bearer $INVOICE_AI_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "url": "https://example.com/hooks/invoice-ai",
-    "events": ["invoice.finalized", "invoice.paid", "invoice.voided"]
+    "url": "https://example.com/webhooks/invoice-ai",
+    "events": ["invoice.finalized", "invoice.paid"]
   }'
 ```
 
-```javascript JavaScript
-const endpoint = await fetch(`${BASE}/webhook-endpoints`, {
-  method: "POST",
-  headers,
-  body: JSON.stringify({
-    url: "https://example.com/hooks/invoice-ai",
-    events: ["invoice.finalized", "invoice.paid", "invoice.voided"],
-  }),
-}).then((r) => r.json()).then((b) => b.data);
-
-// Store endpoint.secret now. It's never returned again.
+```ts Node.js
+const endpoint = await invoiceai.webhookEndpoints.create({
+  url: 'https://example.com/webhooks/invoice-ai',
+  events: ['invoice.finalized', 'invoice.paid'],
+})
+console.log(endpoint.secret) // whsec_… Store it now.
 ```
 
 ```python Python
-endpoint = session.post(f"{BASE}/webhook-endpoints", json={
-    "url": "https://example.com/hooks/invoice-ai",
-    "events": ["invoice.finalized", "invoice.paid", "invoice.voided"],
-}).json()["data"]
+endpoint = client.webhook_endpoints.create(
+    url="https://example.com/webhooks/invoice-ai",
+    events=["invoice.finalized", "invoice.paid"],
+)
+print(endpoint.secret)  # whsec_… Store it now.
+```
 
-# Store endpoint["secret"] now. It's never returned again.
+```bash CLI
+invoice-ai webhooks create --url https://example.com/webhooks/invoice-ai --events invoice.finalized,invoice.paid
 ```
 </CodeGroup>
 
-```json 201 Created
+```json Response
 {
   "data": {
     "id": "8f14e45f-ceea-467a-9575-2f9c1d3b7a60",
-    "url": "https://example.com/hooks/invoice-ai",
-    "events": ["invoice.finalized", "invoice.paid", "invoice.voided"],
+    "url": "https://example.com/webhooks/invoice-ai",
+    "events": ["invoice.finalized", "invoice.paid"],
     "active": true,
     "disabled_at": null,
     "failure_count": 0,
-    "created_at": "2026-09-22T08:30:00.000Z",
-    "secret": "whsec_Q2l0eS1vZi1zdGFycy1hbmQtbW9vbnM"
+    "created_at": "2026-10-04T08:30:00.000Z",
+    "secret": "whsec_MfKQ9r6nRhD8yU2vXc4bWq7tLz0aPe3k"
   }
 }
 ```
 
-<ParamField body="url" type="string" required>
-  Where to send events. It must be `https://`, and its hostname must resolve to a **public** address. Private, loopback, link-local, carrier-grade NAT and multicast ranges are rejected with `422`.
-</ParamField>
-<ParamField body="events" type="string[]">
-  Which [events](#events) to receive. Leave it out, or send an empty array, to receive **every** event, including event types added later. An unknown event name returns `422`.
-</ParamField>
-
 <Warning>
-  The signing `secret` is returned **only in this create response**. `GET /webhook-endpoints` never includes it. If you lose it, delete the endpoint and register it again.
+  The signing `secret` is returned only once, in this response. If you lose it, delete the endpoint and create a new one.
 </Warning>
 
-To list your endpoints, call `GET /webhook-endpoints`. To remove one, call `DELETE /webhook-endpoints/{id}` with the endpoint's UUID. It returns `204`, and deleting an endpoint that's already gone returns `404`. You can't update an endpoint. Delete it and create a new one.
+<ParamField body="url" type="string" required>
+  Where to send events. It must:
+
+  - use `https://`
+  - resolve to a public address. Private, loopback, link-local, carrier-grade NAT, multicast and IPv6 ranges that embed an IPv4 address (NAT64, 6to4, Teredo) are refused.
+  - not contain a username or password
+
+  A URL that breaks these rules returns `422`. The address is checked again at every delivery.
+</ParamField>
+
+<ParamField body="events" type="string[]">
+  The [events](#events) to receive. Leave it out to receive every event, including ones added later.
+</ParamField>
+
+To list endpoints, call `GET /webhook-endpoints`. To remove one, call `DELETE /webhook-endpoints/{id}`. You can't edit an endpoint, so delete it and create a new one.
 
 ## Events
 
 | Event | Sent when |
 |---|---|
-| `invoice.created` | A draft was created. |
-| `invoice.updated` | A draft was edited, including lines added or removed. |
-| `invoice.finalized` | An invoice was finalized: it got its number and is now `open`. |
-| `invoice.emailed` | An invoice was emailed to a customer. |
-| `invoice.email_failed` | Sending an invoice email failed because the email provider returned an error. Later bounces aren't tracked. |
-| `invoice.viewed` | A customer opened the public invoice link. |
-| `invoice.downloaded` | A customer downloaded the PDF. |
-| `invoice.paid` | An invoice was marked paid. |
-| `invoice.voided` | An invoice was voided. |
-
-There's no `invoice.overdue` event, because overdue is [worked out when an invoice is read](/invoice-lifecycle#overdue) and never stored.
+| `invoice.created` | A draft is created. |
+| `invoice.updated` | A draft is edited, including lines added or removed. |
+| `invoice.finalized` | An invoice gets its number and becomes `open`. |
+| `invoice.emailed` | An invoice is emailed. |
+| `invoice.email_failed` | The email provider rejected an invoice email. |
+| `invoice.viewed` | The customer opens the invoice link. At most once per invoice every 10 minutes. |
+| `invoice.downloaded` | The customer downloads the PDF. At most once per invoice every 10 minutes. |
+| `invoice.paid` | An invoice is marked paid. |
+| `invoice.voided` | An invoice is voided. |
 
 ## Payload
-
-Each delivery is a JSON `POST`:
-
-```http
-POST /hooks/invoice-ai HTTP/1.1
-Host: example.com
-Content-Type: application/json; charset=utf-8
-User-Agent: Invoice-AI-Webhooks/1.0
-webhook-id: 3b1f6a52-9c7e-4d0b-8a15-6e2f0c9d4b71
-webhook-timestamp: 1789371234
-webhook-signature: v1,K5s2fXy0hQ3m9vB8nT1cR7wLpA4eZ6uJ2kD0gH5iO8s=
-```
 
 ```json
 {
   "id": "0d6c3e9a-51f2-4b8e-9a7d-2c4f6e8b1a03",
   "type": "invoice.paid",
-  "created_at": "2026-09-22T09:12:44.123456+00:00",
+  "created_at": "2026-10-04T09:12:44.123456+00:00",
   "data": {
     "object": {
       "id": "in_Pb2Xk7Mv4Qs9Lr1Wd6Tn3Fh8",
@@ -117,182 +104,18 @@ webhook-signature: v1,K5s2fXy0hQ3m9vB8nT1cR7wLpA4eZ6uJ2kD0gH5iO8s=
       "status": "paid",
       "customer": "cus_Nf3kQ8pR2mX7vB1cT9wL4sZ6",
       "currency": "USD",
-      "total": 2950000,
+      "total": 150000,
       "amount_due": 0
     }
   }
 }
 ```
 
-<ResponseField name="id" type="string">
-  The UUID of the invoice event. The same event goes to every subscribed endpoint with the same `id`.
-</ResponseField>
-<ResponseField name="type" type="string">
-  One of the [event types](#events).
-</ResponseField>
-<ResponseField name="created_at" type="string">
-  When the event happened, as an ISO 8601 timestamp.
-</ResponseField>
-<ResponseField name="data.object" type="Invoice">
-  The invoice as it was **when the event was recorded**, in the same shape `GET /invoices` returns: `in_…` and `cus_…` ids, amounts in [minor units](/objects-and-money#money), and `status` including `overdue`. It has no `lines`; call `GET /invoices/{id}` for those.
-</ResponseField>
+- `id` is the event id. It's the same for every endpoint that receives the event.
+- `data.object` is the invoice as it was when the event happened, in the same shape as `GET /invoices`. It has no `lines`. Call `GET /invoices/{id}` for those.
 
-## Verifying signatures
-
-Deliveries are signed with [Standard Webhooks](https://www.standardwebhooks.com/). Three headers come with each request:
-
-| Header | Value |
-|---|---|
-| `webhook-id` | The delivery id, a UUID. It's the same on every retry of that delivery. |
-| `webhook-timestamp` | When this attempt was signed, in Unix seconds. |
-| `webhook-signature` | `v1,` followed by a base64 HMAC-SHA256 signature. It may hold several space-separated signatures. |
-
-To verify a delivery:
-
-1. Build the signed content: `{webhook-id}.{webhook-timestamp}.{raw request body}`.
-2. Decode your secret: take the part after `whsec_` and **base64**-decode it to get the key bytes. (Secrets issued before September 2026 are base64url, so accept `-` and `_` too.)
-3. Compute HMAC-SHA256 of the signed content with those bytes, then base64-encode it (standard alphabet, with padding).
-4. Compare `v1,<your result>` with each space-separated value in `webhook-signature`, in **constant time**.
-5. Reject the request if `webhook-timestamp` is more than **5 minutes** from your clock, in either direction.
+Each request carries `webhook-id`, `webhook-timestamp` and `webhook-signature` headers. [Verify them](/verify-webhooks) before you trust the payload.
 
 <Warning>
-  Verify against the **raw bytes** of the body, before any JSON parsing. A body that's parsed and re-serialized won't match the signature.
+  Webhooks are currently delivered **once a day, at 03:00 UTC**. An event can take up to 24 hours to arrive. For anything time-sensitive, poll `GET /invoices` or `GET /invoices/{id}/events`.
 </Warning>
-
-<CodeGroup>
-```javascript Node.js (Express)
-import crypto from "node:crypto";
-import express from "express";
-
-const SECRET = process.env.INVOICE_AI_WEBHOOK_SECRET; // whsec_…
-const TOLERANCE_SECONDS = 5 * 60;
-
-function verify(headers, rawBody) {
-  const id = headers["webhook-id"];
-  const timestamp = headers["webhook-timestamp"];
-  const signatures = (headers["webhook-signature"] ?? "").split(" ").filter(Boolean);
-  if (!id || !timestamp || signatures.length === 0) return false;
-
-  const now = Math.floor(Date.now() / 1000);
-  if (!Number.isFinite(Number(timestamp)) || Math.abs(now - Number(timestamp)) > TOLERANCE_SECONDS) {
-    return false; // too old or too far in the future
-  }
-
-  // Node's base64 decoder also accepts base64url, so older secrets work too.
-  const key = Buffer.from(SECRET.replace(/^whsec_/, ""), "base64");
-  const expected =
-    "v1," + crypto.createHmac("sha256", key).update(`${id}.${timestamp}.${rawBody}`).digest("base64");
-
-  return signatures.some((candidate) => {
-    const a = Buffer.from(candidate);
-    const b = Buffer.from(expected);
-    return a.length === b.length && crypto.timingSafeEqual(a, b);
-  });
-}
-
-const app = express();
-
-app.post("/hooks/invoice-ai", express.raw({ type: "application/json" }), (req, res) => {
-  const rawBody = req.body.toString("utf8");
-  if (!verify(req.headers, rawBody)) return res.status(400).send("invalid signature");
-
-  const event = JSON.parse(rawBody);
-  // Deduplicate on req.headers["webhook-id"] before acting on the event.
-  console.log(event.type, event.data.object.number);
-
-  res.sendStatus(204); // any 2xx acknowledges the delivery
-});
-
-app.listen(3000);
-```
-
-```python Python (Flask)
-import base64, hashlib, hmac, os, time
-from flask import Flask, abort, request
-
-SECRET = os.environ["INVOICE_AI_WEBHOOK_SECRET"]  # whsec_…
-TOLERANCE_SECONDS = 5 * 60
-
-
-def secret_bytes(secret: str) -> bytes:
-    # Standard base64; older secrets are base64url, so map - and _ first.
-    raw = secret.removeprefix("whsec_").replace("-", "+").replace("_", "/").rstrip("=")
-    return base64.b64decode(raw + "=" * (-len(raw) % 4))
-
-
-def verify(headers, raw_body: bytes) -> bool:
-    msg_id = headers.get("webhook-id")
-    timestamp = headers.get("webhook-timestamp")
-    signatures = headers.get("webhook-signature", "").split()
-    if not msg_id or not timestamp or not signatures:
-        return False
-
-    try:
-        if abs(time.time() - int(timestamp)) > TOLERANCE_SECONDS:
-            return False
-    except ValueError:
-        return False
-
-    signed = f"{msg_id}.{timestamp}.".encode() + raw_body
-    digest = hmac.new(secret_bytes(SECRET), signed, hashlib.sha256).digest()
-    expected = "v1," + base64.b64encode(digest).decode()
-
-    return any(hmac.compare_digest(candidate, expected) for candidate in signatures)
-
-
-app = Flask(__name__)
-
-
-@app.post("/hooks/invoice-ai")
-def invoice_ai_webhook():
-    raw_body = request.get_data()  # raw bytes, before any JSON parsing
-    if not verify(request.headers, raw_body):
-        abort(400)
-
-    event = request.get_json()
-    # Deduplicate on request.headers["webhook-id"] before acting on the event.
-    print(event["type"], event["data"]["object"]["number"])
-    return "", 204
-```
-</CodeGroup>
-
-<Note>
-  Secrets are `whsec_` plus standard base64, so the official [Standard Webhooks](https://www.standardwebhooks.com/) libraries work as they are.
-</Note>
-
-## Responding and retries
-
-- **Acknowledge with any `2xx` within 10 seconds.** Do the slow work after you respond, for example on a queue.
-- **Anything else is a failure**: a `3xx` (redirects aren't followed), `4xx`, `5xx`, a timeout, a DNS failure or a URL that now resolves to a private address.
-- **Delivery is at least once.** A delivery can arrive more than once, so deduplicate on `webhook-id`.
-- **Order isn't guaranteed.** Use each event's `created_at`, or fetch the invoice, rather than relying on arrival order.
-
-A failed delivery is retried on this backoff schedule, measured from the failed attempt:
-
-| After attempt | Next attempt no sooner than |
-|---|---|
-| 1 | 1 minute |
-| 2 | 5 minutes |
-| 3 | 30 minutes |
-| 4 | 2 hours |
-| 5 | 8 hours |
-| 6 | 24 hours |
-| 7 | None. The delivery is marked **dead**. |
-
-After **20 dead deliveries** with no successful delivery in between, the endpoint is disabled automatically. It stops receiving events and shows `"active": false` and a `disabled_at` timestamp. Any successful delivery resets the count to zero. To start receiving events again, register the URL again.
-
-<Warning>
-  **Delivery currently runs once a day.** Deliveries are sent by a scheduled worker that runs daily at 03:00 UTC, because of the hosting plan's cron limits. That has two effects:
-
-  - A new event can take **up to about 24 hours** to arrive.
-  - Each retry waits for the next daily run, so in practice retries are about a day apart, and a delivery can keep being retried for about a week before it's marked dead.
-
-  Don't rely on webhooks for anything time-sensitive yet. For near-real-time needs, poll `GET /invoices` or `GET /invoices/{id}/events` in the meantime. The delivery cadence will get faster when the worker's schedule changes. The backoff schedule above stays the same.
-</Warning>
-
-## Security checklist
-
-- Always verify the signature and timestamp before trusting a payload.
-- Keep the `whsec_` secret on your server, never in client code.
-- Use an HTTPS endpoint with a valid certificate on a public address. Other URLs are rejected when you register them and refused again at delivery time.
-- Treat string fields such as the invoice number as untrusted input in whatever system you pass them to.

@@ -1,0 +1,146 @@
+---
+title: "Python"
+description: "The official Python SDK, with sync and asyncio clients."
+icon: "python"
+---
+
+## Install
+
+Requires Python 3.10 or later.
+
+```bash
+pip install horizonpay-invoice-ai
+```
+
+## Configure
+
+```python
+from invoice_ai import InvoiceAI
+
+client = InvoiceAI()  # reads INVOICE_AI_API_KEY
+```
+
+| Option | Env var | Default |
+|---|---|---|
+| `api_key` | `INVOICE_AI_API_KEY` | none |
+| `base_url` | `INVOICE_AI_BASE_URL` | `https://invoice.horizonpay.co/api/v1` |
+| `timeout` | | `60` (seconds, per attempt) |
+| `max_retries` | | `2` |
+| `log_level` | `INVOICE_AI_LOG` | `warn`. `debug` logs each request with secrets redacted. |
+| `http_client` | | a new `httpx.Client` |
+
+For asyncio, use `AsyncInvoiceAI`. It has the same methods:
+
+```python
+from invoice_ai import AsyncInvoiceAI
+
+async with AsyncInvoiceAI() as client:
+    invoice = await client.invoices.retrieve("in_Pb2Xk7Mv4Qs9Lr1Wd6Tn3Fh8")
+```
+
+## Create and send an invoice
+
+```python
+customer = client.customers.create(name="Acme Ltd", email="billing@acme.example")
+
+invoice = client.invoices.create(
+    customer=customer.id,
+    currency="USD",
+    items=[{"description": "Design retainer", "quantity": 1, "unit_amount": 150000}],
+)
+
+sent = client.invoices.send(invoice.id)  # finalizes, then emails
+print(sent.data.number, sent.emailed_to)
+```
+
+Every method also takes `idempotency_key`, `timeout`, `max_retries` and `extra_headers`.
+
+## Errors and retries
+
+Failed calls are retried up to `max_retries` times with exponential backoff. The SDK retries network errors, timeouts, `408`, `409 conflict`, `429` and `5xx`. Every `POST` gets an `Idempotency-Key` that's reused on retries, so a retried create never runs twice. On a `429`, it waits for `Retry-After` when that's 60 seconds or less.
+
+```python
+from invoice_ai import InvalidStateError, RateLimitError, ValidationError
+
+try:
+    client.invoices.void("in_Pb2Xk7Mv4Qs9Lr1Wd6Tn3Fh8", reason="Duplicate")
+except InvalidStateError as err:
+    print(err.detail)
+except ValidationError as err:
+    print(err.fields)
+except RateLimitError as err:
+    print(f"retry in {err.retry_after}s")
+```
+
+| Exception | `code` |
+|---|---|
+| `AuthenticationError` | `unauthorized` (401) |
+| `PermissionDeniedError` | `forbidden` (403). `required_scope` names the missing scope. Also exported as `PermissionError`. |
+| `NotFoundError` | `not_found` (404) |
+| `InvalidStateError` | `invalid_state` (409) |
+| `ConflictError` | `conflict` (409) |
+| `ValidationError` | `validation` (422). See `fields`. |
+| `IdempotencyError` | `idempotency_mismatch` (422) |
+| `RateLimitError` | `rate_limited` (429). See `retry_after`. |
+| `InternalServerError` | `internal_error` (500) |
+| `UpstreamError` | `upstream_failed` (502) |
+| `APIConnectionError` | No response. `APITimeoutError` for timeouts. |
+
+API errors extend `APIError` and carry `status`, `code`, `detail` and `request_id`.
+
+## Pagination
+
+```python
+# Every open invoice, across all pages
+for invoice in client.invoices.list(status="open"):
+    print(invoice.number)
+
+# One page
+page = client.invoices.list(limit=100)
+page.data, page.next_cursor, page.has_more
+
+# Up to 500 items
+invoices = client.invoices.list().to_list(limit=500)
+```
+
+## Webhooks
+
+```python
+import os
+
+from invoice_ai import Webhook
+
+webhook = Webhook(os.environ["INVOICE_AI_WEBHOOK_SECRET"])
+event = webhook.verify(raw_body, headers)  # raises WebhookVerificationError
+```
+
+See [Verify signatures](/verify-webhooks) for a full handler.
+
+## Response headers
+
+```python
+raw = client.invoices.with_raw_response.retrieve("in_Pb2Xk7Mv4Qs9Lr1Wd6Tn3Fh8")
+raw.request_id
+raw.rate_limit.remaining
+invoice = raw.parse()
+```
+
+For an endpoint the SDK doesn't wrap yet, call `client.request("GET", "/business")`.
+
+## Testing
+
+There's no sandbox, so don't point tests at your live account. Instead:
+
+- Pass `http_client=httpx.Client(transport=httpx.MockTransport(handler))` and return canned responses.
+- Run a mock server from the spec, then set `INVOICE_AI_BASE_URL`:
+
+  ```bash
+  npx @stoplight/prism-cli mock https://invoice.horizonpay.co/api/v1/openapi.json
+  export INVOICE_AI_BASE_URL=http://127.0.0.1:4010
+  ```
+
+- Sign test webhook bodies with `sign_payload(body, secret)`, which returns the three signature headers.
+
+## Versioning
+
+The SDK is in beta (`0.x`). A minor release can include breaking changes, so pin the minor version: `horizonpay-invoice-ai~=0.1.0`. Release notes are on [GitHub](https://github.com/navdeepyadav19/invoice-ai-sdk/releases).

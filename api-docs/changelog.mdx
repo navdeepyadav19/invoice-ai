@@ -1,52 +1,56 @@
 ---
 title: "Changelog"
-description: "What's in the Invoice-AI API, and what's changed."
+description: "Changes to the Invoice-AI API, SDKs and CLI."
 icon: "clock-rotate-left"
 ---
 
-<Update label="September 2026" description="SDKs & CLI 0.1.0 (beta)">
-  ## TypeScript SDK, Python SDK and CLI
+<Update label="October 2026" description="Sending and webhook hardening">
+  - `POST /invoices/{id}/send` requires a verified account email. Otherwise it returns `409 invalid_state`.
+  - Invoice emails are capped at 50 per hour per account, across all keys and the dashboard, on top of 10 per hour per key. See [Rate limits](/rate-limits).
+  - Webhook URLs can't contain a username or password. IPv6 forms that embed an IPv4 address (NAT64, 6to4, Teredo) are refused, and every delivery re-checks the address.
+  - `invoice.viewed` and `invoice.downloaded` fire at most once per invoice every 10 minutes.
+  - Unexpected database errors return `502 upstream_failed` with a generic `detail`.
+</Update>
 
-  - `@horizonpay/invoice-ai` (npm) and `horizonpay-invoice-ai` (PyPI): typed clients with automatic retries, idempotency keys, pagination and webhook verification. See [SDKs](/sdks/overview).
+<Update label="September 2026" description="SDKs & CLI 0.1.0 (beta)">
+  - `@horizonpay/invoice-ai` (npm) and `horizonpay-invoice-ai` (PyPI): typed clients with retries, idempotency keys, pagination and webhook verification. See [Node.js](/sdks/node) and [Python](/sdks/python).
   - `@horizonpay/invoice-ai-cli`: the `invoice-ai` command with browser login. See [CLI](/cli/overview).
-  - 0.x is a beta: the API may still change before 1.0. See [Versioning](/sdks/versioning).
+  - `0.x` is a beta, so minor releases may break. Pin the minor version.
 </Update>
 
 <Update label="September 2026" description="v1">
-  ## REST API v1
-
-  The first public version of the Invoice-AI API, served at `https://invoice.horizonpay.co/api/v1`.
+  The first public version of the API, at `https://invoice.horizonpay.co/api/v1`.
 
   **Resources**
 
-  - **Business**: `GET /business` reads your business profile. It's read-only in v1.
-  - **Customers**: create, list (with `query` and `include_deleted`), read, update and archive (`cus_…` ids).
-  - **Products and prices**: a catalog of products (`prod_…`) and their one-time or recurring prices (`price_…`), with `unit_amount` in minor units. Recurring prices are data only in v1, and nothing bills automatically.
-  - **Invoices**: create drafts, from catalog prices or ad-hoc lines, then update, delete, finalize, send, pay and void them. You can also download the PDF and read the event history (`in_…` ids).
-  - **Invoice items**: add, list, read and remove single lines on a draft (`ii_…` ids).
-  - **Webhook endpoints**: register, list and delete HTTPS endpoints.
+  - **Business:** read your business profile. Read-only.
+  - **Customers:** create, list, read, update and archive (`cus_…`).
+  - **Products and prices:** a catalog (`prod_…`, `price_…`) with one-time or recurring prices. Recurring prices don't bill automatically.
+  - **Invoices:** create, update, delete, finalize, send, pay and void (`in_…`), plus PDFs and event history.
+  - **Invoice items:** add, list, read and remove lines on a draft (`ii_…`).
+  - **Webhook endpoints:** register, list and delete HTTPS endpoints.
 
   **Platform**
 
-  - Bearer API keys (`inv_live_…`) with 11 scopes, managed only in Settings → API keys.
+  - Bearer API keys (`inv_live_…`) with 11 scopes, managed in Settings.
   - RFC 9457 `application/problem+json` errors with stable `code` values.
-  - `Idempotency-Key` support. It's required on invoice creation and on every lifecycle action, with `Idempotent-Replayed` on replays.
-  - Cursor pagination over `created_at` and `id`, with `limit` up to 100.
-  - Per-key rate limits: 120 requests per minute and 10 sends per hour, reported through `RateLimit-*` headers.
-  - Nine webhook event types, signed with Standard Webhooks HMAC-SHA256 and retried on a backoff schedule.
-  - A public OpenAPI 3.1 document at `/api/v1/openapi.json`, and a Postman collection generated from it.
+  - `Idempotency-Key`, required on invoice creation and every lifecycle action.
+  - Cursor pagination with `limit` up to 100.
+  - Per-key rate limits: 120 requests per minute and 10 sends per hour.
+  - Nine webhook event types, signed with Standard Webhooks and retried with backoff.
+  - A public OpenAPI 3.1 document at `/api/v1/openapi.json`, and a Postman collection.
 
-  **Hardening before SDKs**
+  **Changes before the SDKs**
 
-  - `PATCH /invoices/{id}` is a true partial update: `customer` is optional and lines are kept unless `items` is sent.
-  - Money uses each currency's own minor unit (¥5,000 is `5000`), in requests, responses and webhooks.
-  - Webhook payloads carry the REST `Invoice` under `data.object`, with public ids and minor units. New signing secrets are standard base64.
-  - `GET /webhook-endpoints` and `GET /invoices/{id}/events` are cursor-paginated.
+  - `PATCH /invoices/{id}` is a partial update. Lines are kept unless you send `items`.
+  - Money uses each currency's own minor unit (¥5,000 is `5000`) everywhere, including webhooks.
+  - Webhook payloads carry the REST `Invoice` under `data.object`. New signing secrets are standard base64.
+  - `GET /webhook-endpoints` and `GET /invoices/{id}/events` are paginated.
   - `POST /invoices/{id}/send` returns `{ data: Invoice, emailed_to }`.
-  - A malformed id is a `404`, an invalid `cursor` is a `422`, and a reused `Idempotency-Key` is the new `idempotency_mismatch` code.
+  - A malformed id returns `404`, an invalid `cursor` returns `422`, and a reused `Idempotency-Key` returns `idempotency_mismatch`.
 
   **Known limitations**
 
-  - Webhook deliveries are currently sent once a day. See [Webhooks](/webhooks#responding-and-retries).
-  - No business profile writes, credit notes, OAuth apps or API key management through the API.
+  - Webhooks are delivered once a day. See [Verify signatures](/verify-webhooks#respond-and-retry).
+  - No business profile writes, credit notes, OAuth apps or key management through the API.
 </Update>

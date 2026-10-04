@@ -45,20 +45,22 @@
             ]
           },
           {
-            "group": "Core concepts",
+            "group": "Basics",
             "pages": [
               "authentication",
-              "objects-and-money",
-              "invoice-lifecycle",
               "errors",
+              "idempotency",
               "pagination",
-              "webhooks"
+              "rate-limits",
+              "money-and-ids",
+              "invoice-lifecycle"
             ]
           },
           {
-            "group": "Guides",
+            "group": "Webhooks",
             "pages": [
-              "guides/build-your-first-integration"
+              "webhooks",
+              "verify-webhooks"
             ]
           }
         ]
@@ -86,11 +88,8 @@
           {
             "group": "SDKs",
             "pages": [
-              "sdks/overview",
-              "sdks/errors-and-retries",
-              "sdks/webhooks",
-              "sdks/testing",
-              "sdks/versioning"
+              "sdks/node",
+              "sdks/python"
             ]
           }
         ]
@@ -118,9 +117,12 @@
     },
     "examples": {
       "languages": [
-        "curl"
+        "curl",
+        "node",
+        "python"
       ],
-      "defaults": "required"
+      "defaults": "required",
+      "autogenerate": false
     },
     "mdx": {
       "server": "https://invoice.horizonpay.co/api/v1",
@@ -155,16 +157,36 @@
   },
   "redirects": [
     {
-      "source": "/idempotency",
-      "destination": "/errors"
-    },
-    {
-      "source": "/rate-limits",
-      "destination": "/errors"
-    },
-    {
       "source": "/ids-and-objects",
-      "destination": "/objects-and-money"
+      "destination": "/money-and-ids"
+    },
+    {
+      "source": "/objects-and-money",
+      "destination": "/money-and-ids"
+    },
+    {
+      "source": "/guides/build-your-first-integration",
+      "destination": "/quickstart"
+    },
+    {
+      "source": "/sdks/overview",
+      "destination": "/sdks/node"
+    },
+    {
+      "source": "/sdks/errors-and-retries",
+      "destination": "/sdks/node#errors-and-retries"
+    },
+    {
+      "source": "/sdks/webhooks",
+      "destination": "/verify-webhooks"
+    },
+    {
+      "source": "/sdks/testing",
+      "destination": "/sdks/node#testing"
+    },
+    {
+      "source": "/sdks/versioning",
+      "destination": "/sdks/node#versioning"
     }
   ],
   "seo": {

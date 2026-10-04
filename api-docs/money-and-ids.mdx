@@ -1,0 +1,56 @@
+---
+title: "Money & IDs"
+description: "Amounts in minor units, currencies, dates, id prefixes and the response envelope."
+icon: "coins"
+---
+
+## Money
+
+Every amount is an **integer in the currency's minor unit**.
+
+| You mean | Send |
+|---|---|
+| $1,500.00 | `150000` |
+| €0.99 | `99` |
+| ¥5,000 (no minor unit) | `5000` |
+| 1.500 KWD (three decimals) | `1500` |
+
+- Fractions such as `1500.5` return `422` with `"Use whole minor units"`.
+- Three-decimal currencies are stored to two decimals, so send a multiple of `10`.
+- The server calculates `subtotal`, `discount`, `tax`, `total` and `amount_due`.
+- `amount_due` equals `total` while an invoice is `open` or `overdue`. Otherwise it's `0`.
+- `tax_rate` and `discount_percent` are percentages from `0` to `100`, such as `18` or `7.5`.
+
+The SDKs convert for you: `toMinor('1500.00', 'USD')` and `formatMoney(150000, 'USD')` in Node.js, `to_minor` and `format_money` in Python.
+
+## Currencies and dates
+
+- Currencies are ISO 4217 codes. `usd` is stored as `USD`. An invoice without `currency` uses your business currency.
+- A line that uses a price must be in the invoice's currency.
+- Dates such as `issue_date` and `due_date` are `YYYY-MM-DD`. Timestamps are ISO 8601 in UTC.
+- On create, pass `due_date` or `days_until_due` (`0` to `365`).
+
+## IDs
+
+| Resource | Id | `object` |
+|---|---|---|
+| Customer | `cus_…` | `customer` |
+| Product | `prod_…` | `product` |
+| Price | `price_…` | `price` |
+| Invoice | `in_…` | `invoice` |
+| Invoice item | `ii_…` | `invoiceitem` |
+| Webhook endpoint | UUID | none |
+
+Treat ids as opaque strings. A malformed id returns `404`.
+
+## Responses
+
+A successful response puts its payload under `data`. Lists add [`next_cursor`](/pagination).
+
+```json
+{ "data": { "id": "cus_Nf3kQ8pR2mX7vB1cT9wL4sZ6", "object": "customer", "name": "Acme Ltd" } }
+```
+
+`DELETE /invoices/{id}` and `DELETE /webhook-endpoints/{id}` return `204` with no body.
+
+Customers, products and prices are archived, not deleted, because invoices refer to them. `DELETE /customers/{id}` returns the customer with `"deleted": true`. `DELETE /products/{id}` and `DELETE /prices/{id}` return the object with `"active": false`.
