@@ -66,12 +66,23 @@ export async function deleteWebhookAction(id: string): Promise<{ error?: string 
   return {}
 }
 
-export async function listWebhookEndpoints(): Promise<WebhookEndpointRow[]> {
+/**
+ * Everything but the signing secret. This feeds a client component, so any
+ * column selected here ends up in the page's RSC payload — and the secret is
+ * shown exactly once, at creation, by design.
+ */
+export type WebhookEndpointListRow = Omit<WebhookEndpointRow, 'secret'>
+
+export async function listWebhookEndpoints(): Promise<WebhookEndpointListRow[]> {
   const ctx = await contextFromSession()
 
-  const rows = await ctx.db.selectFrom('webhook_endpoints').selectAll().orderBy('created_at', 'desc').execute()
+  const rows = await ctx.db
+    .selectFrom('webhook_endpoints')
+    .select(['id', 'owner_id', 'url', 'events', 'active', 'failure_count', 'disabled_at', 'created_at'])
+    .orderBy('created_at', 'desc')
+    .execute()
 
-  return rows as WebhookEndpointRow[]
+  return rows as WebhookEndpointListRow[]
 }
 
 /**
@@ -84,6 +95,8 @@ export async function listWebhookEndpoints(): Promise<WebhookEndpointRow[]> {
  */
 export async function listRecentDeliveries(limit = 30): Promise<WebhookDeliveryRow[]> {
   const ctx = await contextFromSession()
+  // Exported from a 'use server' module, so `limit` can arrive from a client.
+  limit = Number.isInteger(limit) ? Math.min(Math.max(limit, 1), 100) : 30
 
   const rows = await ctx.db
     .selectFrom('webhook_deliveries')

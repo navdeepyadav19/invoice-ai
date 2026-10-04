@@ -20,6 +20,8 @@ concurrency:
 
 jobs:
   pull-cli-docs:
+    # Forks inherit the schedule; only the upstream repo should open sync PRs.
+    if: github.repository == 'navdeepyadav19/invoice-ai'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -39,7 +41,8 @@ jobs:
             const ours = fs.readFileSync(dst, "utf8").match(header)?.[0] ?? ""
             fs.writeFileSync(dst, fs.readFileSync(src, "utf8").replace(header, ours))
           ' "$src" api-docs/cli/commands.mdx
-      - uses: peter-evans/create-pull-request@v8
+      # Third-party action with write access, so pinned to a commit SHA.
+      - uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
         with:
           branch: sync/cli-docs
           delete-branch: true

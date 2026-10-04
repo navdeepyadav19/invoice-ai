@@ -4,6 +4,12 @@
 > **Needed by:** everything. [01-api.md](01-api.md) wraps these functions in HTTP; [02-sdk.md](02-sdk.md), [03-cli.md](03-cli.md) and [04-mcp.md](04-mcp.md) reach them through the API.
 >
 > **Backend note:** this module was planned on Supabase and has since moved to **Neon** (Postgres + Neon Auth). The design is unchanged; how a request becomes "a database connection that can only see one tenant" is different, and is described below as it works now. [../neon-overview.md](../neon-overview.md) has the full picture.
+>
+> **Status (Oct 2026): built.** `lib/auth/context.ts`, `lib/services/*` and `issue_invoice()` (`db/migrations/0004_foundation.sql`) all shipped. Two later changes renamed things this plan describes, so read the plan with this mapping:
+> - **Worldwide, not GST-only** (`0009_global_breaking.sql`). `lib/gst.ts` became the generic exclusive tax engine `lib/tax.ts`; numbering is `PREFIX-0001` (no financial year).
+> - **Stripe-shaped vocabulary** (`0011_stripe_api.sql`). Statuses are `draft → open → paid` and `void` (`sent` became `open`, `cancelled` became `void`). Services are `invoices.finalize` / `pay` / `voidInvoice` rather than `issue` / `markPaid` / `cancel`; the actions are `sendInvoiceAction`, `payAction`, `voidInvoiceAction`. Events are `finalized` / `voided`, exposed as `invoice.finalized` / `invoice.voided`.
+>
+> Sections 2 and 3.6 describe the code *before* this module, and are kept as the teaching "before".
 
 ## 1. What this layer is, and what students learn
 
@@ -33,7 +39,7 @@ All business logic lives in Next.js **server actions** under `lib/actions/`. The
 
 **What's already good and reusable as-is:**
 - `lib/validators.ts`: zod schemas (`invoiceSchema`, `lineItemSchema`, …)
-- `lib/gst.ts#computeInvoice`: the GST engine (CGST/SGST vs IGST, rounding in paise)
+- `lib/gst.ts#computeInvoice`: the GST engine (CGST/SGST vs IGST, rounding in paise). Now `lib/tax.ts#computeInvoice`, a per-line exclusive rate in integer minor units of any currency
 - `lib/invoice-load.ts#viewFromRows`: turns rows into the view shared by web, public page and PDF
 - `lib/invoice-status.ts#deriveStatus`: overdue is calculated, not stored
 - `lib/pdf.tsx#renderInvoicePdf` and `lib/email.tsx#sendInvoiceEmail`
@@ -153,7 +159,7 @@ stateDiagram-v2
     end note
 ```
 
-The database enum is named `sent` for historical reasons. Its meaning is **issued**: it has a number, and the email may or may not have gone out. The API and webhooks call this transition `invoice.issued` and use `invoice.emailed` for the email, so integrators aren't confused.
+When this was planned the database enum said `sent` while meaning **issued**: it has a number, and the email may or may not have gone out. `0011_stripe_api.sql` settled it: the status is now `open`, the transition is `invoice.finalized`, and the email is `invoice.emailed`, so the name no longer suggests an email went out.
 
 ### 3.6 Bugs that must be fixed first
 
@@ -300,6 +306,8 @@ export async function markPaidAction(invoiceId: string) {
 - **Events carry `meta.actor`**, which gives an audit trail for "an AI assistant cancelled this invoice" before the full API audit log exists.
 
 ## 6. Open decisions
+
+*Resolved by `0009_global_breaking.sql`: numbering became locale-neutral `PREFIX-0001`, so the first two items below no longer apply. Cancelling became `void`, which still refuses a paid invoice.*
 
 - **Financial-year counter reset.** `claim_invoice_number` builds `PREFIX/YY-YY/0001` from `businesses.next_invoice_number`, which **never resets**: the first invoice of FY 27-28 would be `…/27-28/0458`. Many businesses restart at `0001` each April. Decide before the API makes numbering visible to integrators.
 - **GST Rule 46 length limit.** An invoice number can be at most **16 characters**. `/YY-YY/0001` uses 11, so `invoice_prefix` must be ≤ 5 characters. Add a check constraint, or change the format.

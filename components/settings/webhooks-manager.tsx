@@ -28,11 +28,14 @@ import type { WebhookDeliveryRow, WebhookEndpointRow } from '@/lib/database.type
 import { keptValues } from '@/lib/form-state'
 import { useSubmissionKey } from '@/lib/use-submission-key'
 
+/** The list never carries the signing secret; it is shown once, at creation. */
+type EndpointListRow = Omit<WebhookEndpointRow, 'secret'>
+
 export function WebhooksManager({
   endpoints,
   deliveries,
 }: {
-  endpoints: WebhookEndpointRow[]
+  endpoints: EndpointListRow[]
   deliveries: WebhookDeliveryRow[]
 }) {
   const [state, formAction, pending] = useActionState<CreateWebhookState, FormData>(
@@ -163,7 +166,7 @@ function RevealedSecret({ secret, url }: { secret: string; url: string }) {
   )
 }
 
-function EndpointList({ endpoints }: { endpoints: WebhookEndpointRow[] }) {
+function EndpointList({ endpoints }: { endpoints: EndpointListRow[] }) {
   if (!endpoints.length) {
     return (
       <section className="rounded-lg border border-dashed p-8 text-center">
@@ -189,7 +192,7 @@ function EndpointList({ endpoints }: { endpoints: WebhookEndpointRow[] }) {
   )
 }
 
-function EndpointRow({ row }: { row: WebhookEndpointRow }) {
+function EndpointRow({ row }: { row: EndpointListRow }) {
   const [error, setError] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
 

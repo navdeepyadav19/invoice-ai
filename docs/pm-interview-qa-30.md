@@ -3,13 +3,23 @@
 Portfolio prep: short spoken answers. For technical questions, the **Depth**
 block is 2–3 extra lines if they push. Say these in your own words.
 
+> **Two things changed after this was written.** On 2026-09-20 the app went
+> worldwide (commit `dc3eaac`): country + currency per business, a generic
+> exclusive tax engine (`lib/tax.ts`) in place of the GST engine, and an
+> optional free-text tax ID instead of GSTIN validation. On 2026-10-04 the
+> backend moved from Supabase to Neon and guest mode went away. India/GST
+> answers are kept because the reasoning still interviews well; the notes say
+> what is true today. Old code is in git history before `dc3eaac`.
+
 ---
 
 ## Problem, users, positioning
 
 ### 1. What problem does Invoice-AI solve?
 
-**Answer:** Indian freelancers and small merchants need a GST-correct invoice fast — without opening a spreadsheet or a full accounting suite. The job is: fill details → tax split done right → send to client.
+> **Since the worldwide release (Sep 2026):** the user is any freelancer or small business, in any country and currency, who needs a correct invoice, a PDF and a link fast. The GST framing below was the India-only v1.
+
+**Answer (GST era):** Indian freelancers and small merchants need a GST-correct invoice fast — without opening a spreadsheet or a full accounting suite. The job is: fill details → tax split done right → send to client.
 
 ### 2. Who is the target user?
 
@@ -29,7 +39,7 @@ block is 2–3 extra lines if they push. Say these in your own words.
 
 ### 6. What’s out of scope on purpose?
 
-**Answer:** Accounting ledgers, GSTR filing, inventory, multi-entity finance teams, payroll. Also not fully shipped yet: PDF, public share link, email send, and draft→sent numbering — those close the loop after tax correctness.
+**Answer:** Accounting ledgers, tax-return filing, inventory, multi-entity finance teams, payroll. Not built yet: payment links, recurring billing runs, credit notes. (PDF, public share link, email send and draft→open numbering have shipped since this was first written.)
 
 ---
 
@@ -47,7 +57,9 @@ block is 2–3 extra lines if they push. Say these in your own words.
 
 ### 9. If you had two more weeks, what would you build next?
 
-**Answer:** Close the send loop: claim invoice number + draft→sent, then PDF, then share link / email. That’s what turns a correct draft into a completed job.
+> **Since this was written:** the send loop below shipped (Issue invoice, PDF, share link, email). Today’s answer: “Get paid” — payment links and marking an invoice paid from a payment webhook, plus mark-paid / void buttons in the app (the API and CLI already do both).
+
+**Answer (MVP era):** Close the send loop: claim invoice number + draft→sent, then PDF, then share link / email. That’s what turns a correct draft into a completed job.
 
 ### 10. What would you cut if you had to launch tomorrow?
 
@@ -63,7 +75,7 @@ block is 2–3 extra lines if they push. Say these in your own words.
 
 ### 13. What’s the biggest risk to this product?
 
-**Answer:** Wrong tax = lost trust (and legal pain for the user). Secondary: sign-up friction (there’s no guest mode, so people create an account before they see the builder), and never closing PDF/send so users bounce after drafting. Domain accuracy and completion rate matter more than feature count.
+**Answer:** Wrong tax = lost trust (and legal pain for the user). Secondary: sign-up friction (there’s no guest mode, so people create an account before they see the builder), and users bouncing between drafting and sending. Domain accuracy and completion rate matter more than feature count.
 
 ---
 
@@ -71,7 +83,7 @@ block is 2–3 extra lines if they push. Say these in your own words.
 
 ### 14. How do you measure success?
 
-**Answer:** Activation (landing → sign-up → onboarding done → first draft), quality (drafts with coherent tax treatment), sign-up conversion (landing → account — the step that costs most now there’s no guest mode), retention (second invoice in 30 days), and once shipped: draft → sent / PDF downloaded / email or share used.
+**Answer:** Activation (landing → sign-up → onboarding done → first draft), quality (drafts with coherent tax treatment), sign-up conversion (landing → account — the step that costs most now there’s no guest mode), retention (second invoice in 30 days), and the send loop: draft → issued, PDF downloaded, email or share link used (the `invoice_events` table records `finalized`, `downloaded`, `emailed`, `viewed`).
 
 ### 15. What’s your north-star metric?
 
@@ -103,7 +115,7 @@ block is 2–3 extra lines if they push. Say these in your own words.
 
 ### 20. How do you keep the builder from feeling like CA software?
 
-**Answer:** Progressive disclosure: essentials first (client, lines, place of supply), live tax preview so they don’t calculate by hand, sensible defaults from business state. Hide export/reverse charge until needed.
+**Answer:** Progressive disclosure: essentials first (client, lines, tax rate), live tax preview so they don’t calculate by hand, sensible defaults from the business (country, currency, payment terms). In the GST era this also meant hiding export/reverse charge until needed.
 
 ---
 
@@ -111,19 +123,21 @@ block is 2–3 extra lines if they push. Say these in your own words.
 
 ### 21. What’s the tech stack and why?
 
-**Answer:** Next.js + React + TypeScript, Neon (Postgres + Neon Auth + RLS) with Kysely, Zod validators, pure GST/money modules, Tailwind/shadcn. PDF/email libs are ready; send flow not fully wired.
+**Answer:** Next.js + React + TypeScript, Neon (Postgres + Neon Auth + RLS) with Kysely, Zod validators, pure tax/money modules, Tailwind/shadcn, `@react-pdf/renderer` for PDFs and Resend for email.
 
-**Depth:** One codebase covers marketing, auth, and server actions. Every query runs in a transaction that does `SET LOCAL ROLE authenticated` and sets `app.uid()` to the caller, so RLS isolates tenants the same way for browser sessions, API keys and the CLI. Moved from Supabase because its free tier pauses idle projects; Neon scales compute to zero instead. Domain logic (`lib/gst.ts`, `lib/money.ts`) is framework-free and unit-tested so browser preview and server save share one engine.
+**Depth:** One codebase covers marketing, auth, and server actions. Every query runs in a transaction that does `SET LOCAL ROLE authenticated` and sets `app.uid()` to the caller, so RLS isolates tenants the same way for browser sessions, API keys and the CLI. Moved from Supabase because its free tier pauses idle projects; Neon scales compute to zero instead. Domain logic (`lib/tax.ts`, `lib/money.ts`) is framework-free and unit-tested so browser preview and server save share one engine.
 
 ### 22. Who is the source of truth for invoice totals?
 
 **Answer:** The server. Preview can run in the browser; on save we recompute and store server totals.
 
-**Depth:** `saveInvoiceDraft` maps line items into `computeInvoice` and ignores client-sent totals. A user can change what they bill, but they can’t persist tax that doesn’t follow from those lines — important for filing-grade consistency.
+**Depth:** `saveInvoiceDraft` hands the lines to `lib/services/invoices.ts`, which runs `computeInvoice` and ignores client-sent totals. A user can change what they bill, but they can’t persist tax that doesn’t follow from those lines — important for filing-grade consistency.
 
 ### 23. How do CGST/SGST vs IGST work in the product?
 
-**Answer:** Same supplier state and place of supply → CGST+SGST; different → IGST. Unregistered → no tax; export → zero-rated.
+> **Since the worldwide release (Sep 2026):** they don’t any more. `lib/tax.ts` applies one free-form exclusive rate per line in any currency; no treatments, no place of supply. The answer below is the India-only engine (`lib/gst.ts`, in git history before `dc3eaac`).
+
+**Answer (GST era):** Same supplier state and place of supply → CGST+SGST; different → IGST. Unregistered → no tax; export → zero-rated.
 
 **Depth:** `resolveTreatment` checks registration, then export (incl. POS `96`), then state equality. Intra-state splits tax in half carefully so CGST+SGST always equals total tax even on odd paise. Reverse charge shows taxable value but collects no tax from the buyer on the invoice.
 
@@ -131,7 +145,7 @@ block is 2–3 extra lines if they push. Say these in your own words.
 
 **Answer:** Avoid float rounding bugs; invoices must reconcile to the paisa.
 
-**Depth:** Convert at the boundary with `toPaise` / `mulPaise`, compute in integers, display with Indian grouping. DB stores `numeric(14,2)`. Same reason banks and GST tools don’t use IEEE floats for money.
+**Depth:** Convert at the boundary with `toMinor` / `mulMinor` (the old `toPaise` / `mulPaise` names are aliases), compute in integers, display with the currency’s own decimals and locale. DB stores `numeric(14,2)`. Same reason banks and GST tools don’t use IEEE floats for money.
 
 ### 25. How is multi-tenant security handled?
 
@@ -155,13 +169,17 @@ block is 2–3 extra lines if they push. Say these in your own words.
 
 ### 28. How do invoice numbers work?
 
-**Answer:** Per-business sequence with Indian FY in the format, claimed under a row lock so two sends can’t get the same number.
+**Answer:** Per-business sequence (`PREFIX-0001`), assigned only when a draft is issued, and claimed and saved in one locked transaction so two clicks can’t burn or share a number.
 
-**Depth:** `claim_invoice_number` increments `next_invoice_number` with `UPDATE … RETURNING`. FY is April–March. Designed in SQL; product UI for draft→sent is still on the roadmap — be honest about that.
+**Depth:** The SQL function `issue_invoice()` locks the invoice row, refuses an empty or non-draft invoice, calls `claim_invoice_number` (which bumps `businesses.next_invoice_number` with `UPDATE … RETURNING`), stores the number, moves the invoice `draft → open` and logs a `finalized` event. A repeat call returns the existing number. It’s live in the UI as **Issue invoice** / **Email it** in the builder, and in the API as `POST /invoices/{id}/finalize` or `/send`. Current definitions: `issue_invoice()` in `db/migrations/0011_stripe_api.sql` (introduced in `0004_foundation.sql`), `claim_invoice_number` in `0009_global_breaking.sql`.
+
+> **Since the worldwide release (Sep 2026):** numbers used to embed the Indian financial year (`INV/25-26/0001`, April–March). Migration `0009` switched new numbers to `PREFIX-0001` and left issued numbers alone.
 
 ### 29. How do you validate GSTIN?
 
-**Answer:** Format check plus checksum; registered businesses must have GSTIN matching their state code.
+> **Since the worldwide release (Sep 2026):** we don’t. The tax ID is optional free text (VAT, EIN, GSTIN, ABN…), and migration `0009` dropped `businesses_gstin_matches_state`. Use this as “how I treated a domain rule as a product feature”.
+
+**Answer (GST era):** Format check plus checksum; registered businesses must have GSTIN matching their state code.
 
 **Depth:** Regex catches shape; checksum catches transposed digits. DB check `businesses_gstin_matches_state` enforces consistency even outside the app. Wrong GSTIN on a sent invoice is costly for the merchant — validation is a product feature.
 
@@ -177,11 +195,11 @@ block is 2–3 extra lines if they push. Say these in your own words.
 
 | Q | Crisp answer |
 |---|--------------|
-| Why India-first? | GST rules are the hard problem; India is where my pain and domain knowledge are. |
+| Why India-first? | It was: GST rules were the hard problem and my own pain. In Sep 2026 I went worldwide — generic tax engine, any currency — because the invariants (server recompute, integer money, snapshots) didn’t depend on GST. |
 | Mobile? | Builder should work on phone for freelancers on the go; v1 prioritizes correctness over native apps. |
 | Data privacy? | Tenant RLS; no sharing with third parties for ads; delete path via the account. |
 | Why Next.js 16 proxy? | Ex-middleware: sends signed-out visitors to login (an optimistic gate — RLS is the real one) and finishes Google sign-in with Neon Auth; skips static assets. |
-| Amount in words? | Required on many Indian invoices; generated from paise in the money module. |
+| Amount in words? | Required on many Indian invoices; `amountInWords` in `lib/money.ts` generates it from minor units, per currency. |
 
 ---
 
@@ -189,4 +207,4 @@ block is 2–3 extra lines if they push. Say these in your own words.
 
 1. Lead with **user + job** (Q1–Q4), then **trade-off** (Q8), then **one technical invariant** (Q22 or Q25).
 2. Always add one line of judgment: “I chose X because Y.”
-3. Be honest about **not built yet** (PDF/email/send) — it shows sequencing maturity, not weakness.
+3. Be honest about **not built yet** (payment links, recurring runs, credit notes — see README) — it shows sequencing maturity, not weakness.

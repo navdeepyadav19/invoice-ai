@@ -1603,7 +1603,8 @@ export function buildOpenApiDocument(serverUrl: string) {
               'required',
             ),
             '404': notFound('No such invoice.', 'Invoice not found.'),
-            '409': problem('The invoice is void or has no lines, or the same Idempotency-Key is still running.', [
+            '409': problem('The account email is not verified yet, the invoice is void or has no lines, or the same Idempotency-Key is still running.', [
+              { code: 'invalid_state', detail: 'Verify your email address before emailing invoices: use the link we sent you, or resend it from the dashboard.' },
               { code: 'invalid_state', detail: 'This invoice is void and cannot be sent.' },
               { code: 'invalid_state', detail: 'Add at least one line item before sending.' },
               IN_FLIGHT,
@@ -1614,8 +1615,9 @@ export function buildOpenApiDocument(serverUrl: string) {
             ]),
             '428': idempotencyRequired,
             '429': {
-              ...problem('More than 10 sends in an hour for this key. Wait `Retry-After` seconds.', [
+              ...problem('More than 10 sends in an hour for this key, or 50 for the whole account (dashboard included). Wait `Retry-After` seconds.', [
                 { code: 'rate_limited', detail: 'Rate limit of 10 per 3600s exceeded.' },
+                { code: 'rate_limited', detail: 'Too many invoices emailed in the last hour. Try again in 20 min.' },
               ]),
               headers: rateLimitedResponse.headers,
             },

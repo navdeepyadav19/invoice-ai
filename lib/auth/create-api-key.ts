@@ -52,6 +52,8 @@ export async function createApiKeyForOwner(db: Db, input: CreateApiKeyInput): Pr
 
     return { ok: true, id: row.id, prefix: key.prefix, plaintext: key.plaintext }
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : 'Could not create the API key.' }
+    // The raw database message names tables and constraints; log it, don't show it.
+    console.error('[api-keys] insert failed', error instanceof Error ? error.message : error)
+    return { ok: false, error: 'Could not create the API key. Try again.' }
   }
 }

@@ -4,6 +4,8 @@
 > **Needed by:** [02-sdk.md](02-sdk.md), [03-cli.md](03-cli.md), [04-mcp.md](04-mcp.md).
 >
 > **Backend note:** this module was planned on Supabase, where an API key was exchanged for a short-lived JWT so PostgREST would apply RLS. Since the move to **Neon** there is no JWT and no PostgREST: the key resolves to an owner id and the request gets a database handle scoped to that owner. Section 3.2 describes the mechanism as it works now; see also [../neon-overview.md](../neon-overview.md).
+>
+> **Status (Oct 2026):** phases A1–A3 are built; A4 (OAuth) is not. The shipped API went **Stripe-shaped** (`0011_stripe_api.sql`) and **worldwide** (`0009_global_breaking.sql`), so the names below differ from this plan: `customers` not `clients`, `finalize` / `pay` / `void` not `issue` / `mark-paid` / `cancel`, scope `invoices:finalize` not `invoices:issue`, statuses `draft` / `open` / `paid` / `void`, amounts in integer minor units of the invoice currency. Sections 3.4, 3.5, 3.7 and 3.9 are updated to what shipped. The live contract is `GET /api/v1/openapi.json`; [api-getting-started.md](api-getting-started.md) is the user-facing guide.
 
 ## 1. What this layer is, and what students learn
 
@@ -15,7 +17,7 @@ Students leave this module understanding four ideas:
    - An **API key** is like a building access card: whoever holds it gets in, and it identifies *a credential*.
    - **OAuth** is like a guest list the owner signed: it says *which user* approved *which app* to do *what*.
 2. **Scopes** limit what a credential can do, even when it's valid.
-3. **Idempotency.** A network retry must never create a second GST invoice number.
+3. **Idempotency.** A network retry must never spend a second invoice number.
 4. **Webhooks.** The API also *calls you* when something happens, and signs the request so you can trust it.
 
 ## 2. How it works in this repo today
@@ -38,10 +40,10 @@ Students leave this module understanding four ideas:
 Every route under `app/api/v1/**/route.ts` (new) is wrapped by one helper, `lib/api/handler.ts#withApi` (new):
 
 ```ts
-// app/api/v1/invoices/[id]/issue/route.ts (new), shape only
+// app/api/v1/invoices/[id]/finalize/route.ts, shape only
 export const POST = withApi(
-  { scope: 'invoices:issue', idempotent: 'required' },
-  async (ctx, req, { params }) => invoices.issue(ctx, (await params).id),
+  { scope: 'invoices:finalize', idempotent: 'required' },
+  async (ctx, req, { params }) => invoices.finalize(ctx, (await params).id),
 )
 ```
 
@@ -145,52 +147,54 @@ On each OAuth request, `withApi` verifies the token, then looks up the grant by 
 
 ### 3.4 Scopes
 
+As shipped (`lib/auth/scopes.ts`):
+
 | Scope | Allows |
 |---|---|
-| `business:read` | Read the business profile (name, GSTIN, state, bank details) |
-| `clients:read` / `clients:write` | List/get clients / create, update, archive |
-| `invoices:read` | List, get, PDF, events |
-| `invoices:write` | Create, update, delete **drafts** |
-| `invoices:issue` | Issue (assigns a GST number) and cancel |
+| `business:read` | Read the business profile (name, country, currency, tax ID, bank details) |
+| `clients:read` / `clients:write` | List/get customers / create, update, archive (the API resource is `customers`; the table and scope kept the old name) |
+| `products:read` / `products:write` | Products and prices: list/get / create, update, archive |
+| `invoices:read` | List, get, PDF, events, line items |
+| `invoices:write` | Create, update, delete **drafts** and their line items |
+| `invoices:finalize` | Finalize (assigns a number) and void |
 | `invoices:send` | Email an invoice to a client |
 | `payments:write` | Mark an invoice paid |
-| `webhooks:manage` | Create, list, delete, test webhook endpoints |
+| `webhooks:manage` | Create, list, delete webhook endpoints |
 
 Managing API keys and OAuth grants is **never** available through the API, only in the web UI. A leaked key can't mint more keys.
 
 ### 3.5 Endpoints
 
-"Idem." means the `Idempotency-Key` header. *Required* endpoints reject requests without one (`428`).
+"Idem." means the `Idempotency-Key` header. *Required* endpoints reject requests without one (`428`). As shipped (`app/api/v1/**`):
 
 | Method | Path | Scope | Idem. | Service call |
 |---|---|---|---|---|
 | GET | `/api/v1/business` | business:read | — | `business.getPrimary` |
-| GET | `/api/v1/clients?query=&cursor=&limit=` | clients:read | — | `clients.list` |
-| POST | `/api/v1/clients` | clients:write | optional | `clients.create` |
-| GET | `/api/v1/clients/{id}` | clients:read | — | `clients.get` |
-| PATCH | `/api/v1/clients/{id}` | clients:write | natural | `clients.update` |
-| POST | `/api/v1/clients/{id}/archive` | clients:write | natural | `clients.archive` |
-| GET | `/api/v1/invoices?status=&client_id=&from=&to=&cursor=&limit=` | invoices:read | — | `invoices.list` |
+| GET / POST | `/api/v1/customers` | clients:read / clients:write | POST optional | `clients.list` / `clients.create` |
+| GET / PATCH / DELETE | `/api/v1/customers/{id}` | clients:read / clients:write | — | `clients.get` / `update` / `archive` |
+| GET / POST | `/api/v1/products`, `/api/v1/prices` | products:read / products:write | POST optional | `products.*`, `prices.*` |
+| GET / PATCH / DELETE | `/api/v1/products/{id}`, `/api/v1/prices/{id}` | products:read / products:write | — | `get` / `update` / `archive` |
+| GET | `/api/v1/invoices?status=&customer=&from=&to=&cursor=&limit=` | invoices:read | — | `invoices.list` |
 | POST | `/api/v1/invoices` | invoices:write | **required** | `invoices.createDraft` |
 | GET | `/api/v1/invoices/{id}` | invoices:read | — | `invoices.get` |
-| PATCH | `/api/v1/invoices/{id}` (drafts only) | invoices:write | natural | `invoices.updateDraft` |
-| DELETE | `/api/v1/invoices/{id}` (drafts only) | invoices:write | natural | `invoices.deleteDraft` |
+| PATCH / DELETE | `/api/v1/invoices/{id}` (drafts only) | invoices:write | — | `invoices.updateDraft` / `deleteDraft` |
+| GET / POST | `/api/v1/invoice-items` | invoices:read / invoices:write | POST **required** | `invoices.get` / `addItem` |
+| GET / DELETE | `/api/v1/invoice-items/{id}` | invoices:read / invoices:write | — | `invoices.findItem` / `removeItem` |
 | GET | `/api/v1/invoices/{id}/pdf` | invoices:read | — | `invoices.pdf` |
 | GET | `/api/v1/invoices/{id}/events` | invoices:read | — | `invoices.events` |
-| POST | `/api/v1/invoices/{id}/issue` | invoices:issue | **required** | `invoices.issue` |
-| POST | `/api/v1/invoices/{id}/send` `{ to? }` | invoices:send | **required** | `invoices.send` |
-| POST | `/api/v1/invoices/{id}/mark-paid` `{ paid_on?, reference? }` | payments:write | **required** | `invoices.markPaid` |
-| POST | `/api/v1/invoices/{id}/cancel` `{ reason }` | invoices:issue | **required** | `invoices.cancel` |
-| GET / POST | `/api/v1/webhook-endpoints` | webhooks:manage | POST optional | `webhooks.*` |
-| DELETE | `/api/v1/webhook-endpoints/{id}` | webhooks:manage | natural | `webhooks.remove` |
-| POST | `/api/v1/webhook-endpoints/{id}/test` | webhooks:manage | — | `webhooks.sendTest` |
+| POST | `/api/v1/invoices/{id}/finalize` | invoices:finalize | **required** | `invoices.finalize` |
+| POST | `/api/v1/invoices/{id}/send` | invoices:send | **required** | `invoices.send` (finalizes a draft first) |
+| POST | `/api/v1/invoices/{id}/pay` | payments:write | **required** | `invoices.pay` |
+| POST | `/api/v1/invoices/{id}/void` `{ reason }` | invoices:finalize | **required** | `invoices.voidInvoice` |
+| GET / POST | `/api/v1/webhook-endpoints` | webhooks:manage | POST optional | `webhooks.list` / `create` |
+| DELETE | `/api/v1/webhook-endpoints/{id}` | webhooks:manage | — | `webhooks.remove` |
 | GET | `/api/v1/openapi.json` | public | — | generated spec |
 
-Issued invoices can't be `DELETE`d, only cancelled. GST requires issued numbers to stay accounted for.
+Finalized invoices can't be `DELETE`d, only voided, so every number spent stays accounted for. The planned `POST /webhook-endpoints/{id}/test` was not built; the CLI's `webhooks test` signs a sample event locally instead.
 
 ### 3.6 Idempotency
 
-**The failure it prevents:** the SDK sends "issue invoice", our server issues it (number `INV/26-27/0042`), and the response is lost on a flaky connection. The SDK retries. Without idempotency, the retry issues `0043` and the first number becomes a gap in the GST series.
+**The failure it prevents:** the SDK sends "issue invoice", our server finalizes it (number `INV-0042`), and the response is lost on a flaky connection. The SDK retries. Without idempotency, the retry spends `INV-0043` and the first number becomes a gap in the series.
 
 **New table `idempotency_keys`**
 
@@ -209,9 +213,9 @@ Issued invoices can't be `DELETE`d, only cancelled. GST requires issued numbers 
 | Same key, still `in_progress` | `409 Conflict`, retry shortly |
 | Same key, **different** body | `422` `idempotency_mismatch`, a client bug |
 
-The database is the second line of defence: the `issue_invoice` RPC from [00-foundation.md](00-foundation.md) returns the *existing* number if the invoice is already issued.
+The database is the second line of defence: the `issue_invoice` RPC from [00-foundation.md](00-foundation.md) returns the *existing* number if the invoice is already finalized.
 
-**Show the students:** run the same `curl -X POST …/issue -H 'Idempotency-Key: demo-1'` twice. Same number, and the second response has `Idempotent-Replayed: true`.
+**Show the students:** run the same `curl -X POST …/finalize -H 'Idempotency-Key: demo-1'` twice. Same number, and the second response has `Idempotent-Replayed: true`.
 
 ### 3.7 Conventions
 
@@ -222,7 +226,7 @@ The database is the second line of defence: the `issue_invoice` RPC from [00-fou
   "type": "https://invoice.horizonpay.co/problems/invalid-state",
   "title": "Invoice is not a draft",
   "status": 409,
-  "detail": "Invoice 7f3c… is already issued as INV/26-27/0042 and cannot be edited.",
+  "detail": "This invoice has been finalized and can no longer be edited.",
   "instance": "req_01J9Z…",
   "code": "invalid_state",
   "errors": []
@@ -242,33 +246,34 @@ The database is the second line of defence: the `issue_invoice` RPC from [00-fou
 
 - **Pagination:** opaque cursor over (`created_at`, `id`), `limit` ≤ 100, response `{ "data": [...], "next_cursor": "…" | null }`.
 - **Versioning:** major version in the URL (`/v1`). Additive changes (new fields, new endpoints) don't bump it; breaking changes mean `/v2`, with `Deprecation` and `Sunset` headers on v1.
-- **Money:** integer **paise** (`rate_paise: 2500000` is ₹25,000), matching `lib/money.ts` and `lib/gst.ts`, so there are no floats in the contract. GST rates are numbers (`18`). Dates are ISO `YYYY-MM-DD`.
+- **Money:** integer **minor units** of the invoice's currency, Stripe-style (`unit_amount: 2500000` is ₹25,000.00; `2500` is $25.00; JPY has no decimals), converted in `lib/api/serialize.ts` with the exponents in `lib/currency.ts`, so there are no floats in the contract. Tax rates are numbers (`18`). Dates are ISO `YYYY-MM-DD`.
 - **Headers:** `X-Request-Id` (accepted and echoed), `RateLimit-Limit`, `RateLimit-Remaining`, `RateLimit-Reset`.
 
 ### 3.8 OpenAPI: one source of truth
 
 ```
-lib/validators.ts (existing zod)  ──►  lib/api/schemas.ts (new: API-shaped zod + .meta({ id }))
+lib/validators.ts (zod, incl. the wire schemas)
                                                  │
                                                  ▼
-                                  lib/api/openapi.ts (new): zod-openapi createDocument({ openapi: '3.1.0', … })
+                                  lib/api/openapi.ts: zod-openapi createDocument({ openapi: '3.1.0', … })
                                                  │
-                              ┌──────────────────┴───────────────────┐
-                              ▼                                      ▼
-                 GET /api/v1/openapi.json                packages/sdk/openapi.json (snapshot)
-                                                         CI fails if the snapshot is stale
+                 ┌───────────────────────────────┼──────────────────────────────┐
+                 ▼                               ▼                              ▼
+     GET /api/v1/openapi.json     api-docs/openapi.json (pnpm openapi:gen)   docs/platform/postman/
+                                  CI fails if it is stale                    (pnpm postman:gen)
+                                  invoice-ai-sdk pulls it to regenerate the SDKs
 ```
 
 The same zod schema validates the request at runtime **and** documents it, so the docs can't lie.
 
 ### 3.9 Webhooks
 
-**Events (v1):**
+**Events (v1, as shipped in `lib/webhooks/events.ts`):**
 - `invoice.created`, `invoice.updated`
-- `invoice.issued`
+- `invoice.finalized`
 - `invoice.emailed`, `invoice.email_failed`
 - `invoice.viewed`, `invoice.downloaded`
-- `invoice.paid`, `invoice.cancelled`
+- `invoice.paid`, `invoice.voided`
 
 There's no `invoice.overdue` in v1: overdue is calculated when read (`lib/invoice-status.ts#deriveStatus`) and never stored, so there's no moment to fire it.
 
@@ -283,7 +288,7 @@ There's no `invoice.overdue` in v1: overdue is calculated when read (`lib/invoic
 |---|---|
 | `id`, `owner_id` (RLS) | `id` (sent as `webhook-id`) |
 | `url` (https only) | `endpoint_id`, `event_type`, `payload` jsonb |
-| `secret` (encrypted at rest, shown once) | `attempt`, `status` (pending / succeeded / failed / dead) |
+| `secret` (shown once; stored as plain text today, see open decisions) | `attempt`, `status` (pending / succeeded / failed / dead) |
 | `events text[]`, `active` | `next_attempt_at`, `response_code`, `last_error` |
 | `failure_count`, `disabled_at`, `created_at` | `created_at` |
 
@@ -298,16 +303,16 @@ webhook-signature: v1,<base64( HMAC-SHA256(secret, "{id}.{timestamp}.{raw body}"
 Receivers recompute the HMAC and **reject timestamps older than 5 minutes** (replay protection). The SDK ships `webhooks.verify()` so integrators don't hand-roll it.
 
 **Delivery:**
-- The first attempt runs right after the request (Next.js `after()`).
-- Retries run from a Vercel Cron route `app/api/cron/webhooks/route.ts` (new) at 1m, 5m, 30m, 2h, 8h and 24h, then the delivery is marked `dead`.
-- An endpoint failing continuously for 3 days is disabled, and the owner is emailed.
+- Planned: the first attempt runs right after the request (Next.js `after()`). **As built**, every attempt, the first included, runs from the Vercel Cron route `app/api/cron/webhooks/route.ts`.
+- Retries back off at 1m, 5m, 30m, 2h, 8h and 24h (`lib/webhooks/deliver.ts`), then the delivery is marked `dead`. The cron in `vercel.json` runs **daily** (Hobby plan limit), so in practice a delivery can wait up to 24h; on Pro, run it every few minutes.
+- An endpoint is disabled after 20 consecutive failed deliveries (`finish_webhook_delivery`). Emailing the owner when that happens is not built.
 
 ### 3.10 Rate limits and audit
 
 | Layer | What | Why |
 |---|---|---|
 | **Edge** | Vercel WAF `rate_limit` rule on `/api/v1/*`, keyed by IP | Stops floods before they reach a function. Blocked requests aren't billed |
-| **App** | Per-credential quota inside `withApi`, counters in a Marketplace Redis. Starting points: 120 requests/min per credential, 10 sends/hour | WAF can't key on API keys (header keys are Enterprise-only), and WAF counters are per region |
+| **App** | Per-credential quota inside `withApi` (`lib/api/rate-limit.ts`). Counters are per-instance memory today; a Marketplace Redis store is a one-function swap. Starting points: 120 requests/min per credential, 10 sends/hour | WAF can't key on API keys (header keys are Enterprise-only), and WAF counters are per region |
 | **Audit** | New table `api_requests`: `request_id`, `owner_id`, `via`, `api_key_id`, `client_id`, `method`, `route`, `status`, `duration_ms`, `idempotency_key`, `ip_hash`, `created_at` (30-day cleanup) | "Which app issued this invoice?" must have an answer |
 
 Roll out WAF rules as **log → preview → production** (see the Vercel Firewall rollout practice) so a bad rule can't block real users.
@@ -334,7 +339,7 @@ Roll out WAF rules as **log → preview → production** (see the Vercel Firewal
   - resolve DNS and block private, loopback and link-local ranges
   - no redirects, 10-second timeout, response body not stored beyond a short error excerpt
 - **Dynamic client registration can be spammed.** Consent shows an "Unverified app" badge and the redirect host, and grants are per client and revocable.
-- **Cost abuse:** the endpoints that cost money per call (AI, GSTIN lookup) are excluded from v1. Sends are capped per hour.
+- **Cost abuse:** the endpoints that cost money per call (AI parse and transcribe) are excluded from v1. Sends are capped per hour.
 - **`API_KEY_PEPPER` and the database URLs are the root secrets.** The pepper makes stored hashes uncheckable without it (changing it invalidates every key); `DATABASE_URL*` log in as the owner role, which bypasses RLS. Keep them only in Vercel env (sensitive).
 
 ## 6. Open decisions
@@ -346,14 +351,14 @@ Roll out WAF rules as **log → preview → production** (see the Vercel Firewal
 
 > ### How the MCP story uses this layer
 > When Claude runs "invoice Acme and email it", **every tool call becomes an API request** carrying the user's OAuth token.
-> - The **OAuth grant** is Claude's permission slip. The user ticked `invoices:issue` and `invoices:send` on the consent screen.
-> - The **Idempotency-Key** means a model that retries "email it" can't burn a second GST number or send two emails.
-> - The **webhooks** `invoice.issued` and `invoice.emailed` let the user's accounting tool react without Claude doing anything more.
+> - The **OAuth grant** is Claude's permission slip. The user ticked `invoices:finalize` and `invoices:send` on the consent screen.
+> - The **Idempotency-Key** means a model that retries "email it" can't burn a second invoice number or send two emails.
+> - The **webhooks** `invoice.finalized` and `invoice.emailed` let the user's accounting tool react without Claude doing anything more.
 
 ## 7. Five-minute demo order
 
 1. Settings → API keys → create "Demo" with `invoices:read`. *"Copy it now, you'll never see it again."*
 2. `curl -H "Authorization: Bearer inv_live_…" https://<site>/api/v1/invoices`. Your invoices, as JSON.
 3. `curl` a write endpoint with the same read-only key: `403 insufficient scope`, as problem+json.
-4. Issue a draft twice with the same `Idempotency-Key`: one number, and the second response is a replay.
+4. Finalize a draft twice with the same `Idempotency-Key`: one number, and the second response is a replay.
 5. Revoke the key in settings and re-run step 2: `401`. *"Revocation is instant."*

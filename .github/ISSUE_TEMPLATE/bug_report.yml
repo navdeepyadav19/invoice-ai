@@ -1,0 +1,55 @@
+name: Bug report
+description: Something in the app or the /api/v1 API doesn't work as it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Security problems go through private reporting instead (see SECURITY.md).
+        Leave out API keys, webhook secrets, `.env` values and real customer data.
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where
+      options:
+        - Live site (invoice.horizonpay.co)
+        - Local / self-hosted instance
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Sign-up / login / email verification
+        - Onboarding or business settings
+        - Invoice builder, PDF or share link
+        - Emailing invoices
+        - AI invoice creation
+        - Customers / products & prices
+        - Public API (/api/v1), API keys or webhooks
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: For the API, the request (method, path, body) with the key redacted.
+      placeholder: |
+        1. …
+        2. …
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected vs. actual
+      description: What you expected, what happened instead. Include the error message, HTTP status, or problem+json body if there is one.
+    validations:
+      required: true
+  - type: input
+    id: commit
+    attributes:
+      label: Commit (self-hosted only)
+      description: Output of `git rev-parse --short HEAD`.

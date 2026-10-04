@@ -21,6 +21,9 @@ import {
 import { createApiKeyAction, revokeApiKeyAction, type CreateKeyState } from '@/lib/actions/api-keys'
 import { SCOPES, SCOPE_DESCRIPTIONS, type Scope } from '@/lib/auth/scopes'
 import type { ApiKeyRow } from '@/lib/database.types'
+
+/** The list never carries the secret hash. */
+type ApiKeyListRow = Omit<ApiKeyRow, 'secret_hash'>
 import { keptValues } from '@/lib/form-state'
 import { useSubmissionKey } from '@/lib/use-submission-key'
 
@@ -56,7 +59,7 @@ const PRESETS: { id: string; label: string; hint: string; scopes: Scope[] }[] = 
   { id: 'custom', label: 'Custom', hint: 'Pick exactly what this integration needs.', scopes: [] },
 ]
 
-export function ApiKeysManager({ keys, ready }: { keys: ApiKeyRow[]; ready: boolean }) {
+export function ApiKeysManager({ keys, ready }: { keys: ApiKeyListRow[]; ready: boolean }) {
   const [state, formAction, pending] = useActionState<CreateKeyState, FormData>(
     async (_previous, formData) => createApiKeyAction(formData),
     {},
@@ -239,7 +242,7 @@ function RevealedKey({ plaintext }: { plaintext: string }) {
   )
 }
 
-function KeyList({ keys }: { keys: ApiKeyRow[] }) {
+function KeyList({ keys }: { keys: ApiKeyListRow[] }) {
   if (!keys.length) {
     return (
       <section className="rounded-lg border border-dashed p-8 text-center">
@@ -266,7 +269,7 @@ function KeyList({ keys }: { keys: ApiKeyRow[] }) {
   )
 }
 
-function KeyRow({ row }: { row: ApiKeyRow }) {
+function KeyRow({ row }: { row: ApiKeyListRow }) {
   const [error, setError] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
 
@@ -337,7 +340,7 @@ function KeyRow({ row }: { row: ApiKeyRow }) {
   )
 }
 
-function Status({ row }: { row: ApiKeyRow }) {
+function Status({ row }: { row: ApiKeyListRow }) {
   if (row.revoked_at) return <Badge variant="outline">Revoked</Badge>
   if (row.expires_at && new Date(row.expires_at) <= new Date()) {
     return <Badge variant="outline">Expired</Badge>

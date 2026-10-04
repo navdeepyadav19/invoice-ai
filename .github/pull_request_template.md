@@ -8,9 +8,10 @@
 
 ## Review checklist
 
-- [ ] CI is green: lint, typecheck, unit tests, build
+- [ ] CI is green: lint, typecheck, unit tests, API docs up to date, build
 - [ ] Preview deployment opened and the change works there
 - [ ] New logic has unit tests (`lib/**/*.test.ts`)
 - [ ] No secrets or `.env` values committed
 - [ ] Database changes ship as a new file in `db/migrations/` (applied with `pnpm db:migrate`), never an edit to an old one
-- [ ] GST math still reconciles: taxable + tax + round-off = total
+- [ ] Totals still reconcile: subtotal − discounts + tax = total, in integer minor units (`lib/tax.ts`, `lib/money.ts`)
+- [ ] API contract changes regenerated: `pnpm openapi:gen && pnpm postman:gen`

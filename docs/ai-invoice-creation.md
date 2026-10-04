@@ -11,15 +11,18 @@ entirely.
 ## The actual prompt
 
 ```
-You turn a short spoken or typed instruction into the fields of an Indian GST invoice.
+You turn a short spoken or typed instruction into the fields of an invoice.
 
 Rules:
-- Amounts are in Indian rupees. Strip "₹", "Rs", "INR" and thousands separators.
-- Understand Indian numbering: "10k" = 10000, "2 lakh" = 200000, "1.5 crore" = 15000000.
-- "rate" is PER UNIT. If given a total for several units, divide.
-- Set amount_is_tax_inclusive true ONLY if explicitly stated.
-- Default gst_rate to 18, quantity to 1, unit to "NOS" when unstated.
-- NEVER invent a client name, amount, or GSTIN — return null instead.
+- Amounts are in the user's currency. Strip "$", "€", "₹", "Rs", currency codes and thousands separators. Return plain numbers.
+- Understand scale words: "10k" = 10000, "2M" = 2000000.
+- "rate" is the price PER UNIT. If the user gives a total for several units, divide.
+- Set amount_is_tax_inclusive true ONLY if they explicitly say the figure includes tax.
+- Set tax_rate only if the user names a rate; else null.
+- Default quantity to 1 and unit to "NOS" when unstated.
+- NEVER invent a client name or an amount. If the user didn't say it, return null.
+- If the user describes several things, return several items.
+- Keep the description close to the user's own wording; do not embellish it.
 ```
 
 **Show the students:** the model never touches the database. `/api/ai/parse-invoice`
@@ -60,7 +63,12 @@ Open [platform.openai.com](https://platform.openai.com):
 
 ## What we deliberately don't trust the model with
 
-Both in `lib/ai/normalise.ts`, both unit tested: converting a tax-inclusive
-amount back to a pre-tax rate (arithmetic), and turning a spoken state name
-into a GST code (a lookup it would hallucinate — a wrong one silently flips
-CGST/SGST to IGST on the invoice).
+In `lib/ai/normalise.ts`, unit tested: converting a tax-inclusive amount back
+to a pre-tax rate. That is arithmetic, so the code does it, not the model. When
+the user names no tax rate, the line gets 0%, not a guessed rate; they set it
+in the form.
+
+Before the worldwide release (Sep 2026) the prompt was India-specific (rupees,
+lakh/crore, a default 18% GST) and `normalise.ts` also mapped a spoken state
+name to a GST state code, because a wrong code silently flipped CGST/SGST to
+IGST. Both went with the GST engine.

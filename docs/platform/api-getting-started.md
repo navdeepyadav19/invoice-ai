@@ -50,42 +50,50 @@ parse it.
 
 ## 4. Things that will bite you if you skip them
 
-### Money is in paise
+### Money is in minor units
 
-`total_paise: 2950000` is ₹29,500. Never rupees, never decimals — JSON numbers
+Every amount is an integer in the currency's smallest unit, the way Stripe
+does it: `total: 2950000` on an INR invoice is ₹29,500.00, `2500` on a USD
+invoice is $25.00, and `5000` on a JPY invoice is ¥5,000 (no decimals). The
+exponent per currency lives in `lib/currency.ts`. Never decimals — JSON numbers
 are IEEE doubles and a contract carrying `0.1 + 0.2` eventually disagrees with
 itself about a total.
 
-### Writes need an Idempotency-Key
+### Writes that create or change an invoice need an Idempotency-Key
 
 ```bash
-curl -X POST https://your-site/api/v1/invoices/$ID/issue \
+curl -X POST https://your-site/api/v1/invoices/$ID/finalize \
   -H "Authorization: Bearer inv_live_..." \
   -H "Idempotency-Key: $(uuidgen)"
 ```
 
-Without one you get `428`. Retry with the **same** key and you get the first
-response back plus `Idempotent-Replayed: true`.
+`POST /invoices`, `POST /invoice-items` and the `finalize`, `send`, `pay` and
+`void` actions return `428` without one. On `customers`, `products`, `prices`
+and `webhook-endpoints` the header is optional but honoured. Retry with the
+**same** key and you get the first response back plus `Idempotent-Replayed: true`.
 
 Generate one key per *request*, not per retry loop. Reusing a key with a
 different body is `422 idempotency_mismatch` — that error exists because
 replaying the first response for a different request would silently return
 invoice A when you asked for B.
 
-This matters more here than in most APIs: `claim_invoice_number` advances a
-counter, so a retry without a key would spend `INV/26-27/0043` while the lost
-response held `0042`, leaving a permanent gap in a series GST requires to be
-consecutive.
+This matters more here than in most APIs: finalizing runs `issue_invoice()`,
+which advances the business's invoice counter, so a retry without a key would
+spend `INV-0043` while the lost response held `INV-0042`, leaving a gap in a
+series that should be consecutive.
 
 ### `overdue` is computed, not stored
 
-`status` comes from `due_date` at read time. Nothing ever writes an `overdue`
-row, so there is no `invoice.overdue` webhook — poll `?status=overdue` instead.
+The stored statuses are `draft`, `open`, `paid` and `void`. `overdue` is derived
+from `due_date` at read time for an `open` invoice. Nothing ever writes an
+`overdue` row, so there is no `invoice.overdue` webhook — poll
+`?status=overdue` instead.
 
-### The status enum says `sent`, the API says `issued`
+### Finalized is not the same as emailed
 
-`sent` means "has a GST number", which is not the same as "the email went out".
-Events are `invoice.issued` and `invoice.emailed` separately.
+`open` means "has an invoice number", not "the email went out". The events are
+`invoice.finalized` and `invoice.emailed` separately, and `POST /send` finalizes
+a draft first if it needs to.
 
 ### Errors are problem+json
 
@@ -94,7 +102,7 @@ Events are `invoice.issued` and `invoice.emailed` separately.
   "type": "https://invoice.horizonpay.co/problems/invalid-state",
   "title": "Invalid state for this operation",
   "status": 409,
-  "detail": "Invoice is cancelled and cannot be marked paid.",
+  "detail": "Invoice is void and cannot be marked paid.",
   "instance": "req_01J9Z…",
   "code": "invalid_state"
 }
@@ -112,7 +120,7 @@ probing.
 curl -X POST https://your-site/api/v1/webhook-endpoints \
   -H "Authorization: Bearer inv_live_..." \
   -H "Content-Type: application/json" \
-  -d '{"url":"https://you.example/hooks","events":["invoice.issued","invoice.paid"]}'
+  -d '{"url":"https://you.example/hooks","events":["invoice.finalized","invoice.paid"]}'
 ```
 
 The signing secret is in that response and **only** that response.
@@ -121,7 +129,7 @@ Each delivery carries [Standard Webhooks](https://www.standardwebhooks.com/)
 headers:
 
 ```
-webhook-id:        <uuid>
+webhook-id:        msg_…
 webhook-timestamp: 1789371234
 webhook-signature: v1,<base64 HMAC-SHA256>
 ```
@@ -137,9 +145,8 @@ Delivery is at-least-once: deduplicate on `webhook-id`. Retries run at 1m, 5m,
 
 | Not included | Why |
 |---|---|
-| Business profile writes | Onboarding is a wizard with GSTIN lookup and state cross-checks. A bare PATCH could reach a state the UI cannot produce. |
+| Business profile writes | Onboarding sets country, currency and numbering together. A bare PATCH could reach a state the UI cannot produce. |
 | AI parse / transcribe | Costs money per call. |
-| GSTIN lookup | Paid third-party quota. |
 | API key management | UI only, so a leaked key cannot mint more keys. |
-| Credit notes | Cancelling a *paid* invoice needs one under GST. Out of scope. |
-| OAuth | Planned. API keys first. |
+| Credit notes | A *paid* invoice can't be voided; reversing one needs a credit note. Out of scope. |
+| OAuth | Planned. API keys (and the CLI's device login, which issues one) first. |

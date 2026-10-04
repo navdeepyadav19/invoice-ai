@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { userDb } from '@/lib/db'
 import { syncOauthEmailVerification } from '@/lib/db/rpc'
 import { ensureProfile, getCurrentUser } from '@/lib/queries'
+import { safeNextPath } from '@/lib/safe-redirect'
 
 /**
  * Where Google sign-in lands.
@@ -18,8 +19,7 @@ export async function GET(request: NextRequest) {
 
   // Only ever redirect to a path on this origin — an open redirect here would
   // let someone craft a sign-in link that lands on their site.
-  const rawNext = searchParams.get('next') ?? '/dashboard'
-  const next = rawNext.startsWith('/') && !rawNext.startsWith('//') ? rawNext : '/dashboard'
+  const next = safeNextPath(searchParams.get('next'), '/dashboard')
 
   const oauthError = searchParams.get('error')
   if (oauthError) {

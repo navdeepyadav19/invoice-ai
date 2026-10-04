@@ -4,6 +4,25 @@ Today Invoice-AI is a **closed app**: the only way to create a GST invoice is to
 
 These are **planning documents, not code**. Each one explains the concept first, grounds it in this repo's real files, and ends with build phases you can pick up later.
 
+## Where this stands (Oct 2026)
+
+Most of the plan has been built. Each module doc opens with a status note; the short version:
+
+| Module | Status |
+|---|---|
+| 00 Foundation | Built: `lib/auth/context.ts`, `lib/services/*`, atomic `issue_invoice()` |
+| 01 API | Built: keys, scopes, idempotency, webhooks, rate limits, audit. **OAuth (A4) is not built** |
+| 02 SDK | Built in [navdeepyadav19/invoice-ai-sdk](https://github.com/navdeepyadav19/invoice-ai-sdk): TypeScript and Python, generated from `api-docs/openapi.json`. Publishing pending |
+| 03 CLI | Built in the same repo (`invoice-ai`, browser device login). The server half is here: `app/api/cli/`, `lib/cli-auth/` |
+| 04 MCP | Not built |
+
+Two decisions taken after this was written change the vocabulary throughout:
+
+- **Worldwide, not India-only** (`db/migrations/0009_global_breaking.sql`): any country and currency, a free-form tax rate per line (`lib/tax.ts`), numbering `PREFIX-0001`. The GST examples below (CGST/SGST/IGST, GSTIN, `INV/26-27/0042`, paise) are from the original plan.
+- **Stripe-shaped API** (`0011_stripe_api.sql`): `customers`, `products`, `prices`, `invoice-items`; invoices go `draft → open → paid` or `void` through `finalize` / `pay` / `void`; amounts are integer minor units.
+
+For using the API today, start with [api-getting-started.md](api-getting-started.md) or the developer docs in `api-docs/`.
+
 ## The north-star story
 
 Every document is designed around one sentence a user says to an AI assistant:
@@ -11,7 +30,7 @@ Every document is designed around one sentence a user says to an AI assistant:
 > **"Claude, invoice Acme ₹25,000 for September consulting and email it."**
 
 If the platform can do that *safely*, it can do almost anything else an integrator needs. "Safely" means:
-- the right GST split
+- the right tax on every line
 - one invoice number, never two
 - a human confirming before a legal document is issued
 - no access to anyone else's data
@@ -29,7 +48,7 @@ A restaurant has one kitchen and many ways to order: a waiter at the table, a ph
 | MCP server | AI assistants (Claude, ChatGPT, Cursor) | [04-mcp.md](04-mcp.md) |
 | **The kitchen: service layer** | **Every waiter above** | [00-foundation.md](00-foundation.md) |
 
-**Show the students:** open `lib/actions/send.ts`. The "kitchen" (claim an invoice number, render a PDF, email it) is mixed up with one specific waiter (a Next.js server action reading the browser's cookies). Module 0 separates them.
+**Show the students:** open `lib/actions/send.ts`. The "kitchen" (claim an invoice number, render a PDF, email it) is mixed up with one specific waiter (a Next.js server action reading the browser's cookies). Module 0 separates them. (That's the pre-foundation code; today `send.ts` is a thin adapter over `lib/services/invoices.ts`, so show the "before" from git history.)
 
 ## The north-star request, end to end
 
@@ -97,9 +116,11 @@ flowchart LR
 |---|---|
 | Business profile (read) | Business settings writes: onboarding is a UI flow |
 | Clients: list, get, create, update, archive | AI parse / transcribe: costs OpenAI money per call |
-| Invoices: drafts, issue, send, mark paid, cancel, PDF, events | GSTIN lookup: paid third-party quota (sandbox.co.in) |
-| Webhook endpoints | Organisations / team members: product stays single-owner |
-| API keys + OAuth for third-party apps | Guest (anonymous) accounts getting credentials |
+| Invoices: drafts, issue, send, mark paid, cancel, PDF, events | Organisations / team members: product stays single-owner |
+| Webhook endpoints | |
+| API keys + OAuth for third-party apps | |
+
+(As shipped, clients are `customers`, products and prices were added, and OAuth is still to come. The plan also excluded GSTIN lookup and guest accounts; both have since been removed from the product.)
 
 ## Glossary
 
@@ -123,23 +144,23 @@ flowchart LR
 
 ## Branch policy
 
-- **Platform work happens on `platform/*` branches, after the `stage-1…4` course branches are merged into `main`.** The SDK, CLI and MCP packages need `packages: ['packages/*']` in `pnpm-workspace.yaml` plus new dependencies, and both change the lockfile. Doing that mid-course would conflict with every stage merge.
-- **New packages go *alongside* the Next.js app** (`packages/sdk`, `packages/cli`, `packages/mcp-tools`). The app is never moved into `apps/`.
-- **Every platform PR goes through the existing CI/CD pipeline** (`.github/workflows/`). OpenAPI drift and SDK type checks are added to CI in module 02.
+- **As planned:** platform work on its own branches, with the SDK, CLI and MCP packages under `packages/` alongside the Next.js app (never moving the app into `apps/`).
+- **As it turned out:** the packages were built here, then moved with their history to [navdeepyadav19/invoice-ai-sdk](https://github.com/navdeepyadav19/invoice-ai-sdk). This repo has no workspace packages; it owns the API and its spec.
+- **Every PR goes through the CI pipeline** (`.github/workflows/`, see [../cicd-pipeline.md](../cicd-pipeline.md)). The `api-docs` job fails if `api-docs/openapi.json` or the Postman collection is stale; SDK type checks run in invoice-ai-sdk.
 
 ## Things to verify at build time
 
 These came up during planning and are **not yet confirmed**. Each doc repeats the ones relevant to it.
 
 - **OAuth 2.1 authorization server:** Supabase's built-in one went away with the move to Neon. Check whether Neon's managed Better Auth exposes an OAuth-provider plugin, or plan a small server of our own; confirm loopback redirects accept any port (RFC 8252). (01, 03, 04)
-- **Vercel plan tier:** per-minute Cron (webhook retries) and the Rate Limiting SDK. (01)
-- **GST Rule 46:** invoice numbers are at most 16 characters, and the current format `PREFIX/YY-YY/0001` leaves at most 5 for the prefix. Also decide whether the counter resets each financial year. (00)
+- **Vercel plan tier:** the project is on Hobby, so the webhook cron in `vercel.json` runs once a day and retries can wait up to 24h. Per-minute Cron and a shared rate-limit store need Pro or a Marketplace Redis. (01)
+- ~~**GST Rule 46:** invoice numbers are at most 16 characters, and the format `PREFIX/YY-YY/0001` leaves at most 5 for the prefix.~~ Resolved: numbering is `PREFIX-0001` since `0009_global_breaking.sql`. (00)
 
 ## A suggested teaching path (5 sessions)
 
 1. **Foundation:** refactor one action (`markPaidAction`) into a service live, and show the bug it had.
-2. **API:** create an API key in settings, `curl` your own invoices, then retry an issue with the same `Idempotency-Key`.
-3. **SDK:** change a zod schema and watch the generated SDK types break in the editor.
+2. **API:** create an API key in settings, `curl` your own invoices, then retry a finalize with the same `Idempotency-Key`.
+3. **SDK:** change a zod schema, run `pnpm openapi:gen`, and watch the regenerated SDK types break in the editor.
 4. **CLI:** `invoice-ai login`, then `invoice-ai invoices list --json | jq`.
 5. **MCP:** connect Claude to the MCP server and run the north-star sentence, including the confirmation step.
 
