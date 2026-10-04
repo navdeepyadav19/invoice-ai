@@ -4,8 +4,7 @@ import { ApiKeysManager } from '@/components/settings/api-keys-manager'
 import { SetupWarning } from '@/components/settings/setup-warning'
 import { listApiKeys } from '@/lib/actions/api-keys'
 import { apiSetupStatus } from '@/lib/api/setup-status'
-import { getCurrentUser } from '@/lib/queries'
-import { siteUrl } from '@/lib/supabase/env'
+import { siteUrl } from '@/lib/env'
 
 export const metadata: Metadata = { title: 'API keys' }
 
@@ -13,14 +12,12 @@ export const metadata: Metadata = { title: 'API keys' }
  * The only place API keys can be created or revoked.
  *
  * Deliberately not exposed over the API itself — see lib/auth/scopes.ts. A
- * leaked key cannot mint more keys, which keeps the blast radius of a stolen
+ * leaked key cannot create more keys, which keeps the blast radius of a stolen
  * credential fixed at whatever it was granted.
  */
 export default async function ApiKeysPage() {
-  const user = await getCurrentUser()
-  const isGuest = Boolean(user?.is_anonymous)
   const setup = apiSetupStatus()
-  const keys = isGuest ? [] : await listApiKeys()
+  const keys = await listApiKeys()
 
   return (
     <div className="space-y-8">
@@ -33,14 +30,7 @@ export default async function ApiKeysPage() {
 
       {!setup.ready ? <SetupWarning missing={setup.missing} /> : null}
 
-      {isGuest ? (
-        <p className="rounded-lg border bg-muted/40 p-4 text-sm text-muted-foreground">
-          Guest accounts can&rsquo;t hold API keys — guest data is cleared after 30 days, which
-          would leave the key pointing at nothing. Add an email and password first.
-        </p>
-      ) : (
-        <ApiKeysManager keys={keys} ready={setup.ready} />
-      )}
+      <ApiKeysManager keys={keys} ready={setup.ready} />
 
       <section className="space-y-3 border-t pt-8">
         <h3 className="text-sm font-medium">Using your key</h3>

@@ -69,12 +69,9 @@ export async function deleteWebhookAction(id: string): Promise<{ error?: string 
 export async function listWebhookEndpoints(): Promise<WebhookEndpointRow[]> {
   const ctx = await contextFromSession()
 
-  const { data } = await ctx.supabase
-    .from('webhook_endpoints')
-    .select('*')
-    .order('created_at', { ascending: false })
+  const rows = await ctx.db.selectFrom('webhook_endpoints').selectAll().orderBy('created_at', 'desc').execute()
 
-  return (data ?? []) as WebhookEndpointRow[]
+  return rows as WebhookEndpointRow[]
 }
 
 /**
@@ -88,11 +85,12 @@ export async function listWebhookEndpoints(): Promise<WebhookEndpointRow[]> {
 export async function listRecentDeliveries(limit = 30): Promise<WebhookDeliveryRow[]> {
   const ctx = await contextFromSession()
 
-  const { data } = await ctx.supabase
-    .from('webhook_deliveries')
-    .select('*')
-    .order('created_at', { ascending: false })
+  const rows = await ctx.db
+    .selectFrom('webhook_deliveries')
+    .selectAll()
+    .orderBy('created_at', 'desc')
     .limit(limit)
+    .execute()
 
-  return (data ?? []) as WebhookDeliveryRow[]
+  return rows as WebhookDeliveryRow[]
 }

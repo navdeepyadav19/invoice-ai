@@ -2,8 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 
-import { createClient } from '@/lib/supabase/server'
-import { getPrimaryBusiness, requireUser } from '@/lib/queries'
+import { getPrimaryBusiness, requireUser, sessionDb } from '@/lib/queries'
 import { countryName } from '@/lib/locale/countries'
 import { businessSchema, numberingSchema, paymentDetailsSchema } from '@/lib/validators'
 import { toFieldErrors, withValues, type StepState } from '@/lib/form-state'
@@ -57,7 +56,7 @@ export async function persistBusiness(formData: FormData): Promise<StepState> {
 
   if (!parsed.success) return toFieldErrors(parsed.error, formData)
 
-  const supabase = await createClient()
+  const db = await sessionDb()
   const existing = await getPrimaryBusiness()
 
   const values = {
@@ -78,15 +77,20 @@ export async function persistBusiness(formData: FormData): Promise<StepState> {
     business_type: parsed.data.business_type ?? null,
   }
 
-  const { error } = existing
-    ? await supabase.from('businesses').update(values).eq('id', existing.id)
-    : await supabase.from('businesses').insert(values)
-
-  if (error) return saveFailed(error, formData)
+  try {
+    if (existing) {
+      await db.updateTable('businesses').set(values).where('id', '=', existing.id).execute()
+    } else {
+      await db.insertInto('businesses').values(values).execute()
+    }
+  } catch (error) {
+    return saveFailed(error, formData)
+  }
 
   revalidatePath('/settings/business')
-  // A guest fills this same form inline on /invoices/new; without this they
-  // see "Saved." but stay on the form instead of reaching the builder.
+  // /invoices/new shows this same form inline when no business exists yet;
+  // without this they see "Saved." but stay on the form instead of reaching
+  // the builder.
   revalidatePath('/invoices/new')
   return { saved: true }
 }
@@ -106,20 +110,22 @@ export async function persistPayment(formData: FormData): Promise<StepState> {
 
   if (!parsed.success) return toFieldErrors(parsed.error, formData)
 
-  const supabase = await createClient()
-  const { error } = await supabase
-    .from('businesses')
-    .update({
-      bank_name: nullable(formData.get('bank_name')),
-      account_name: nullable(formData.get('account_name')),
-      account_number: nullable(formData.get('account_number')),
-      routing_number: parsed.data.routing_number || null,
-      default_terms: nullable(formData.get('default_terms')),
-      default_notes: nullable(formData.get('default_notes')),
-    })
-    .eq('id', business.id)
-
-  if (error) return saveFailed(error, formData)
+  try {
+    await (await sessionDb())
+      .updateTable('businesses')
+      .set({
+        bank_name: nullable(formData.get('bank_name')),
+        account_name: nullable(formData.get('account_name')),
+        account_number: nullable(formData.get('account_number')),
+        routing_number: parsed.data.routing_number || null,
+        default_terms: nullable(formData.get('default_terms')),
+        default_notes: nullable(formData.get('default_notes')),
+      })
+      .where('id', '=', business.id)
+      .execute()
+  } catch (error) {
+    return saveFailed(error, formData)
+  }
 
   revalidatePath('/settings/business')
   return { saved: true }
@@ -136,16 +142,18 @@ export async function persistNumbering(formData: FormData): Promise<StepState> {
 
   if (!parsed.success) return toFieldErrors(parsed.error, formData)
 
-  const supabase = await createClient()
-  const { error } = await supabase
-    .from('businesses')
-    .update({
-      invoice_prefix: parsed.data.invoice_prefix,
-      next_invoice_number: parsed.data.next_invoice_number,
-    })
-    .eq('id', business.id)
-
-  if (error) return saveFailed(error, formData)
+  try {
+    await (await sessionDb())
+      .updateTable('businesses')
+      .set({
+        invoice_prefix: parsed.data.invoice_prefix,
+        next_invoice_number: parsed.data.next_invoice_number,
+      })
+      .where('id', '=', business.id)
+      .execute()
+  } catch (error) {
+    return saveFailed(error, formData)
+  }
 
   revalidatePath('/settings/business')
   return { saved: true }
@@ -169,8 +177,8 @@ export async function saveNumberingSettings(_prev: StepState, formData: FormData
  * the person filling the form, and leak schema details. Log the real one for us,
  * show them something they can act on.
  */
-function saveFailed(error: { message: string }, formData: FormData): StepState {
-  console.error('[save failed]', error.message)
+function saveFailed(error: unknown, formData: FormData): StepState {
+  console.error('[save failed]', error instanceof Error ? error.message : error)
   // Echo the submission: a failed save must not wipe what they typed.
   return withValues(
     { error: "We couldn't save your details. Please try again in a moment." },

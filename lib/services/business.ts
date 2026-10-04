@@ -1,5 +1,5 @@
 import { requireScope, type AuthContext } from '@/lib/auth/context'
-import { fromPostgres, notFound } from '@/lib/services/errors'
+import { notFound, q } from '@/lib/services/errors'
 import type { BusinessRow } from '@/lib/database.types'
 
 /**
@@ -22,14 +22,10 @@ import type { BusinessRow } from '@/lib/database.types'
 export async function getPrimary(ctx: AuthContext): Promise<BusinessRow> {
   requireScope(ctx, 'business:read')
 
-  const { data, error } = await ctx.supabase
-    .from('businesses')
-    .select('*')
-    .order('created_at', { ascending: true })
-    .limit(1)
-    .maybeSingle()
+  const data = await q(
+    ctx.db.selectFrom('businesses').selectAll().orderBy('created_at', 'asc').limit(1).executeTakeFirst(),
+  )
 
-  if (error) throw fromPostgres(error)
   if (!data) throw notFound('No business profile yet. Finish onboarding first.')
 
   return data as BusinessRow
@@ -39,13 +35,9 @@ export async function getPrimary(ctx: AuthContext): Promise<BusinessRow> {
 export async function findPrimary(ctx: AuthContext): Promise<BusinessRow | null> {
   requireScope(ctx, 'business:read')
 
-  const { data, error } = await ctx.supabase
-    .from('businesses')
-    .select('*')
-    .order('created_at', { ascending: true })
-    .limit(1)
-    .maybeSingle()
+  const data = await q(
+    ctx.db.selectFrom('businesses').selectAll().orderBy('created_at', 'asc').limit(1).executeTakeFirst(),
+  )
 
-  if (error) throw fromPostgres(error)
-  return (data as BusinessRow | null) ?? null
+  return (data as BusinessRow | undefined) ?? null
 }

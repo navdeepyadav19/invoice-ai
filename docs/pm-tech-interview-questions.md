@@ -57,7 +57,13 @@ sellers and exports.
 
 ## 3. How is a guest’s data kept separate, and what happens when they claim an account?
 
-**Good answer**
+> **Since the move to Neon (Oct 2026):** guest mode is gone. Neon’s managed
+> auth has no anonymous users, so everyone signs up first. The answer below is
+> how it worked on Supabase, and is still a good answer to “what did you trade
+> away by switching backends?” — the RLS half of it is unchanged, with
+> `app.uid()` in place of `auth.uid()`.
+
+**Good answer (Supabase era)**
 
 A guest is not a shared scratchpad. “Create an invoice” does Supabase
 **anonymous sign-in** — a real auth user with a real `uid` and JWT, just no
@@ -76,11 +82,10 @@ account’s uid and consume the token so it can’t be replayed.
 
 **Where to look**
 
-- `lib/actions/auth.ts` — `continueAsGuestAction` / `signInAnonymously`
-- `lib/actions/claim.ts` — `claimAccountAction`, `mergePendingGuestData`
-- `supabase/migrations/0001_init.sql` — RLS policies, `merge_tokens`,
-  `redeem_merge_token`
-- README — anonymous sign-ins must be enabled in Supabase
+- Git history before the Neon migration: `lib/actions/claim.ts`,
+  `continueAsGuestAction`, and the `merge_tokens` table in the old
+  `db/migrations/0001_init.sql`
+- `db/migrations/0001_init.sql` — the RLS policies that still apply
 
 ---
 
@@ -101,7 +106,7 @@ subtraction so `cgst + sgst` always equals the total tax even on odd paise.
 
 - `lib/money.ts` — `toPaise`, `mulPaise`, formatting with Indian digit grouping
 - `lib/gst.ts` — CGST/SGST split comment around odd paise
-- `supabase/migrations/0001_init.sql` — money as `numeric(14,2)`, never float
+- `db/migrations/0001_init.sql` — money as `numeric(14,2)`, never float
 
 ---
 
@@ -118,7 +123,7 @@ snapshots make the data model match that product rule.
 
 **Where to look**
 
-- `supabase/migrations/0001_init.sql` — schema comments on snapshots
+- `db/migrations/0001_init.sql` — schema comments on snapshots
 - `lib/actions/invoice.ts` — writes `business_snapshot` / `client_snapshot` on save
 - `lib/invoice-view.ts` — `snapshotBusiness` helper
 - README — “Invoices freeze their parties”
@@ -141,9 +146,9 @@ isolation model itself doesn’t special-case guests.
 
 **Where to look**
 
-- `supabase/migrations/0001_init.sql` — design notes at top + RLS policies
+- `db/migrations/0001_init.sql` — design notes at top + RLS policies
 - README — “Tenant isolation is RLS, not application code”
-- `lib/supabase/*` — how the session reaches the DB
+- `lib/db/scoped.ts` — how the signed-in user reaches the DB (role switch + `app.uid()`)
 
 ---
 
@@ -164,7 +169,7 @@ built yet”). You can talk about the design and the gap without overselling.
 
 **Where to look**
 
-- `supabase/migrations/0001_init.sql` — `claim_invoice_number`, FY logic
+- `db/migrations/0001_init.sql` — `claim_invoice_number`, FY logic
 - `businesses.invoice_prefix` / `next_invoice_number` columns
 - README — Not built yet: sending / claiming number
 
@@ -186,7 +191,7 @@ enforces that the GSTIN’s state digits match `state_code` — so no code path
 
 - `lib/validators.ts` — `GSTIN_REGEX`, `hasValidGstinChecksum`, cross-field rules
 - `lib/validators.test.ts` — checksum / registration tests
-- `supabase/migrations/0001_init.sql` — `businesses_gstin_matches_state` check
+- `db/migrations/0001_init.sql` — `businesses_gstin_matches_state` check
 
 ---
 
@@ -224,8 +229,10 @@ the send loop (number → PDF/share/email) now that the engine and data model ho
 - **Next.js (App Router) + React + TypeScript** — one codebase for marketing,
   auth, builder, and server actions; good fit for a PM-built product where UI
   and domain logic stay close.
-- **Supabase (Auth + Postgres + RLS)** — auth (including anonymous), database,
-  and tenant isolation in one place; guests and registered users share one model.
+- **Neon (Postgres + Neon Auth + RLS)** — database, managed Better Auth, and
+  tenant isolation in one Postgres; RLS still does the isolation, with the app
+  pinning the user per transaction. Moved from Supabase because its free tier
+  pauses idle projects, while Neon scales compute to zero instead.
 - **Zod validators + pure GST/money modules** — domain rules unit-tested without
   the framework; browser and server can share the same functions.
 - **Tailwind / shadcn** — fast UI for forms and app shell without a design system
@@ -258,7 +265,7 @@ guest → account path, and a small team (or solo PM) shipping end-to-end.
 | 7 | Invoice numbers? | Per-business, FY-aware, row-locked claim |
 | 8 | GSTIN? | Regex + checksum + state match in DB |
 | 9 | What’s missing? | PDF, public link, email, draft→sent |
-| 10 | Stack? | Next + Supabase + shared GST engine |
+| 10 | Stack? | Next + Neon (Postgres + Auth) + shared GST engine |
 
 ---
 

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { siteUrl, supabasePublishableKey, supabaseUrl } from './supabase/env'
+import { siteUrl } from './env'
 import { publicInvoicePdfUrl, publicInvoiceUrl } from './urls'
 
 // Every test starts from a clean slate, so a developer's own shell or a CI
@@ -9,9 +9,6 @@ beforeEach(() => {
   vi.stubEnv('NEXT_PUBLIC_SITE_URL', undefined)
   vi.stubEnv('VERCEL_PROJECT_PRODUCTION_URL', undefined)
   vi.stubEnv('VERCEL_URL', undefined)
-  vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', undefined)
-  vi.stubEnv('NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY', undefined)
-  vi.stubEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY', undefined)
 })
 
 afterEach(() => {
@@ -58,23 +55,5 @@ describe('public invoice links', () => {
     expect(publicInvoicePdfUrl('tok_123', true)).toBe(
       'https://invoices.example.com/api/public/tok_123/pdf?download=1',
     )
-  })
-})
-
-describe('Supabase env', () => {
-  it('fails loudly, naming the missing variable', () => {
-    expect(() => supabaseUrl()).toThrow(/NEXT_PUBLIC_SUPABASE_URL/)
-    expect(() => supabasePublishableKey()).toThrow(/PUBLISHABLE_KEY/)
-  })
-
-  it('accepts the legacy anon key when there is no publishable key', () => {
-    vi.stubEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY', 'anon-key')
-    expect(supabasePublishableKey()).toBe('anon-key')
-  })
-
-  it('prefers the publishable key when both exist', () => {
-    vi.stubEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY', 'anon-key')
-    vi.stubEnv('NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY', 'publishable-key')
-    expect(supabasePublishableKey()).toBe('publishable-key')
   })
 })

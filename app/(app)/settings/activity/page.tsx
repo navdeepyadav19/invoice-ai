@@ -3,7 +3,6 @@ import { Activity } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { contextFromSession } from '@/lib/auth/context'
-import { getCurrentUser } from '@/lib/queries'
 import type { ApiKeyRow, ApiRequestRow } from '@/lib/database.types'
 
 export const metadata: Metadata = { title: 'API activity' }
@@ -20,32 +19,15 @@ export const metadata: Metadata = { title: 'API activity' }
  * deletable. An audit log a caller can edit is not an audit log.
  */
 export default async function ActivityPage() {
-  const user = await getCurrentUser()
-
-  if (user?.is_anonymous) {
-    return (
-      <div className="space-y-8">
-        <Header />
-        <p className="rounded-lg border bg-muted/40 p-4 text-sm text-muted-foreground">
-          Guest accounts can&rsquo;t use the API, so there&rsquo;s nothing to show here.
-        </p>
-      </div>
-    )
-  }
-
   const ctx = await contextFromSession()
 
-  const [{ data: requests }, { data: keys }] = await Promise.all([
-    ctx.supabase
-      .from('api_requests')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .limit(100),
-    ctx.supabase.from('api_keys').select('*'),
+  const [requests, keys] = await Promise.all([
+    ctx.db.selectFrom('api_requests').selectAll().orderBy('created_at', 'desc').limit(100).execute(),
+    ctx.db.selectFrom('api_keys').select(['id', 'name']).execute(),
   ])
 
-  const rows = (requests ?? []) as ApiRequestRow[]
-  const keyNames = new Map(((keys ?? []) as ApiKeyRow[]).map((key) => [key.id, key.name]))
+  const rows = requests as ApiRequestRow[]
+  const keyNames = new Map((keys as Pick<ApiKeyRow, 'id' | 'name'>[]).map((key) => [key.id, key.name]))
 
   return (
     <div className="space-y-8">

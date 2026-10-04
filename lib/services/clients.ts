@@ -1,7 +1,7 @@
 import { requireScope, type AuthContext } from '@/lib/auth/context'
-import { fromPostgres, invalidState, notFound, ServiceError } from '@/lib/services/errors'
+import { invalidState, notFound, q, ServiceError } from '@/lib/services/errors'
 import { clientSchema, type ClientInput } from '@/lib/validators'
-import { afterFilter, clampLimit, parseCursor, toPage, type Page } from '@/lib/services/pagination'
+import { afterPosition, clampLimit, parseCursor, toPage, type Page } from '@/lib/services/pagination'
 import { isCustomerId, isUuid, nextCustomerId } from '@/lib/catalog/ids'
 import type { ClientRow } from '@/lib/database.types'
 
@@ -30,30 +30,29 @@ export async function list(ctx: AuthContext, options: ListClientsOptions = {}): 
 
   const limit = clampLimit(options.limit)
 
-  let q = ctx.supabase
-    .from('clients')
-    .select('*')
-    .order('created_at', { ascending: false })
-    .order('id', { ascending: false })
+  let query = ctx.db
+    .selectFrom('clients')
+    .selectAll()
+    .orderBy('created_at', 'desc')
+    .orderBy('id', 'desc')
     // One extra row tells us whether another page exists without a count query.
     .limit(limit + 1)
 
-  if (!options.includeArchived) q = q.is('archived_at', null)
+  if (!options.includeArchived) query = query.where('archived_at', 'is', null)
 
   if (options.query) {
-    // Escape the PostgREST pattern wildcards so a client searching for "10%"
-    // doesn't accidentally match everything.
+    // Escape the LIKE wildcards so a client searching for "10%" doesn't
+    // accidentally match everything.
     const term = options.query.replace(/[%_]/g, (m) => `\\${m}`)
-    q = q.ilike('name', `%${term}%`)
+    query = query.where('name', 'ilike', `%${term}%`)
   }
 
   const after = parseCursor(options.cursor)
-  if (after) q = q.or(afterFilter(after))
+  if (after) query = query.where(afterPosition(after))
 
-  const { data, error } = await q
-  if (error) throw fromPostgres(error)
+  const data = await q(query.execute())
 
-  return toPage((data ?? []) as ClientRow[], limit)
+  return toPage(data as ClientRow[], limit)
 }
 
 export async function get(ctx: AuthContext, id: string): Promise<ClientRow> {
@@ -61,12 +60,14 @@ export async function get(ctx: AuthContext, id: string): Promise<ClientRow> {
 
   if (!isCustomerId(id) && !isUuid(id)) throw notFound('Client not found.')
 
-  const q = ctx.supabase.from('clients').select('*')
-  const { data, error } = isCustomerId(id)
-    ? await q.eq('public_id', id).maybeSingle()
-    : await q.eq('id', id).maybeSingle()
+  const data = await q(
+    ctx.db
+      .selectFrom('clients')
+      .selectAll()
+      .where(isCustomerId(id) ? 'public_id' : 'id', '=', id)
+      .executeTakeFirst(),
+  )
 
-  if (error) throw fromPostgres(error)
   // RLS returns nothing for another owner's row, so this is also the "not
   // yours" answer. Deliberately indistinguishable — see services/errors.ts.
   if (!data) throw notFound('Client not found.')
@@ -80,13 +81,14 @@ export async function create(ctx: AuthContext, input: ClientInput): Promise<Clie
   const parsed = clientSchema.safeParse(input)
   if (!parsed.success) throw validationError(parsed.error)
 
-  const { data, error } = await ctx.supabase
-    .from('clients')
-    .insert({ ...emptyToNull(parsed.data), owner_id: ctx.userId, public_id: nextCustomerId() })
-    .select('*')
-    .single()
+  const data = await q(
+    ctx.db
+      .insertInto('clients')
+      .values({ ...emptyToNull(parsed.data), owner_id: ctx.userId, public_id: nextCustomerId() })
+      .returningAll()
+      .executeTakeFirstOrThrow(),
+  )
 
-  if (error) throw fromPostgres(error)
   return data as ClientRow
 }
 
@@ -104,14 +106,15 @@ export async function update(
 
   const existing = await get(ctx, id)
 
-  const { data, error } = await ctx.supabase
-    .from('clients')
-    .update(emptyToNull(parsed.data))
-    .eq('id', existing.id)
-    .select('*')
-    .maybeSingle()
+  const data = await q(
+    ctx.db
+      .updateTable('clients')
+      .set(emptyToNull(parsed.data))
+      .where('id', '=', existing.id)
+      .returningAll()
+      .executeTakeFirst(),
+  )
 
-  if (error) throw fromPostgres(error)
   if (!data) throw notFound('Client not found.')
 
   return data as ClientRow
@@ -129,14 +132,15 @@ export async function archive(ctx: AuthContext, id: string): Promise<ClientRow> 
   const existing = await get(ctx, id)
   if (existing.archived_at) return existing
 
-  const { data, error } = await ctx.supabase
-    .from('clients')
-    .update({ archived_at: new Date().toISOString() })
-    .eq('id', existing.id)
-    .select('*')
-    .maybeSingle()
+  const data = await q(
+    ctx.db
+      .updateTable('clients')
+      .set({ archived_at: new Date().toISOString() })
+      .where('id', '=', existing.id)
+      .returningAll()
+      .executeTakeFirst(),
+  )
 
-  if (error) throw fromPostgres(error)
   if (!data) throw notFound('Client not found.')
 
   return data as ClientRow
@@ -147,14 +151,15 @@ export async function unarchive(ctx: AuthContext, id: string): Promise<ClientRow
 
   const existing = await get(ctx, id)
 
-  const { data, error } = await ctx.supabase
-    .from('clients')
-    .update({ archived_at: null })
-    .eq('id', existing.id)
-    .select('*')
-    .maybeSingle()
+  const data = await q(
+    ctx.db
+      .updateTable('clients')
+      .set({ archived_at: null })
+      .where('id', '=', existing.id)
+      .returningAll()
+      .executeTakeFirst(),
+  )
 
-  if (error) throw fromPostgres(error)
   if (!data) throw notFound('Client not found.')
 
   return data as ClientRow
@@ -193,15 +198,16 @@ export async function findOrCreateByName(ctx: AuthContext, input: ClientInput): 
   const parsed = clientSchema.safeParse(input)
   if (!parsed.success) throw validationError(parsed.error)
 
-  const { data, error } = await ctx.supabase
-    .from('clients')
-    .select('*')
-    .ilike('name', parsed.data.name)
-    .is('archived_at', null)
-    .limit(1)
-    .maybeSingle()
+  const data = await q(
+    ctx.db
+      .selectFrom('clients')
+      .selectAll()
+      .where('name', 'ilike', parsed.data.name)
+      .where('archived_at', 'is', null)
+      .limit(1)
+      .executeTakeFirst(),
+  )
 
-  if (error) throw fromPostgres(error)
   if (data) return data as ClientRow
 
   return create(ctx, parsed.data)

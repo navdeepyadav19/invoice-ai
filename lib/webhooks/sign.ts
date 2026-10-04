@@ -21,7 +21,7 @@ import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
  *
  * NOTE on storage: unlike an API key, this secret cannot be hashed — we need it
  * to produce a signature, so it must be recoverable. It is stored in the clear
- * in webhook_endpoints.secret today. Moving it behind Supabase Vault or app-level
+ * in webhook_endpoints.secret today. Moving it behind pgsodium/KMS or app-level
  * encryption is tracked as an open item.
  */
 

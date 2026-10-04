@@ -3,8 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 
-import { createClient } from '@/lib/supabase/server'
-import { getPrimaryBusiness, requireUser } from '@/lib/queries'
+import { getPrimaryBusiness, requireUser, sessionDb } from '@/lib/queries'
 import { persistBusiness } from '@/lib/actions/business'
 import { paymentDetailsSchema } from '@/lib/validators'
 import { toFieldErrors, withValues, type StepState } from '@/lib/form-state'
@@ -21,19 +20,20 @@ import { toFieldErrors, withValues, type StepState } from '@/lib/form-state'
 
 async function setStep(step: number) {
   const user = await requireUser()
-  const supabase = await createClient()
-  await supabase.from('profiles').update({ onboarding_step: step }).eq('id', user.id)
+  const db = await sessionDb()
+  await db.updateTable('profiles').set({ onboarding_step: step }).where('id', '=', user.id).execute()
   revalidatePath('/onboarding')
 }
 
 async function finishOnboarding(): Promise<never> {
   const user = await requireUser()
-  const supabase = await createClient()
+  const db = await sessionDb()
 
-  await supabase
-    .from('profiles')
-    .update({ onboarding_completed_at: new Date().toISOString(), onboarding_step: 2 })
-    .eq('id', user.id)
+  await db
+    .updateTable('profiles')
+    .set({ onboarding_completed_at: new Date().toISOString(), onboarding_step: 2 })
+    .where('id', '=', user.id)
+    .execute()
 
   redirect('/invoices/new')
 }
@@ -67,17 +67,19 @@ export async function saveBankStep(_prev: StepState, formData: FormData): Promis
 
   if (!parsed.success) return toFieldErrors(parsed.error, formData)
 
-  const supabase = await createClient()
-  const { error } = await supabase
-    .from('businesses')
-    .update({
-      account_name: parsed.data.account_name ?? null,
-      account_number: parsed.data.account_number ?? null,
-      routing_number: parsed.data.routing_number || null,
-    })
-    .eq('id', business.id)
-
-  if (error) return saveFailed(error, formData)
+  try {
+    await (await sessionDb())
+      .updateTable('businesses')
+      .set({
+        account_name: parsed.data.account_name ?? null,
+        account_number: parsed.data.account_number ?? null,
+        routing_number: parsed.data.routing_number || null,
+      })
+      .where('id', '=', business.id)
+      .execute()
+  } catch (error) {
+    return saveFailed(error, formData)
+  }
 
   return finishOnboarding()
 }
@@ -102,8 +104,8 @@ export async function goToStep(formData: FormData): Promise<void> {
  * the person filling the form, and leak schema details. Log the real one for us,
  * show them something they can act on.
  */
-function saveFailed(error: { message: string }, formData: FormData): StepState {
-  console.error('[save failed]', error.message)
+function saveFailed(error: unknown, formData: FormData): StepState {
+  console.error('[save failed]', error instanceof Error ? error.message : error)
   // Echo the submission: a failed save must not wipe what they typed.
   return withValues(
     { error: "We couldn't save your details. Please try again in a moment." },

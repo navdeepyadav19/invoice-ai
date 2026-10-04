@@ -1,13 +1,12 @@
 'use client'
 
 import Link from 'next/link'
-import { ChevronsUpDown, LogOut, Settings, UserRound } from 'lucide-react'
+import { ChevronsUpDown, LogOut, Settings } from 'lucide-react'
 
 import { signOutAction } from '@/lib/actions/auth'
 import { initialsFromEmail } from '@/lib/nav'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -17,42 +16,16 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 
-/**
- * Bottom-of-sidebar account block. Guests have no account to manage, so they
- * get the "Save my work" claim CTA instead of a menu (same as the old header).
- */
+/** Bottom-of-sidebar account block: who you are, settings, sign out. */
 export function UserMenu({
   email,
-  isGuest,
   emailUnverified,
   collapsed,
 }: {
   email: string | null
-  isGuest: boolean
   emailUnverified: boolean
   collapsed: boolean
 }) {
-  if (isGuest) {
-    return collapsed ? (
-      <Button
-        variant="outline"
-        size="icon"
-        className="mx-auto flex"
-        nativeButton={false}
-        render={<Link href="/claim" />}
-        title="Save my work"
-      >
-        <UserRound aria-hidden="true" />
-        <span className="sr-only">Save my work</span>
-      </Button>
-    ) : (
-      <Button variant="outline" className="w-full" nativeButton={false} render={<Link href="/claim" />}>
-        <UserRound aria-hidden="true" />
-        Save my work
-      </Button>
-    )
-  }
-
   const unverifiedBadge = (
     <Badge
       variant="outline"

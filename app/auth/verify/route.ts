@@ -1,12 +1,14 @@
 import { NextResponse, type NextRequest } from 'next/server'
 
-import { createClient } from '@/lib/supabase/server'
+import { anonDb, userDb } from '@/lib/db'
+import { redeemEmailVerification } from '@/lib/db/rpc'
 import {
   hashVerificationToken,
   isWellFormedToken,
   toRedeemResult,
   type RedeemVerificationResult,
 } from '@/lib/email-verification'
+import { getCurrentUser } from '@/lib/queries'
 
 /**
  * Where the "Verify your email" link lands.
@@ -30,33 +32,24 @@ export async function GET(request: NextRequest) {
 
   if (!isWellFormedToken(token)) return explain(origin, 'invalid')
 
-  const supabase = await createClient()
-
-  const { data, error } = await supabase.rpc('redeem_email_verification', {
-    p_token_hash: hashVerificationToken(token),
-  })
-
-  if (error) {
-    console.error('[verify-email] redeem failed', error.message)
+  let result: RedeemVerificationResult
+  try {
+    result = toRedeemResult(await redeemEmailVerification(anonDb(), hashVerificationToken(token)))
+  } catch (err) {
+    console.error('[verify-email] redeem failed', err instanceof Error ? err.message : err)
     return explain(origin, 'invalid')
   }
 
-  const result = toRedeemResult(data)
   if (result !== 'verified' && result !== 'already_verified') return explain(origin, result)
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await getCurrentUser()
+  if (!user) return NextResponse.redirect(`${origin}/login?verified=1`)
 
-  if (!user || user.is_anonymous) {
-    return NextResponse.redirect(`${origin}/login?verified=1`)
-  }
-
-  const { data: profile } = await supabase
-    .from('profiles')
+  const profile = await userDb(user.id)
+    .selectFrom('profiles')
     .select('onboarding_completed_at')
-    .eq('id', user.id)
-    .maybeSingle()
+    .where('id', '=', user.id)
+    .executeTakeFirst()
 
   const destination = profile?.onboarding_completed_at ? '/dashboard' : '/onboarding'
   return NextResponse.redirect(`${origin}${destination}?verified=1`)

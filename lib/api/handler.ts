@@ -25,7 +25,7 @@ import type { Scope } from '@/lib/auth/scopes'
  * that leaks a tenant's data or burns a second invoice number.
  *
  *   1. request id    accept X-Request-Id or generate one; echo it everywhere
- *   2. authenticate  API key → verify → mint a 60s user JWT
+ *   2. authenticate  API key → verify → a db handle scoped to its owner
  *   3. rate limit    per credential → 429 + Retry-After
  *   4. scope check   403 before the handler runs
  *   5. idempotency   claim the key → replay / 409 / 422
@@ -228,22 +228,25 @@ async function audit(
   durationMs: number,
   idempotencyKey: string | null,
 ): Promise<void> {
-  const { error } = await ctx.supabase.from('api_requests').insert({
-    request_id: ctx.requestId,
-    owner_id: ctx.userId,
-    via: ctx.via,
-    api_key_id: ctx.apiKeyId ?? null,
-    client_id: ctx.clientId ?? null,
-    method: request.method,
-    route: url.pathname,
-    status,
-    duration_ms: durationMs,
-    idempotency_key: idempotencyKey,
-    ip_hash: await hashIp(request),
-  })
-
-  if (error) {
-    console.error('[api] audit insert failed for %s: %s', ctx.requestId, error.message)
+  try {
+    await ctx.db
+      .insertInto('api_requests')
+      .values({
+        request_id: ctx.requestId,
+        owner_id: ctx.userId,
+        via: ctx.via,
+        api_key_id: ctx.apiKeyId ?? null,
+        client_id: ctx.clientId ?? null,
+        method: request.method,
+        route: url.pathname,
+        status,
+        duration_ms: durationMs,
+        idempotency_key: idempotencyKey,
+        ip_hash: await hashIp(request),
+      })
+      .execute()
+  } catch (error) {
+    console.error('[api] audit insert failed for %s: %s', ctx.requestId, (error as Error).message)
   }
 }
 

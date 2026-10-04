@@ -3,7 +3,7 @@
 import { contextFromSession } from '@/lib/auth/context'
 import { getCurrentUser } from '@/lib/queries'
 import * as clients from '@/lib/services/clients'
-import { fromPostgres } from '@/lib/services/errors'
+import { q } from '@/lib/services/errors'
 import { sanitizeSearchTerm, type CustomerOption, type PriceOption } from '@/lib/catalog/picker'
 import type { ClientRow, PriceRow } from '@/lib/database.types'
 
@@ -52,42 +52,28 @@ export async function searchPrices(query: string): Promise<SearchResult<PriceOpt
     const ctx = await contextFromSession()
     const term = sanitizeSearchTerm(typeof query === 'string' ? query : '')
 
-    let q = ctx.supabase
-      .from('prices')
-      .select('*, products!inner(name, active)')
-      .eq('active', true)
-      .eq('products.active', true)
-      .order('created_at', { ascending: false })
+    let prices = ctx.db
+      .selectFrom('prices')
+      .innerJoin('products', 'products.id', 'prices.product_id')
+      .selectAll('prices')
+      .select('products.name as product_name')
+      .where('prices.active', '=', true)
+      .where('products.active', '=', true)
+      .orderBy('prices.created_at', 'desc')
       .limit(SEARCH_LIMIT)
 
     if (term) {
-      // A price matches on its product's name or its own nickname. The
-      // product side is a separate lookup because PostgREST can't OR across
-      // an embedded resource.
-      const { data: products, error } = await ctx.supabase
-        .from('products')
-        .select('id')
-        .eq('active', true)
-        .ilike('name', `%${term}%`)
-        .limit(50)
-      if (error) throw fromPostgres(error)
-
-      const ids = (products ?? []).map((row) => (row as { id: string }).id)
-      // Quoted so a term with a dot or space stays one value in the or= tree.
-      const filters = [`nickname.ilike."%${term}%"`]
-      if (ids.length > 0) filters.push(`product_id.in.(${ids.join(',')})`)
-      q = q.or(filters.join(','))
+      // A price matches on its product's name or its own nickname.
+      const pattern = `%${term}%`
+      prices = prices.where((eb) =>
+        eb.or([eb('prices.nickname', 'ilike', pattern), eb('products.name', 'ilike', pattern)]),
+      )
     }
 
-    const { data, error } = await q
-    if (error) throw fromPostgres(error)
+    const data = await q(prices.execute())
 
-    type Joined = PriceRow & { products: { name: string } | Array<{ name: string }> | null }
     return {
-      results: ((data ?? []) as unknown as Joined[]).map((row) => {
-        const product = Array.isArray(row.products) ? row.products[0] : row.products
-        return toPriceOption(row, product?.name ?? '')
-      }),
+      results: data.map((row) => toPriceOption(row as PriceRow, row.product_name)),
     }
   } catch (cause) {
     return searchFailed('prices', cause)
@@ -95,7 +81,7 @@ export async function searchPrices(query: string): Promise<SearchResult<PriceOpt
 }
 
 /**
- * Log the real cause; show a sentence. `fromPostgres` keeps the database's
+ * Log the real cause; show a sentence. `q` keeps the database's
  * message on the error, which is fine for a log line and wrong for a dropdown.
  */
 function searchFailed<T>(what: string, cause: unknown): SearchResult<T> {

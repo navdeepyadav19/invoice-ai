@@ -1,15 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-// The services import the server tree (cookies, PDF renderer, mailer) at
-// module load. None of it runs in these tests — the fake client below is the
-// only thing a service touches — so the heavy modules are stubbed out.
-vi.mock('@/lib/supabase/server', () => ({ createClient: vi.fn() }))
+// The services import the server tree (connection pool, auth, PDF renderer,
+// mailer) at module load. None of it runs in these tests — the fake database
+// below is the only thing a service touches — so the heavy modules are stubbed.
+vi.mock('@/lib/db', () => ({ userDb: vi.fn(), anonDb: vi.fn() }))
 vi.mock('@/lib/queries', () => ({ getCurrentUser: vi.fn() }))
 vi.mock('@/lib/pdf', () => ({ renderInvoicePdf: vi.fn(), pdfFilename: vi.fn() }))
 vi.mock('@/lib/email', () => ({ sendInvoiceEmail: vi.fn() }))
 
 import type { AuthContext } from '@/lib/auth/context'
 import { ALL_SCOPES } from '@/lib/auth/scopes'
+import { fakeDb, type FakeResponder, type RecordedQuery } from '@/lib/db/testing'
 import { encodeCursor } from '@/lib/services/pagination'
 import { fromPostgres, isServiceError, ServiceError } from '@/lib/services/errors'
 import { serializeInvoice, serializePrice } from '@/lib/api/serialize'
@@ -23,37 +24,35 @@ import * as products from '@/lib/services/products'
 import * as webhooks from '@/lib/services/webhooks'
 
 /**
- * A PostgREST query builder that records every call and resolves to `rows`.
+ * A context whose database records every statement and answers with `respond`.
  * Enough to assert *what was asked of the database*, which is the point here:
  * the overdue filter has to be in the query, not applied to its result.
  */
-function fakeContext(rows: Array<Record<string, unknown>> = []) {
-  const calls: Array<[string, ...unknown[]]> = []
-  const builder: Record<string, unknown> = {}
-  for (const method of ['select', 'order', 'limit', 'eq', 'lt', 'gte', 'lte', 'or', 'is', 'ilike', 'in', 'delete']) {
-    builder[method] = (...args: unknown[]) => {
-      calls.push([method, ...args])
-      return builder
-    }
-  }
-  builder.maybeSingle = () => Promise.resolve({ data: rows[0] ?? null, error: null })
-  builder.then = (resolve: (value: unknown) => unknown) => resolve({ data: rows, error: null })
-
-  const from = vi.fn((table: string) => {
-    calls.push(['from', table])
-    return builder
-  })
+function fakeContext(respond?: FakeResponder) {
+  const db = fakeDb(respond)
 
   const ctx = {
     userId: 'user-1',
-    supabase: { from },
+    db,
     via: 'api_key',
     scopes: new Set(ALL_SCOPES),
     requestId: 'req_test',
   } as unknown as AuthContext
 
-  return { ctx, calls, from }
+  return { ctx, db, queries: db.queries }
 }
+
+/** The value bound to the placeholder right after `fragment`, e.g. `"status" = $1`. */
+function param(query: RecordedQuery | undefined, fragment: string): unknown {
+  if (!query) throw new Error('no query was run')
+  const at = query.sql.indexOf(fragment)
+  if (at === -1) throw new Error(`"${fragment}" not in: ${query.sql}`)
+  const match = /^\s*\$(\d+)/.exec(query.sql.slice(at + fragment.length))
+  if (!match) throw new Error(`no placeholder after "${fragment}" in: ${query.sql}`)
+  return query.parameters[Number(match[1]) - 1]
+}
+
+const from = (table: string) => (query: RecordedQuery) => query.sql.includes(`from "${table}"`)
 
 async function rejection(promise: Promise<unknown>): Promise<ServiceError> {
   try {
@@ -78,11 +77,11 @@ function invoiceRow(n: number) {
 
 describe('status=overdue is filtered in SQL', () => {
   it('asks for open invoices due before today (UTC), not open invoices narrowed afterwards', async () => {
-    const { ctx, calls } = fakeContext([invoiceRow(1)])
+    const { ctx, queries } = fakeContext([[invoiceRow(1)]])
     await invoices.list(ctx, { status: 'overdue' })
 
-    expect(calls).toContainEqual(['eq', 'status', 'open'])
-    expect(calls).toContainEqual(['lt', 'due_date', todayUtc()])
+    expect(param(queries[0], '"status" =')).toBe('open')
+    expect(param(queries[0], '"due_date" <')).toBe(todayUtc())
   })
 
   /**
@@ -91,20 +90,20 @@ describe('status=overdue is filtered in SQL', () => {
    * is the page: limit+1 rows back means a full page plus a next_cursor.
    */
   it('returns full pages and a cursor when more overdue invoices exist', async () => {
-    const { ctx, calls } = fakeContext([invoiceRow(3), invoiceRow(2), invoiceRow(1)])
+    const { ctx, queries } = fakeContext([[invoiceRow(3), invoiceRow(2), invoiceRow(1)]])
     const page = await invoices.list(ctx, { status: 'overdue', limit: 2 })
 
-    expect(calls).toContainEqual(['limit', 3])
+    expect(param(queries[0], 'limit')).toBe(3)
     expect(page.data).toHaveLength(2)
     expect(page.next_cursor).not.toBeNull()
   })
 
   it('other statuses are a plain equality filter', async () => {
-    const { ctx, calls } = fakeContext()
+    const { ctx, queries } = fakeContext()
     await invoices.list(ctx, { status: 'paid' })
 
-    expect(calls).toContainEqual(['eq', 'status', 'paid'])
-    expect(calls.some(([method]) => method === 'lt')).toBe(false)
+    expect(param(queries[0], '"status" =')).toBe('paid')
+    expect(queries[0]!.sql).not.toContain('"due_date" <')
   })
 })
 
@@ -127,14 +126,14 @@ describe('an invalid cursor is a 422, never page one', () => {
   })
 
   it('a cursor from a previous page is applied as a position filter', async () => {
-    const { ctx, calls } = fakeContext()
+    const { ctx, queries } = fakeContext()
     const createdAt = '2026-09-17T08:30:00.000Z'
     await invoices.list(ctx, { cursor: encodeCursor({ createdAt, id: UUID }) })
 
-    expect(calls).toContainEqual([
-      'or',
-      `created_at.lt.${createdAt},and(created_at.eq.${createdAt},id.lt.${UUID})`,
-    ])
+    // A row comparison: strictly older, with id breaking created_at ties.
+    expect(queries[0]!.sql).toMatch(/\("created_at", "id"\) < \(\$\d+::timestamptz, \$\d+::uuid\)/)
+    expect(param(queries[0], '("created_at", "id") < (')).toBe(createdAt)
+    expect(param(queries[0], '::timestamptz,')).toBe(UUID)
   })
 })
 
@@ -149,24 +148,24 @@ describe('malformed ids are 404 not_found, not a failed uuid cast', () => {
       (ctx: AuthContext) => prices.get(ctx, id),
       (ctx: AuthContext) => webhooks.remove(ctx, id),
     ]) {
-      const { ctx, from } = fakeContext()
+      const { ctx, queries } = fakeContext()
       const error = await rejection(call(ctx))
       expect(error.code).toBe('not_found')
       // Answered from the id's shape alone — the database is never asked.
-      expect(from).not.toHaveBeenCalled()
+      expect(queries).toHaveLength(0)
     }
   })
 
   it('an unknown invoice item id is simply not found', async () => {
-    const { ctx, from } = fakeContext()
+    const { ctx, queries } = fakeContext()
     expect(await invoices.findItem(ctx, 'garbage')).toBeNull()
-    expect(from).not.toHaveBeenCalled()
+    expect(queries).toHaveLength(0)
   })
 
   it('well-formed ids still reach the database', async () => {
-    const { ctx, from } = fakeContext()
+    const { ctx, queries } = fakeContext()
     await rejection(invoices.get(ctx, UUID))
-    expect(from).toHaveBeenCalledWith('invoices')
+    expect(queries.some(from('invoices'))).toBe(true)
   })
 
   it('Postgres 22P02 (invalid_text_representation) maps to not_found as a backstop', () => {
@@ -188,14 +187,14 @@ describe('PATCH /invoices/{id} is a partial update', () => {
   }
 
   it('without customer or items, keeps the stored customer and lines untouched', async () => {
-    const { ctx, from } = fakeContext()
+    const { ctx, queries } = fakeContext()
     const merged = await invoices.wireToDraftInput(ctx, invoiceWireSchema.parse({ description: 'New notes' }), base)
 
     expect(merged.client).toEqual(base.client)
     expect(merged.items).toEqual(base.items)
     expect(merged.notes).toBe('New notes')
     expect(merged.terms).toBe('Net 30')
-    expect(from).not.toHaveBeenCalled()
+    expect(queries).toHaveLength(0)
   })
 
   it('items, when sent, replace the lines — read in the invoice currency’s minor unit', async () => {
@@ -245,11 +244,18 @@ describe('invoice events are paginated', () => {
 
   it('pages with limit + 1 and returns next_cursor', async () => {
     const event = (n: number) => ({ id: invoiceRow(n).id, created_at: invoiceRow(n).created_at, invoice_id: UUID, type: 'created' })
-    // The first row doubles as the invoice `load` finds; the list is the rest.
-    const { ctx, calls } = fakeContext([{ ...invoiceRow(9), id: UUID }, event(2), event(1)])
+    // `load` finds the invoice (no items); the event list then returns
+    // limit + 1 rows.
+    const { ctx, queries } = fakeContext((query) => {
+      if (from('invoices')(query)) return [{ ...invoiceRow(9), id: UUID }]
+      if (from('invoice_events')(query)) return [event(3), event(2), event(1)]
+      return []
+    })
     const page = await invoices.events(ctx, UUID, { limit: 2 })
 
-    expect(calls).toContainEqual(['limit', 3])
+    const list = queries.find(from('invoice_events'))
+    expect(param(list, '"invoice_id" =')).toBe(UUID)
+    expect(param(list, 'limit')).toBe(3)
     expect(page.data).toHaveLength(2)
     expect(page.next_cursor).not.toBeNull()
   })

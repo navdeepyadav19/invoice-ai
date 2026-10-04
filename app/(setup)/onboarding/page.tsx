@@ -24,10 +24,7 @@ const COPY = {
 } as const
 
 export default async function OnboardingPage() {
-  const user = await requireUser()
-
-  // Guests never see the wizard — they fill details inline in the builder.
-  if (user.is_anonymous) redirect('/invoices/new')
+  await requireUser()
 
   const profile = await getProfile()
   if (profile?.onboarding_completed_at) redirect('/dashboard')

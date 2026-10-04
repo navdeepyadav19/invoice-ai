@@ -1,5 +1,5 @@
 import { buildOpenApiDocument } from '@/lib/api/openapi'
-import { siteUrl } from '@/lib/supabase/env'
+import { siteUrl } from '@/lib/env'
 
 /**
  * GET /api/v1/openapi.json

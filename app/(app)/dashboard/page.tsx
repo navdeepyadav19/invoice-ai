@@ -5,7 +5,7 @@ import { FilePlus2, FileText } from 'lucide-react'
 import { PageContainer, PageHeader } from '@/components/app/page-header'
 import { StatusBadge } from '@/components/app/status-badge'
 import { Button } from '@/components/ui/button'
-import { createClient } from '@/lib/supabase/server'
+import { userDb } from '@/lib/db'
 import { requireUser } from '@/lib/queries'
 import { formatPaise, toPaise } from '@/lib/money'
 import { deriveStatus } from '@/lib/invoice-status'
@@ -15,18 +15,18 @@ export const metadata: Metadata = { title: 'Invoices' }
 
 export default async function DashboardPage() {
   const user = await requireUser()
-  const supabase = await createClient()
 
-  const { data: invoices } = await supabase
-    .from('invoices')
-    .select('*')
-    .eq('owner_id', user.id)
-    .order('created_at', { ascending: false })
+  const invoices = (await userDb(user.id)
+    .selectFrom('invoices')
+    .selectAll()
+    .where('owner_id', '=', user.id)
+    .orderBy('created_at', 'desc')
     .limit(100)
+    .execute()) as InvoiceRow[]
 
   // Overdue is computed, not stored — see lib/invoice-status.ts. Resolving it
   // once here means the badge, the totals and any future filter can't disagree.
-  const rows = (invoices ?? []).map((invoice) => ({
+  const rows = invoices.map((invoice) => ({
     ...invoice,
     displayStatus: deriveStatus(invoice),
   }))

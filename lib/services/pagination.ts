@@ -15,6 +15,8 @@
  * or duplicate one of them.
  */
 
+import { sql, type RawBuilder } from 'kysely'
+
 import { isUuid } from '@/lib/catalog/ids'
 import { ServiceError } from '@/lib/services/errors'
 
@@ -66,8 +68,8 @@ export function decodeCursor(cursor?: string | null): CursorPosition | null {
  * treats `null` as "no cursor" serves page one again — a sync job walking the
  * list would loop forever without noticing. So a cursor that is present but
  * unreadable is a `validation` error on `cursor`. The parts are checked too:
- * they end up inside a PostgREST filter, so only a real timestamp and UUID
- * may reach it.
+ * they are cast to timestamptz and uuid in SQL, and a value that fails the
+ * cast is a 500, not a 422.
  */
 export function parseCursor(cursor?: string | null): CursorPosition | null {
   if (!cursor) return null
@@ -81,9 +83,16 @@ export function parseCursor(cursor?: string | null): CursorPosition | null {
   return position
 }
 
-/** The PostgREST filter for "strictly after this position" in (created_at, id) desc order. */
-export function afterFilter(position: CursorPosition): string {
-  return `created_at.lt.${position.createdAt},and(created_at.eq.${position.createdAt},id.lt.${position.id})`
+/**
+ * "Strictly after this position" in (created_at desc, id desc) order, as a
+ * row comparison: (created_at, id) < (X, Y) means created_at < X, or equal
+ * created_at and a smaller id — exactly the tiebreak the ordering uses.
+ *
+ * Pass `table` when the query joins, so the columns aren't ambiguous.
+ */
+export function afterPosition(position: CursorPosition, table?: string): RawBuilder<boolean> {
+  const col = (name: string) => sql.ref(table ? `${table}.${name}` : name)
+  return sql<boolean>`(${col('created_at')}, ${col('id')}) < (${position.createdAt}::timestamptz, ${position.id}::uuid)`
 }
 
 /** 1–100, 25 by default. */

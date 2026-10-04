@@ -17,7 +17,7 @@ export default async function VerifyEmailPage({ searchParams }: PageProps<'/veri
   const params = await searchParams
   const result = toRedeemResult(params.status)
   const user = await getCurrentUser()
-  const signedIn = Boolean(user && !user.is_anonymous)
+  const signedIn = Boolean(user)
 
   const { title, body, ok } = describeRedeemResult(result, signedIn)
 

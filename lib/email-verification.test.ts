@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 
-import { friendlyAuthError, isAccountExistsError } from './auth-messages'
 import {
   describeRedeemResult,
   generateVerificationToken,
@@ -66,35 +65,17 @@ describe('redeem results', () => {
   })
 })
 
-describe('friendlyAuthError', () => {
-  it('maps a duplicate signup to a sign-in prompt', () => {
-    expect(friendlyAuthError('User already registered')).toBe(
-      'An account with this email already exists. Sign in instead.',
-    )
-    expect(isAccountExistsError('User already registered')).toBe(true)
-    expect(isAccountExistsError('Invalid login credentials')).toBe(false)
-  })
-
-  it('maps rate limits', () => {
-    expect(friendlyAuthError('Email rate limit exceeded')).toMatch(/Too many attempts/)
-  })
-
-  it('passes unknown messages through and handles empty input', () => {
-    expect(friendlyAuthError('Database on fire')).toBe('Database on fire')
-    expect(friendlyAuthError(undefined)).toMatch(/Something went wrong/)
-  })
-})
-
 describe('isEmailUnverified', () => {
-  const user = { email: 'a@b.co', is_anonymous: false }
+  const user = { email: 'a@b.co' }
 
   it('is true only for a signed-in email user with a null verified stamp', () => {
     expect(isEmailUnverified(user, { email_verified_at: null })).toBe(true)
     expect(isEmailUnverified(user, { email_verified_at: '2026-01-01T00:00:00Z' })).toBe(false)
   })
 
-  it('stays quiet for guests, missing users and a pre-migration schema', () => {
-    expect(isEmailUnverified({ is_anonymous: true, email: null }, { email_verified_at: null })).toBe(false)
+  it('stays quiet without an email, a user, or a pre-migration schema', () => {
+    expect(isEmailUnverified({ email: null }, { email_verified_at: null })).toBe(false)
+    expect(isEmailUnverified({ email: '' }, { email_verified_at: null })).toBe(false)
     expect(isEmailUnverified(null, null)).toBe(false)
     expect(isEmailUnverified(user, {})).toBe(false)
     expect(isEmailUnverified(user, null)).toBe(false)

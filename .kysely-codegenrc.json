@@ -1,0 +1,12 @@
+{
+  "dialect": "postgres",
+  "outFile": "lib/db/schema.ts",
+  "includePattern": "public.*",
+  "dateParser": "string",
+  "numericParser": "number",
+  "typeMapping": {
+    "timestamptz": "string",
+    "timestamp": "string",
+    "int8": "number"
+  }
+}

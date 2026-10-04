@@ -11,8 +11,14 @@ export default async function LoginPage({ searchParams }: PageProps<'/login'>) {
   const error = typeof params.error === 'string' ? params.error : undefined
   const email = typeof params.email === 'string' ? params.email : undefined
   // Set by /auth/verify when the link was opened without a session (e.g. on a
-  // phone): the address is confirmed, they just need to sign in.
-  const message = params.verified === '1' ? 'Email verified. Sign in to continue.' : undefined
+  // phone): the address is confirmed, they just need to sign in. And by the
+  // reset-password action, which changes the password but doesn't sign in.
+  const message =
+    params.verified === '1'
+      ? 'Email verified. Sign in to continue.'
+      : params.reset === '1'
+        ? 'Password updated. Sign in with your new password.'
+        : undefined
 
   return <LoginForm next={next} initialError={error} initialMessage={message} initialEmail={email} />
 }

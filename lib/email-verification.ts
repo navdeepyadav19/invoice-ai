@@ -3,10 +3,10 @@ import { createHash, randomBytes } from 'node:crypto'
 /**
  * App-level email verification: the pure half.
  *
- * Supabase's own "Confirm email" is off so people can sign in straight after
- * signing up, which means auth.users.email_confirmed_at no longer proves
- * anything. Instead we email a link carrying a random token and store only its
- * SHA-256 (migration 0012). The raw token exists in exactly one place — the
+ * Neon Auth's own email verification is off so people can sign in straight
+ * after signing up, which means its emailVerified flag proves nothing for a
+ * password account. Instead we email a link carrying a random token and store
+ * only its SHA-256 (migration 0012). The raw token exists in exactly one place — the
  * email — so a database leak is not a pile of working links.
  *
  * Plain SHA-256 rather than HMAC or bcrypt: the token is 256 random bits, so
@@ -18,16 +18,15 @@ import { createHash, randomBytes } from 'node:crypto'
 /**
  * Whether to show the "unverified" banner and badge.
  *
- * Guests have no email to verify. The check is `=== null`, not falsy, on
- * purpose: if this code ships before migration 0012 is applied the column is
- * simply absent (undefined), and we'd rather show nothing than tell every
- * existing user they're unverified.
+ * The check is `=== null`, not falsy, on purpose: if this code ships before
+ * migration 0012 is applied the column is simply absent (undefined), and we'd
+ * rather show nothing than tell every existing user they're unverified.
  */
 export function isEmailUnverified(
-  user: { is_anonymous?: boolean; email?: string | null } | null,
+  user: { email?: string | null } | null,
   profile: { email_verified_at?: string | null } | null,
 ): boolean {
-  if (!user || user.is_anonymous || !user.email) return false
+  if (!user?.email) return false
   return profile?.email_verified_at === null
 }
 

@@ -41,9 +41,6 @@ export interface AuthFormState {
   values?: FormValues
 }
 
-/** Carries a guest's single-use merge token across a sign-in. */
-export const PENDING_MERGE_COOKIE = 'pending_merge_uid'
-
 /**
  * Field names never echoed back into the DOM, however the form failed.
  * `gst_data` isn't secret, just a large JSON blob the form re-derives itself.

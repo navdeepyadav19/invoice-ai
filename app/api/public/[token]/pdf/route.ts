@@ -1,6 +1,8 @@
 import { NextResponse, type NextRequest } from 'next/server'
 
-import { createClient } from '@/lib/supabase/server'
+import { isUuid } from '@/lib/catalog/ids'
+import { anonDb } from '@/lib/db'
+import { getPublicInvoice, logPublicInvoiceEvent } from '@/lib/db/rpc'
 import { isPublicInvoicePayload, viewFromRows } from '@/lib/invoice-load'
 import { pdfFilename, renderInvoicePdf } from '@/lib/pdf'
 
@@ -16,10 +18,15 @@ export const runtime = 'nodejs'
 export async function GET(request: NextRequest, { params }: RouteContext<'/api/public/[token]/pdf'>) {
   const { token } = await params
 
-  const supabase = await createClient()
-  const { data, error } = await supabase.rpc('get_public_invoice', { p_token: token })
+  // A non-uuid can't be a token; 404 it before Postgres rejects the cast.
+  const data = isUuid(token)
+    ? await getPublicInvoice(anonDb(), token).catch((cause) => {
+        console.error('[public] invoice lookup failed', cause)
+        return null
+      })
+    : null
 
-  if (error || !isPublicInvoicePayload(data)) {
+  if (!isPublicInvoicePayload(data)) {
     return new NextResponse('Not found', { status: 404 })
   }
 
@@ -28,7 +35,7 @@ export async function GET(request: NextRequest, { params }: RouteContext<'/api/p
 
   // Fire-and-forget: a failed analytics write must never cost the client their
   // download, so the result is deliberately ignored.
-  void supabase.rpc('log_public_invoice_event', { p_token: token, p_type: 'downloaded' })
+  void logPublicInvoiceEvent(anonDb(), token, 'downloaded').catch(() => {})
 
   const disposition = request.nextUrl.searchParams.get('download') === '1' ? 'attachment' : 'inline'
 

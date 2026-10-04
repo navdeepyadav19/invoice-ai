@@ -2,8 +2,9 @@ import type { Metadata } from 'next'
 import { notFound, redirect } from 'next/navigation'
 
 import { InvoiceBuilder, type LinkedCustomer } from '@/components/invoice/builder'
-import { createClient } from '@/lib/supabase/server'
-import { getPrimaryBusiness, requireUser } from '@/lib/queries'
+import { isUuid } from '@/lib/catalog/ids'
+import type { Db } from '@/lib/db'
+import { getPrimaryBusiness, requireUser, sessionDb } from '@/lib/queries'
 import { emptyLineItem, type InvoiceFormValues } from '@/lib/invoice-form'
 import { pickerAvailability } from '@/lib/catalog/availability'
 import { formatPriceLabel, isSavedCustomerLink } from '@/lib/catalog/picker'
@@ -14,44 +15,48 @@ export const metadata: Metadata = { title: 'Edit invoice' }
 export default async function EditInvoicePage({ params }: PageProps<'/invoices/[id]/edit'>) {
   await requireUser()
   const { id } = await params
+  // Not a uuid → cannot be an invoice; 404 rather than a Postgres cast error.
+  if (!isUuid(id)) notFound()
 
-  const supabase = await createClient()
+  const db = await sessionDb()
   const business = await getPrimaryBusiness()
   if (!business) redirect('/invoices/new')
 
   // RLS means a wrong id returns nothing rather than someone else's invoice, so
   // "not found" and "not yours" collapse into the same 404 — which is also the
   // right thing to tell an attacker probing for ids.
-  const { data: invoice } = await supabase
-    .from('invoices')
-    .select('*')
-    .eq('id', id)
-    .maybeSingle<InvoiceRow>()
+  const invoice = (await db.selectFrom('invoices').selectAll().where('id', '=', id).executeTakeFirst()) as
+    | InvoiceRow
+    | undefined
 
   if (!invoice) notFound()
 
-  const { data: items } = await supabase
-    .from('invoice_items')
-    .select('*')
-    .eq('invoice_id', id)
-    .order('position', { ascending: true })
+  const rows = (await db
+    .selectFrom('invoice_items')
+    .selectAll()
+    .where('invoice_id', '=', id)
+    .orderBy('position', 'asc')
+    .execute()) as InvoiceItemRow[]
 
-  const { data: client } = invoice.client_id
-    ? await supabase.from('clients').select('*').eq('id', invoice.client_id).maybeSingle<ClientRow>()
-    : { data: null }
-
-  const rows = (items ?? []) as InvoiceItemRow[]
+  const client = invoice.client_id
+    ? ((await db.selectFrom('clients').selectAll().where('id', '=', invoice.client_id).executeTakeFirst()) as
+        | ClientRow
+        | undefined)
+    : undefined
 
   // Catalog links on the lines, so a re-save keeps them (price_… refs) and the
   // builder can badge them and flag a currency change.
   const priceIds = [...new Set(rows.map((item) => item.price_id).filter((v): v is string => Boolean(v)))]
   const pricesById = new Map<string, PriceMeta>()
   if (priceIds.length > 0) {
-    const { data: prices } = await supabase
-      .from('prices')
-      .select('*, products(name)')
-      .in('id', priceIds)
-    for (const row of (prices ?? []) as unknown as Array<PriceRow & { products: unknown }>) {
+    const prices = (await db
+      .selectFrom('prices')
+      .leftJoin('products', 'products.id', 'prices.product_id')
+      .selectAll('prices')
+      .select('products.name as product_name')
+      .where('prices.id', 'in', priceIds)
+      .execute()) as unknown as Array<PriceRow & { product_name: string | null }>
+    for (const row of prices) {
       pricesById.set(row.id, {
         publicId: row.public_id,
         currency: row.currency,
@@ -79,7 +84,7 @@ export default async function EditInvoicePage({ params }: PageProps<'/invoices/[
       pickers={invoice.status === 'draft' ? await pickerAvailability() : undefined}
       initialCustomer={
         invoice.status === 'draft' && client
-          ? await savedCustomerLink(supabase, invoice, client, initialValues.client)
+          ? await savedCustomerLink(db, invoice, client, initialValues.client)
           : null
       }
     />
@@ -98,16 +103,17 @@ interface PriceMeta {
  * isSavedCustomerLink for the rule.
  */
 async function savedCustomerLink(
-  supabase: Awaited<ReturnType<typeof createClient>>,
+  db: Db,
   invoice: InvoiceRow,
   client: ClientRow,
   snapshot: InvoiceFormValues['client'],
 ): Promise<LinkedCustomer | null> {
-  const { count } = await supabase
-    .from('invoices')
-    .select('id', { count: 'exact', head: true })
-    .eq('client_id', client.id)
-    .neq('id', invoice.id)
+  const { n: count } = await db
+    .selectFrom('invoices')
+    .select((eb) => eb.fn.countAll<number>().as('n'))
+    .where('client_id', '=', client.id)
+    .where('id', '!=', invoice.id)
+    .executeTakeFirstOrThrow()
 
   const saved = isSavedCustomerLink({
     clientCreatedAt: client.created_at,

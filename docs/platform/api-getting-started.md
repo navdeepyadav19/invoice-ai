@@ -5,17 +5,18 @@ A Postman collection generated from it lives in [`postman/`](postman/).
 
 ## 1. Deployment setup
 
-The API is off until four environment variables exist. Until then every request
-returns `401`, and the web app behaves exactly as before.
+The API is off until `API_KEY_PEPPER` exists alongside the database URL. Until
+then every request returns `401`, and the web app behaves exactly as before.
 
 | Variable | What it is |
 |---|---|
+| `DATABASE_URL` | Neon's pooled connection string. Injected by the Vercel ↔ Neon integration; `vercel env pull .env.local` fetches it locally. |
 | `API_KEY_PEPPER` | Long random string. `api_keys` stores `HMAC(pepper, secret)`, so a read-only leak of that table yields hashes nobody can check. **Changing it invalidates every key.** |
-| `SUPABASE_JWT_PRIVATE_KEY` | ES256 private PEM. `supabase gen signing-key --algorithm ES256`, then import the public half in Supabase → Auth → Signing Keys. |
-| `SUPABASE_JWT_KID` | The key id Supabase shows for that imported key. |
-| `CRON_SECRET` + `SUPABASE_SERVICE_ROLE_KEY` | Webhook delivery only. |
+| `CRON_SECRET` | Webhook delivery only: the bearer token Vercel Cron sends to `/api/cron/webhooks`. |
 
-Migrations `0004`–`0007` must be applied first.
+There is no signing key any more. A verified key resolves to its owner's id,
+and the request's queries run as that owner under RLS (`userDb()` in
+`lib/db/index.ts`). Migrations must be applied first: `pnpm db:migrate`.
 
 ## 2. Create a key
 

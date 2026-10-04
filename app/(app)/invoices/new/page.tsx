@@ -12,9 +12,9 @@ export default async function NewInvoicePage() {
   await requireUser()
   const business = await getPrimaryBusiness()
 
-  // Guests skip the onboarding wizard, so this is where they enter their
-  // business details — inline, once, and only because the invoice can't be
-  // addressed or taxed without them.
+  // Onboarding normally creates the business. This is the fallback if it's
+  // missing anyway: business details inline, once, and only because the
+  // invoice can't be addressed or taxed without them.
   if (!business) {
     return (
       <div className="mx-auto w-full max-w-3xl px-6 py-10">

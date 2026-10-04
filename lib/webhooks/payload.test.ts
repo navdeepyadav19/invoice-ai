@@ -11,7 +11,7 @@ import { currencyDecimals } from '@/lib/currency'
  * TypeScript (serializeInvoice). Nothing runs the SQL in CI, so this reads the
  * migration and checks the two can't drift: same fields, same currency table.
  */
-const SQL = readFileSync(resolve(import.meta.dirname, '../../supabase/migrations/0014_webhook_payload_v2.sql'), 'utf8')
+const SQL = readFileSync(resolve(import.meta.dirname, '../../db/migrations/0014_webhook_payload_v2.sql'), 'utf8')
 
 function sqlInvoiceKeys(): string[] {
   const start = SQL.lastIndexOf('jsonb_build_object(', SQL.indexOf("'id', i.public_id"))

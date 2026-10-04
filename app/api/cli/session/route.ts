@@ -37,16 +37,22 @@ export async function DELETE(request: Request) {
     )
   }
 
-  // Runs as the key's owner (minted token), so the `own api keys` RLS policy is
-  // what permits this update — the same path as Settings → Revoke.
-  const { error } = await ctx.supabase
-    .from('api_keys')
-    .update({ revoked_at: new Date().toISOString() })
-    .eq('id', keyId)
-    .is('revoked_at', null)
+  // Runs as the key's owner (userDb), so the `own api keys` RLS policy is what
+  // permits this update — the same path as Settings → Revoke.
+  let error: unknown = null
+  try {
+    await ctx.db
+      .updateTable('api_keys')
+      .set({ revoked_at: new Date().toISOString() })
+      .where('id', '=', keyId)
+      .where('revoked_at', 'is', null)
+      .execute()
+  } catch (cause) {
+    error = cause
+  }
 
   if (error) {
-    console.error('[cli] revoke failed on %s: %s', requestId, error.message)
+    console.error('[cli] revoke failed on %s', requestId, error)
     return problem({
       status: 500,
       code: 'internal_error',

@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { useActionState } from 'react'
 
-import { requestPasswordResetAction, updatePasswordAction } from '@/lib/actions/auth'
+import { requestPasswordResetAction, resetPasswordAction } from '@/lib/actions/auth'
 import { keptValues, type AuthFormState } from '@/lib/form-state'
 import { useSubmissionKey } from '@/lib/use-submission-key'
 import { FormError, FormSuccess } from '@/components/auth/form-error'
@@ -59,8 +59,8 @@ export function ForgotPasswordForm() {
   )
 }
 
-export function ResetPasswordForm() {
-  const [state, formAction] = useActionState<AuthFormState, FormData>(updatePasswordAction, {})
+export function ResetPasswordForm({ token }: { token: string }) {
+  const [state, formAction] = useActionState<AuthFormState, FormData>(resetPasswordAction, {})
   // Only password fields here, which are never echoed: clearing them after a
   // failure is intentional. The key just keeps the reset behaviour uniform.
   const formKey = useSubmissionKey(state)
@@ -70,11 +70,14 @@ export function ResetPasswordForm() {
       <div className="space-y-1.5">
         <h1 className="text-2xl font-semibold tracking-tight">Choose a new password</h1>
         <p className="text-sm text-muted-foreground">
-          You&rsquo;re signed in from the reset link. Pick something you&rsquo;ll remember.
+          Pick something you&rsquo;ll remember. You&rsquo;ll sign in with it next.
         </p>
       </div>
 
       <form key={formKey} action={formAction} className="space-y-4">
+        {/* The single-use token from the emailed link is the only credential. */}
+        <input type="hidden" name="token" value={token} />
+
         <div className="space-y-2">
           <Label htmlFor="password">New password</Label>
           <Input
@@ -105,6 +108,15 @@ export function ResetPasswordForm() {
           Save password
         </SubmitButton>
       </form>
+
+      {state.error && (
+        <p className="text-center text-sm text-muted-foreground">
+          Link not working?{' '}
+          <Link href="/forgot-password" className="font-medium text-foreground underline underline-offset-4">
+            Send a new one
+          </Link>
+        </p>
+      )}
     </div>
   )
 }

@@ -1,12 +1,8 @@
-import { createClient as createSupabaseClient } from '@supabase/supabase-js'
-
-import { supabasePublishableKey, supabaseUrl } from '@/lib/supabase/env'
-import { createTokenClient } from '@/lib/supabase/for-token'
+import { anonDb, userDb } from '@/lib/db'
+import { apiKeyByPrefix, touchApiKey, type ApiKeyLookup } from '@/lib/db/rpc'
 import { checkValidity, parseApiKey, secretMatches } from '@/lib/auth/api-key'
-import { mintUserToken } from '@/lib/auth/mint'
 import { parseScopes } from '@/lib/auth/scopes'
 import type { AuthContext } from '@/lib/auth/context'
-import type { Database } from '@/lib/database.types'
 
 /**
  * Turn an Authorization header into an AuthContext, or explain why not.
@@ -51,16 +47,16 @@ async function authenticateApiKey(token: string, requestId: string): Promise<Aut
   // half of a guess was right.
   if (!parsed) return { ok: false, detail: 'Invalid API key.' }
 
-  const anon = anonClient()
-
-  const { data, error } = await anon.rpc('api_key_by_prefix', { p_prefix: parsed.prefix })
-
-  if (error) {
-    console.error('[api] key lookup failed on %s: %s', requestId, error.message)
+  // api_key_by_prefix is SECURITY DEFINER and callable as `anon` precisely
+  // because authentication is the one moment when there is no user yet.
+  let row: ApiKeyLookup | null
+  try {
+    row = await apiKeyByPrefix(anonDb(), parsed.prefix)
+  } catch (cause) {
+    console.error('[api] key lookup failed on %s', requestId, cause)
     return { ok: false, detail: 'Could not verify the API key.' }
   }
 
-  const row = Array.isArray(data) ? data[0] : data
   if (!row) return { ok: false, detail: 'Invalid API key.' }
 
   if (!secretMatches(parsed.secret, row.secret_hash)) {
@@ -85,48 +81,21 @@ async function authenticateApiKey(token: string, requestId: string): Promise<Aut
     return { ok: false, detail: 'This API key has no usable scopes.' }
   }
 
-  let accessToken: string
-  try {
-    accessToken = await mintUserToken({ userId: row.owner_id, apiKeyId: row.id })
-  } catch (cause) {
-    // A missing signing key is a deployment error, not a caller error. Say so
-    // in the log; the caller gets a generic failure.
-    console.error('[api] could not mint a token on %s', requestId, cause)
-    return { ok: false, detail: 'API key authentication is not configured on this deployment.' }
-  }
-
   // Fire and forget: recording "this key was used" must never fail the request
   // it describes, and it is not worth a round trip of latency.
-  void anon.rpc('touch_api_key', { p_id: row.id }).then(
-    () => undefined,
-    () => undefined,
-  )
+  void touchApiKey(anonDb(), row.id).catch(() => {})
 
   return {
     ok: true,
     ctx: {
       userId: row.owner_id,
-      supabase: createTokenClient(accessToken),
+      // Every statement runs as this key's owner, so RLS isolates the tenant
+      // exactly as it does for a browser session.
+      db: userDb(row.owner_id),
       via: 'api_key',
       scopes: new Set(scopes),
       apiKeyId: row.id,
       requestId,
-      // Guests can never hold a key: the settings page refuses to create one
-      // for an anonymous user, so anything that authenticates here is real.
-      isAnonymous: false,
     },
   }
-}
-
-/**
- * A client with no user attached.
- *
- * Used only to call `api_key_by_prefix`, which is SECURITY DEFINER precisely
- * because authentication is the one moment when there is no `auth.uid()` yet.
- * Everything after this point runs through the minted user token.
- */
-function anonClient() {
-  return createSupabaseClient<Database>(supabaseUrl(), supabasePublishableKey(), {
-    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
-  })
 }

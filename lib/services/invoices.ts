@@ -1,6 +1,8 @@
 import { requireScope, type AuthContext } from '@/lib/auth/context'
-import { fromPostgres, invalidState, notFound, ServiceError, upstreamFailed } from '@/lib/services/errors'
-import { afterFilter, clampLimit, parseCursor, toPage, type Page } from '@/lib/services/pagination'
+import type { Db } from '@/lib/db'
+import { issueInvoice, replaceInvoiceItems } from '@/lib/db/rpc'
+import { invalidState, notFound, q, ServiceError, upstreamFailed } from '@/lib/services/errors'
+import { afterPosition, clampLimit, parseCursor, toPage, type Page } from '@/lib/services/pagination'
 import * as businesses from '@/lib/services/business'
 import { get as getClient, rowToInput as clientRowToInput } from '@/lib/services/clients'
 import { invoiceSchema, emptyClientInput, type InvoiceInput, type InvoiceWireInput } from '@/lib/validators'
@@ -63,11 +65,11 @@ export async function list(ctx: AuthContext, options: ListInvoicesOptions = {}):
 
   const limit = clampLimit(options.limit)
 
-  let q = ctx.supabase
-    .from('invoices')
-    .select('*')
-    .order('created_at', { ascending: false })
-    .order('id', { ascending: false })
+  let query = ctx.db
+    .selectFrom('invoices')
+    .selectAll()
+    .orderBy('created_at', 'desc')
+    .orderBy('id', 'desc')
     .limit(limit + 1)
 
   // `overdue` is never stored, but it is still a WHERE clause: open and due
@@ -75,22 +77,21 @@ export async function list(ctx: AuthContext, options: ListInvoicesOptions = {}):
   // after the fetch, is what keeps every page full and `next_cursor` honest;
   // narrowing afterwards returned short pages and could stop early.
   if (options.status === 'overdue') {
-    q = q.eq('status', 'open').lt('due_date', todayUtc())
+    query = query.where('status', '=', 'open').where('due_date', '<', todayUtc())
   } else if (options.status) {
-    q = q.eq('status', options.status)
+    query = query.where('status', '=', options.status)
   }
 
-  if (options.clientId) q = q.eq('client_id', options.clientId)
-  if (options.from) q = q.gte('issue_date', options.from)
-  if (options.to) q = q.lte('issue_date', options.to)
+  if (options.clientId) query = query.where('client_id', '=', options.clientId)
+  if (options.from) query = query.where('issue_date', '>=', options.from)
+  if (options.to) query = query.where('issue_date', '<=', options.to)
 
   const after = parseCursor(options.cursor)
-  if (after) q = q.or(afterFilter(after))
+  if (after) query = query.where(afterPosition(after))
 
-  const { data, error } = await q
-  if (error) throw fromPostgres(error)
+  const data = await q(query.execute())
 
-  return toPage((data ?? []) as InvoiceRow[], limit)
+  return toPage(data as InvoiceRow[], limit)
 }
 
 export async function get(ctx: AuthContext, id: string): Promise<InvoiceWithItems> {
@@ -110,20 +111,19 @@ export async function events(
   const { invoice: eventInvoice } = await load(ctx, id)
   const limit = clampLimit(options.limit)
 
-  let q = ctx.supabase
-    .from('invoice_events')
-    .select('*')
-    .eq('invoice_id', eventInvoice.id)
-    .order('created_at', { ascending: false })
-    .order('id', { ascending: false })
+  let query = ctx.db
+    .selectFrom('invoice_events')
+    .selectAll()
+    .where('invoice_id', '=', eventInvoice.id)
+    .orderBy('created_at', 'desc')
+    .orderBy('id', 'desc')
     .limit(limit + 1)
 
   const after = parseCursor(options.cursor)
-  if (after) q = q.or(afterFilter(after))
+  if (after) query = query.where(afterPosition(after))
 
-  const { data, error } = await q
-  if (error) throw fromPostgres(error)
-  return toPage((data ?? []) as InvoiceEventRow[], limit)
+  const data = await q(query.execute())
+  return toPage(data as InvoiceEventRow[], limit)
 }
 
 export async function pdf(ctx: AuthContext, id: string): Promise<{ buffer: Buffer; filename: string }> {
@@ -201,18 +201,18 @@ export async function refsForInvoice(
 
   const pricePublicById = new Map<string, string>()
   if (priceIds.length > 0) {
-    const { data } = await ctx.supabase.from('prices').select('id, public_id').in('id', priceIds)
-    for (const row of (data ?? []) as Array<{ id: string; public_id: string }>) {
-      pricePublicById.set(row.id, row.public_id)
-    }
+    const data = await q(
+      ctx.db.selectFrom('prices').select(['id', 'public_id']).where('id', 'in', priceIds).execute(),
+    )
+    for (const row of data) pricePublicById.set(row.id, row.public_id)
   }
 
   const productPublicById = new Map<string, string>()
   if (productIds.length > 0) {
-    const { data } = await ctx.supabase.from('products').select('id, public_id').in('id', productIds)
-    for (const row of (data ?? []) as Array<{ id: string; public_id: string }>) {
-      productPublicById.set(row.id, row.public_id)
-    }
+    const data = await q(
+      ctx.db.selectFrom('products').select(['id', 'public_id']).where('id', 'in', productIds).execute(),
+    )
+    for (const row of data) productPublicById.set(row.id, row.public_id)
   }
 
   return { customerPublicId, pricePublicById, productPublicById }
@@ -227,10 +227,10 @@ export async function customerMap(
   const map = new Map<string, string>()
   if (unique.length === 0) return map
 
-  const { data } = await ctx.supabase.from('clients').select('id, public_id').in('id', unique)
-  for (const row of (data ?? []) as Array<{ id: string; public_id: string }>) {
-    map.set(row.id, row.public_id)
-  }
+  const data = await q(
+    ctx.db.selectFrom('clients').select(['id', 'public_id']).where('id', 'in', unique).execute(),
+  )
+  for (const row of data) map.set(row.id, row.public_id)
   return map
 }
 
@@ -253,8 +253,9 @@ export async function deleteDraft(ctx: AuthContext, id: string): Promise<void> {
     )
   }
 
-  const { error } = await ctx.supabase.from('invoices').delete().eq('id', invoice.id).eq('status', 'draft')
-  if (error) throw fromPostgres(error)
+  await q(
+    ctx.db.deleteFrom('invoices').where('id', '=', invoice.id).where('status', '=', 'draft').execute(),
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -264,7 +265,7 @@ export async function deleteDraft(ctx: AuthContext, id: string): Promise<void> {
 /**
  * Assign an invoice number.
  *
- * All the real work is in the `issue_invoice` RPC, which takes a row lock so two
+ * All the real work is in the `issue_invoice` SQL function, which takes a row lock so two
  * concurrent calls cannot both claim a number. Calling it twice returns the same
  * number rather than erroring, which is what makes a retry safe even if the
  * Idempotency-Key layer above is bypassed entirely.
@@ -272,15 +273,10 @@ export async function deleteDraft(ctx: AuthContext, id: string): Promise<void> {
 export async function finalize(ctx: AuthContext, id: string): Promise<{ invoiceNumber: string }> {
   requireScope(ctx, 'invoices:finalize')
 
-  // Surfaces a 404 for an unknown id before the RPC turns it into P0002.
+  // Surfaces a 404 for an unknown id before issue_invoice() turns it into P0002.
   const { invoice: draftInvoice } = await load(ctx, id)
 
-  const { data, error } = await ctx.supabase.rpc('issue_invoice', {
-    p_invoice_id: draftInvoice.id,
-    p_meta: actorMeta(ctx),
-  })
-
-  if (error) throw fromPostgres(error)
+  const data = await q(issueInvoice(ctx.db, draftInvoice.id, actorMeta(ctx)))
   if (!data) throw upstreamFailed('Could not assign an invoice number.')
 
   return { invoiceNumber: data }
@@ -355,12 +351,7 @@ export async function send(
  */
 async function finalizeForSend(ctx: AuthContext, id: string): Promise<string> {
   const { invoice: draftInvoice } = await load(ctx, id)
-  const { data, error } = await ctx.supabase.rpc('issue_invoice', {
-    p_invoice_id: draftInvoice.id,
-    p_meta: actorMeta(ctx),
-  })
-
-  if (error) throw fromPostgres(error)
+  const data = await q(issueInvoice(ctx.db, draftInvoice.id, actorMeta(ctx)))
   if (!data) throw upstreamFailed('Could not assign an invoice number.')
 
   return data
@@ -375,16 +366,16 @@ export async function pay(
 
   const { invoice: openInvoice } = await load(ctx, id)
 
-  const { data, error } = await ctx.supabase
-    .from('invoices')
-    .update({ status: 'paid', paid_at: options.paidOn ?? new Date().toISOString() })
-    .eq('id', openInvoice.id)
-    // Not `.neq('draft')`. That let a void invoice be flipped to paid.
-    .eq('status', 'open')
-    .select('*')
-    .maybeSingle()
-
-  if (error) throw fromPostgres(error)
+  const data = await q(
+    ctx.db
+      .updateTable('invoices')
+      .set({ status: 'paid', paid_at: options.paidOn ?? new Date().toISOString() })
+      .where('id', '=', openInvoice.id)
+      // Not `status <> 'draft'`. That let a void invoice be flipped to paid.
+      .where('status', '=', 'open')
+      .returningAll()
+      .executeTakeFirst(),
+  )
 
   // Nothing changed. Work out why, so the caller gets a 404 or a 409 rather
   // than a success that did nothing.
@@ -398,7 +389,7 @@ export async function pay(
     ...(options.reference ? { reference: options.reference } : {}),
   })
 
-  return data as InvoiceRow
+  return data as unknown as InvoiceRow
 }
 
 /**
@@ -420,15 +411,15 @@ export async function voidInvoice(ctx: AuthContext, id: string, options: { reaso
 
   const { invoice: openInvoice } = await load(ctx, id)
 
-  const { data, error } = await ctx.supabase
-    .from('invoices')
-    .update({ status: 'void', cancelled_at: new Date().toISOString(), cancel_reason: reason })
-    .eq('id', openInvoice.id)
-    .eq('status', 'open')
-    .select('*')
-    .maybeSingle()
-
-  if (error) throw fromPostgres(error)
+  const data = await q(
+    ctx.db
+      .updateTable('invoices')
+      .set({ status: 'void', cancelled_at: new Date().toISOString(), cancel_reason: reason })
+      .where('id', '=', openInvoice.id)
+      .where('status', '=', 'open')
+      .returningAll()
+      .executeTakeFirst(),
+  )
 
   if (!data) {
     const { invoice } = await load(ctx, openInvoice.id)
@@ -441,7 +432,7 @@ export async function voidInvoice(ctx: AuthContext, id: string, options: { reaso
 
   await writeEvent(ctx, openInvoice.id, 'voided', { ...actorMeta(ctx), reason })
 
-  return data as InvoiceRow
+  return data as unknown as InvoiceRow
 }
 
 // ---------------------------------------------------------------------------
@@ -451,27 +442,29 @@ export async function voidInvoice(ctx: AuthContext, id: string, options: { reaso
 async function load(ctx: AuthContext, id: string): Promise<InvoiceWithItems> {
   if (!isInvoiceId(id) && !isUuid(id)) throw notFound('Invoice not found.')
 
-  const q = ctx.supabase.from('invoices').select('*')
-  const { data: invoice, error } = isInvoiceId(id)
-    ? await q.eq('public_id', id).maybeSingle()
-    : await q.eq('id', id).maybeSingle()
-
-  if (error) throw fromPostgres(error)
+  const invoice = await q(
+    ctx.db
+      .selectFrom('invoices')
+      .selectAll()
+      .where(isInvoiceId(id) ? 'public_id' : 'id', '=', id)
+      .executeTakeFirst(),
+  )
   if (!invoice) throw notFound('Invoice not found.')
 
-  const row = invoice as InvoiceRow
+  const row = invoice as unknown as InvoiceRow
 
-  const { data: items, error: itemsError } = await ctx.supabase
-    .from('invoice_items')
-    .select('*')
-    .eq('invoice_id', row.id)
-    .order('position', { ascending: true })
-
-  if (itemsError) throw fromPostgres(itemsError)
+  const items = await q(
+    ctx.db
+      .selectFrom('invoice_items')
+      .selectAll()
+      .where('invoice_id', '=', row.id)
+      .orderBy('position', 'asc')
+      .execute(),
+  )
 
   return {
     invoice: row,
-    items: (items ?? []) as InvoiceItemRow[],
+    items: items as InvoiceItemRow[],
     derivedStatus: deriveStatus(row),
   }
 }
@@ -550,32 +543,14 @@ async function writeDraft(
     country: data.client.country ?? data.client.country_code ?? '',
   }
 
-  // Reuse the row this draft already points at, so editing doesn't leave a
-  // trail of near-identical clients behind.
-  let clientId = existingClientId
-
-  if (options.customer) {
-    // A saved customer: link, never overwrite. RLS makes someone else's id a
-    // plain 404. The row is left exactly as the customer list has it.
-    const saved = await getClient(ctx, options.customer)
-    clientId = saved.id
-  } else if (clientId && options.customer !== null) {
-    const { error } = await ctx.supabase.from('clients').update(clientValues).eq('id', clientId)
-    if (error) throw fromPostgres(error)
-  } else {
-    const { data: created, error } = await ctx.supabase
-      .from('clients')
-      .insert({ ...clientValues, public_id: nextCustomerId() })
-      .select('id')
-      .single()
-    if (error) throw fromPostgres(error)
-    clientId = created.id
-  }
+  // A saved customer: link, never overwrite. RLS makes someone else's id a
+  // plain 404. The row is left exactly as the customer list has it. Resolved
+  // before the transaction so the 404 costs no write.
+  const savedClientId = options.customer ? (await getClient(ctx, options.customer)).id : null
 
   const invoiceValues = {
     owner_id: ctx.userId,
     business_id: business.id,
-    client_id: clientId,
     status: 'draft' as const,
     issue_date: data.issue_date,
     due_date: data.due_date || null,
@@ -586,8 +561,9 @@ async function writeDraft(
     reverse_charge: false,
     notes: data.notes ?? null,
     terms: data.terms ?? null,
-    business_snapshot: snapshotBusiness(business),
-    client_snapshot: { ...clientValues, owner_id: undefined },
+    // jsonb: stringified so the column gets exactly this JSON.
+    business_snapshot: JSON.stringify(snapshotBusiness(business)),
+    client_snapshot: JSON.stringify({ ...clientValues, owner_id: undefined }),
     subtotal: paiseToStored(computed.subtotalMinor),
     discount_total: paiseToStored(computed.discountTotalMinor),
     taxable_total: paiseToStored(computed.taxableTotalMinor),
@@ -601,56 +577,78 @@ async function writeDraft(
     amount_in_words: computed.amountInWords,
   }
 
-  if (invoiceId) {
-    const { error } = await ctx.supabase
-      .from('invoices')
-      .update(invoiceValues)
-      .eq('id', invoiceId)
-      .eq('status', 'draft')
-    if (error) throw fromPostgres(error)
-  } else {
-    const { data: created, error } = await ctx.supabase
-      .from('invoices')
-      .insert({ ...invoiceValues, public_id: nextInvoiceId() })
-      .select('id')
-      .single()
-    if (error) throw fromPostgres(error)
-    invoiceId = created.id
-  }
+  const itemValues = computed.lines.map((line, index) => ({
+    position: index,
+    description: line.description,
+    hsn_sac: null,
+    quantity: line.quantity,
+    unit: line.unit,
+    rate: line.rate,
+    discount_percent: line.discountPercent,
+    taxable_value: paiseToStored(line.taxableMinor),
+    tax_rate: line.taxRate,
+    tax_amount: paiseToStored(line.taxMinor),
+    gst_rate: line.taxRate,
+    cgst_amount: 0,
+    sgst_amount: 0,
+    igst_amount: paiseToStored(line.taxMinor),
+    cess_rate: 0,
+    cess_amount: 0,
+    line_total: paiseToStored(line.totalMinor),
+    product_id: resolved[index]?.productId ?? null,
+    price_id: resolved[index]?.priceId ?? null,
+    public_id: nextInvoiceItemId(),
+  }))
 
-  // One transaction: either the new set of items lands or the old one is
-  // untouched. The previous delete-then-insert could leave neither.
-  const { error: itemsError } = await ctx.supabase.rpc('replace_invoice_items', {
-    p_invoice_id: invoiceId!,
-    p_items: computed.lines.map((line, index) => ({
-      position: index,
-      description: line.description,
-      hsn_sac: null,
-      quantity: line.quantity,
-      unit: line.unit,
-      rate: line.rate,
-      discount_percent: line.discountPercent,
-      taxable_value: paiseToStored(line.taxableMinor),
-      tax_rate: line.taxRate,
-      tax_amount: paiseToStored(line.taxMinor),
-      gst_rate: line.taxRate,
-      cgst_amount: 0,
-      sgst_amount: 0,
-      igst_amount: paiseToStored(line.taxMinor),
-      cess_rate: 0,
-      cess_amount: 0,
-      line_total: paiseToStored(line.totalMinor),
-      product_id: resolved[index]?.productId ?? null,
-      price_id: resolved[index]?.priceId ?? null,
-      public_id: nextInvoiceItemId(),
-    })),
-  })
+  // Client row, invoice header and line items land together or not at all —
+  // a failure part-way can no longer leave a header whose totals don't match
+  // its items, or an orphaned client row.
+  invoiceId = await q(
+    atomically(ctx.db, async (trx) => {
+      // Reuse the row this draft already points at, so editing doesn't leave a
+      // trail of near-identical clients behind.
+      let clientId = savedClientId ?? existingClientId
 
-  if (itemsError) throw fromPostgres(itemsError)
+      if (!savedClientId) {
+        if (clientId && options.customer !== null) {
+          await trx.updateTable('clients').set(clientValues).where('id', '=', clientId).execute()
+        } else {
+          const created = await trx
+            .insertInto('clients')
+            .values({ ...clientValues, public_id: nextCustomerId() })
+            .returning('id')
+            .executeTakeFirstOrThrow()
+          clientId = created.id
+        }
+      }
 
-  await writeEvent(ctx, invoiceId!, id ? 'updated' : 'created', actorMeta(ctx))
+      let targetId = invoiceId
+      if (targetId) {
+        await trx
+          .updateTable('invoices')
+          .set({ ...invoiceValues, client_id: clientId })
+          .where('id', '=', targetId)
+          .where('status', '=', 'draft')
+          .execute()
+      } else {
+        const created = await trx
+          .insertInto('invoices')
+          .values({ ...invoiceValues, client_id: clientId, public_id: nextInvoiceId() })
+          .returning('id')
+          .executeTakeFirstOrThrow()
+        targetId = created.id
+      }
 
-  return load(ctx, invoiceId!)
+      // replace_invoice_items swaps the whole set in one statement, so even on
+      // its own either the new items land or the old ones are untouched.
+      await replaceInvoiceItems(trx, targetId, itemValues)
+      return targetId
+    }),
+  )
+
+  await writeEvent(ctx, invoiceId, id ? 'updated' : 'created', actorMeta(ctx))
+
+  return load(ctx, invoiceId)
 }
 
 /**
@@ -694,12 +692,13 @@ export async function findItem(
   requireScope(ctx, 'invoices:read')
   if (!isInvoiceItemId(id) && !isUuid(id)) return null
 
-  const q = ctx.supabase.from('invoice_items').select('*')
-  const { data, error } = isInvoiceItemId(id)
-    ? await q.eq('public_id', id).maybeSingle()
-    : await q.eq('id', id).maybeSingle()
-
-  if (error) throw fromPostgres(error)
+  const data = await q(
+    ctx.db
+      .selectFrom('invoice_items')
+      .selectAll()
+      .where(isInvoiceItemId(id) ? 'public_id' : 'id', '=', id)
+      .executeTakeFirst(),
+  )
   if (!data) return null
 
   const item = data as InvoiceItemRow
@@ -780,22 +779,19 @@ async function draftInputFor(
 ): Promise<InvoiceInput> {
   let client: InvoiceInput['client'] = emptyClientInput()
   if (invoice.client_id) {
-    const { data } = await ctx.supabase
-      .from('clients')
-      .select('*')
-      .eq('id', invoice.client_id)
-      .maybeSingle()
-    const row = data as ClientRow | null
-    if (row) client = clientRowToInput(row)
+    const row = await q(
+      ctx.db.selectFrom('clients').selectAll().where('id', '=', invoice.client_id).executeTakeFirst(),
+    )
+    if (row) client = clientRowToInput(row as ClientRow)
   }
 
   const priceIds = [...new Set(items.map((i) => i.price_id).filter((v): v is string => Boolean(v)))]
   const priceRefById = new Map<string, string>()
   if (priceIds.length > 0) {
-    const { data } = await ctx.supabase.from('prices').select('id, public_id').in('id', priceIds)
-    for (const row of (data ?? []) as Array<{ id: string; public_id: string }>) {
-      priceRefById.set(row.id, row.public_id)
-    }
+    const data = await q(
+      ctx.db.selectFrom('prices').select(['id', 'public_id']).where('id', 'in', priceIds).execute(),
+    )
+    for (const row of data) priceRefById.set(row.id, row.public_id)
   }
 
   return {
@@ -934,6 +930,14 @@ function actorMeta(ctx: AuthContext): Record<string, string> {
   }
 }
 
+/**
+ * Run `fn` in a transaction, or inside the caller's if `db` already is one
+ * (Kysely refuses to nest `transaction()`).
+ */
+function atomically<T>(db: Db, fn: (trx: Db) => Promise<T>): Promise<T> {
+  return db.isTransaction ? fn(db) : db.transaction().execute(fn)
+}
+
 async function writeEvent(
   ctx: AuthContext,
   invoiceId: string,
@@ -943,12 +947,13 @@ async function writeEvent(
   // An event that fails to write must not fail the operation it describes —
   // the invoice is already issued. Webhooks hang off this table, so a dropped
   // row means a missed delivery, which is why it is logged rather than ignored.
-  const { error } = await ctx.supabase
-    .from('invoice_events')
-    .insert({ invoice_id: invoiceId, type, meta: meta as never })
-
-  if (error) {
-    console.error('[invoice_events] failed to record %s for %s: %s', type, invoiceId, error.message)
+  try {
+    await ctx.db
+      .insertInto('invoice_events')
+      .values({ invoice_id: invoiceId, type, meta: JSON.stringify(meta) })
+      .execute()
+  } catch (error) {
+    console.error('[invoice_events] failed to record %s for %s: %s', type, invoiceId, (error as Error).message)
   }
 }
 

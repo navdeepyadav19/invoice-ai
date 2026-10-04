@@ -41,7 +41,7 @@ sequenceDiagram
     participant SDK as @invoice-ai/sdk
     participant API as REST API<br/>/api/v1 + withApi
     participant Svc as Service layer<br/>lib/services/*
-    participant DB as Supabase Postgres<br/>(RLS)
+    participant DB as Neon Postgres<br/>(RLS)
     participant Mail as Resend
 
     User->>Claude: "Invoice Acme ₹25,000 and email it"
@@ -49,7 +49,7 @@ sequenceDiagram
     MCP->>SDK: clients.list({query})
     SDK->>API: GET /api/v1/clients (Bearer token)
     API->>Svc: clients.list(ctx)
-    Svc->>DB: select … (auth.uid() = owner)
+    Svc->>DB: select … (app.uid() = owner)
     Claude->>MCP: create_invoice_draft(...)
     Claude->>MCP: issue_invoice(id) → preview
     Claude-->>User: "This assigns a permanent GST number. Confirm?"
@@ -105,8 +105,8 @@ flowchart LR
 
 | Term | Plain meaning in this project |
 |---|---|
-| **RLS** (Row Level Security) | Postgres rules like `owner_id = auth.uid()` on every table, so a query can only ever see its owner's rows |
-| **JWT** | A signed token saying "this is user X, valid until Y". Supabase reads it to fill in `auth.uid()` |
+| **RLS** (Row Level Security) | Postgres rules like `owner_id = app.uid()` on every table, so a query can only ever see its owner's rows |
+| **Scoped connection** | Every query runs inside a transaction that first does `SET LOCAL ROLE authenticated` and pins the user id, which `app.uid()` reads (`lib/db/scoped.ts`) |
 | **Service layer** | Plain functions (`invoices.issue(ctx, id)`) that hold the business rules, called by every interface |
 | **AuthContext** | The "who is asking" object passed into every service function: user, how they authenticated, allowed scopes |
 | **Scope** | A permission slice such as `invoices:send`. A credential only gets the scopes it was granted |
@@ -131,8 +131,7 @@ flowchart LR
 
 These came up during planning and are **not yet confirmed**. Each doc repeats the ones relevant to it.
 
-- **Supabase signing keys:** does Supabase accept JWTs signed by an imported key while it's still on *standby*, or must it be rotated to active first? Once active, it signs every session, which makes it the root secret. (01)
-- **Supabase OAuth 2.1 server:** check its current release status, the exact consent-page APIs, and whether loopback redirects accept any port (RFC 8252). (01, 03, 04)
+- **OAuth 2.1 authorization server:** Supabase's built-in one went away with the move to Neon. Check whether Neon's managed Better Auth exposes an OAuth-provider plugin, or plan a small server of our own; confirm loopback redirects accept any port (RFC 8252). (01, 03, 04)
 - **Vercel plan tier:** per-minute Cron (webhook retries) and the Rate Limiting SDK. (01)
 - **GST Rule 46:** invoice numbers are at most 16 characters, and the current format `PREFIX/YY-YY/0001` leaves at most 5 for the prefix. Also decide whether the counter resets each financial year. (00)
 

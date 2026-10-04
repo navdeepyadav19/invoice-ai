@@ -1,19 +1,18 @@
 import 'server-only'
 
-import type { SupabaseClient } from '@supabase/supabase-js'
-
 import { generateApiKey } from '@/lib/auth/api-key'
 import type { Scope } from '@/lib/auth/scopes'
-import type { Database } from '@/lib/database.types'
+import type { Db } from '@/lib/db'
 
 /**
  * The one way an API key row comes into existence.
  *
  * Shared by the Settings → API keys form (createApiKeyAction) and the CLI device
- * flow (/api/cli/token). Both pass a Supabase client that is authenticated AS
- * the owner — a cookie session in the first case, a minted user token in the
- * second — so the insert goes through the same `own api keys` RLS policy either
- * way. There is no service-role path that could write a key for someone else.
+ * flow (/api/cli/token). Both pass a database handle scoped AS the owner
+ * (userDb) — from the cookie session in the first case, from the approved
+ * device code's owner in the second — so the insert goes through the same
+ * `own api keys` RLS policy either way. There is no owner-connection path that
+ * could write a key for someone else.
  */
 
 export interface CreateApiKeyInput {
@@ -34,26 +33,25 @@ export type CreateApiKeyResult =
     }
   | { ok: false; error: string }
 
-export async function createApiKeyForOwner(
-  supabase: SupabaseClient<Database>,
-  input: CreateApiKeyInput,
-): Promise<CreateApiKeyResult> {
+export async function createApiKeyForOwner(db: Db, input: CreateApiKeyInput): Promise<CreateApiKeyResult> {
   const key = generateApiKey()
 
-  const { data, error } = await supabase
-    .from('api_keys')
-    .insert({
-      owner_id: input.ownerId,
-      name: input.name,
-      prefix: key.prefix,
-      secret_hash: key.secretHash,
-      scopes: [...input.scopes],
-      expires_at: input.expiresAt,
-    })
-    .select('id')
-    .single()
+  try {
+    const row = await db
+      .insertInto('api_keys')
+      .values({
+        owner_id: input.ownerId,
+        name: input.name,
+        prefix: key.prefix,
+        secret_hash: key.secretHash,
+        scopes: [...input.scopes],
+        expires_at: input.expiresAt,
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
 
-  if (error) return { ok: false, error: error.message }
-
-  return { ok: true, id: data.id, prefix: key.prefix, plaintext: key.plaintext }
+    return { ok: true, id: row.id, prefix: key.prefix, plaintext: key.plaintext }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : 'Could not create the API key.' }
+  }
 }

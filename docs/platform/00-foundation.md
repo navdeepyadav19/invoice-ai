@@ -2,6 +2,8 @@
 
 > **Depends on:** nothing. This is the first module.
 > **Needed by:** everything. [01-api.md](01-api.md) wraps these functions in HTTP; [02-sdk.md](02-sdk.md), [03-cli.md](03-cli.md) and [04-mcp.md](04-mcp.md) reach them through the API.
+>
+> **Backend note:** this module was planned on Supabase and has since moved to **Neon** (Postgres + Neon Auth). The design is unchanged; how a request becomes "a database connection that can only see one tenant" is different, and is described below as it works now. [../neon-overview.md](../neon-overview.md) has the full picture.
 
 ## 1. What this layer is, and what students learn
 
@@ -24,10 +26,10 @@ All business logic lives in Next.js **server actions** under `lib/actions/`. The
 |---|---|---|
 | `requireUser()` **redirects** to `/login` when signed out | `lib/queries.ts` | An API caller needs a `401` JSON error, not an HTML redirect |
 | Queries are wrapped in React `cache()` | `lib/queries.ts` (`getCurrentUser`, `getProfile`, `getPrimaryBusiness`) | Only meaningful inside a React server render |
-| The Supabase client is built from **browser cookies** | `lib/supabase/server.ts` | API keys and OAuth tokens arrive in an `Authorization` header |
+| The database handle comes from the **browser session** | `lib/queries.ts` (`sessionDb`, via `getAuth().getSession()`) | API keys and OAuth tokens arrive in an `Authorization` header |
 | Form actions take `FormData` | `lib/actions/business.ts` (`persistBusiness`, `persistPayment`, `persistNumbering`), `lib/actions/onboarding.ts` | Programs send JSON |
 | `revalidatePath()` after writes | `lib/actions/invoice.ts`, `lib/actions/send.ts` | A page-cache concern, irrelevant to an API |
-| The proxy redirects every non-public path | `lib/supabase/proxy.ts` (`PUBLIC_PREFIXES` = `/i/`, `/api/public/`, …) | `/api/v1/*` would be redirected before reaching a handler |
+| The proxy redirects every non-public path | `proxy.ts` (`PUBLIC_PREFIXES` = `/i/`, `/api/public/`, …) | `/api/v1/*` would be redirected before reaching a handler |
 
 **What's already good and reusable as-is:**
 - `lib/validators.ts`: zod schemas (`invoiceSchema`, `lineItemSchema`, …)
@@ -35,7 +37,7 @@ All business logic lives in Next.js **server actions** under `lib/actions/`. The
 - `lib/invoice-load.ts#viewFromRows`: turns rows into the view shared by web, public page and PDF
 - `lib/invoice-status.ts#deriveStatus`: overdue is calculated, not stored
 - `lib/pdf.tsx#renderInvoicePdf` and `lib/email.tsx#sendInvoiceEmail`
-- **RLS on every table** (`owner_id = auth.uid()`, `supabase/migrations/0001_init.sql`), so tenant isolation is already enforced by the database
+- **RLS on every table** (`owner_id = app.uid()`, `db/migrations/0001_init.sql`), so tenant isolation is already enforced by the database
 
 **What's missing entirely:**
 - cancelling an invoice (`cancelled` exists in the enum but is never written)
@@ -59,7 +61,7 @@ export type AuthVia = 'session' | 'api_key' | 'oauth'
 
 export type AuthContext = {
   userId: string
-  supabase: SupabaseClient<Database>   // already authenticated AS this user, so RLS applies
+  db: Db                               // runs every statement AS this user, so RLS applies
   via: AuthVia
   scopes: ReadonlySet<Scope>           // session = all scopes; keys/OAuth = what was granted
   apiKeyId?: string
@@ -73,14 +75,26 @@ export function requireScope(ctx: AuthContext, scope: Scope): void  // throws Se
 
 [01-api.md](01-api.md) adds `contextFromApiKey()` and `contextFromOAuth()`. Every service function accepts the context without caring which one built it.
 
-### 3.2 A Supabase client from a token (new: `lib/supabase/for-token.ts`)
+### 3.2 A database handle for one user (`lib/db/index.ts`, `lib/db/scoped.ts`)
 
 ```ts
-export function createTokenClient(accessToken: string): SupabaseClient<Database>
-// publishable key as `apikey`, `Authorization: Bearer <accessToken>`, no cookies, no session persistence
+export function userDb(userId: string): Kysely<DB>   // every statement runs as `authenticated`, app.uid() = userId
+export function anonDb(): Kysely<DB>                 // runs as `anon`: no tables, only the public token-taking functions
 ```
 
-This is what lets an API key or OAuth token run under the **same RLS policies** as a browser session. The Supabase secret (service_role) key is **never** used for tenant data, because it bypasses RLS.
+The app connects to Postgres directly (a `pg` Pool plus Kysely, server-only). The login role it connects with **bypasses RLS**, so the scoping can't be a helper callers remember to use. It lives in the driver: every statement is sent as
+
+```sql
+begin;
+set local role authenticated;
+select set_config('app.user_id', '<uuid>', true);
+<the query>
+commit;
+```
+
+RLS policies read the id back through `app.uid()`. Both settings are transaction-local, so they vanish at `commit` and the next request to borrow that pooled connection inherits nothing.
+
+This is what lets a browser session, an API key or an OAuth token run under the **same RLS policies**: each one only has to produce a user id. The owner connection (`systemDb()` in `lib/db/system.ts`, no role switch) is **never** used for tenant data. An ESLint rule lets only the webhook cron import it.
 
 ### 3.3 One error type (new: `lib/services/errors.ts`)
 
@@ -161,7 +175,7 @@ All six are real on `main` today. Each one becomes more dangerous once programs 
 
 Then explain why a transaction with a row lock makes this impossible.
 
-### 3.7 Migration `supabase/migrations/0004_foundation.sql` (new)
+### 3.7 Migration `db/migrations/0004_foundation.sql` (new)
 
 **Atomic issue** (sketch; final SQL written at build time):
 
@@ -179,7 +193,7 @@ begin
   -- Lock this invoice row: a second concurrent call waits here instead of racing.
   select * into v_invoice
     from public.invoices
-   where id = p_invoice_id and owner_id = auth.uid()
+   where id = p_invoice_id and owner_id = app.uid()
      for update;
 
   if not found then
@@ -211,8 +225,8 @@ revoke execute on function public.issue_invoice(uuid) from public, anon;
 grant  execute on function public.issue_invoice(uuid) to authenticated;
 ```
 
-- `claim_invoice_number` already checks `owner_id = auth.uid()` and increments under a row lock. Calling it inside `issue_invoice` means "claim" and "save" either **both** happen or **neither** does.
-- The `revoke … from anon` line follows the lesson already recorded in `0002_lock_down_functions.sql`: Supabase's default privileges would otherwise grant new functions to `anon`.
+- `claim_invoice_number` already checks `owner_id = app.uid()` and increments under a row lock. Calling it inside `issue_invoice` means "claim" and "save" either **both** happen or **neither** does.
+- The `revoke … from public` / `from anon` lines follow the rule recorded in `0002_lock_down_functions.sql`: privileges name the roles explicitly. The lesson came from Supabase, which granted every new function to `anon` by default. Neon has no such default, but plain Postgres still grants `execute` to `public`, so a function nobody revoked is callable by any role, `anon` included.
 
 **Also in 0004:**
 
@@ -230,7 +244,7 @@ grant  execute on function public.issue_invoice(uuid) to authenticated;
 Before and after for the smallest example:
 
 ```ts
-// BEFORE: lib/actions/send.ts (today, simplified)
+// BEFORE: lib/actions/send.ts (Supabase era, simplified)
 export async function markPaidAction(invoiceId: string) {
   const user = await requireUser()
   const supabase = await createClient()
@@ -258,9 +272,9 @@ export async function markPaidAction(invoiceId: string) {
 ### 3.9 Testing
 
 - **Unit (Vitest, `lib/**/*.test.ts`, already in CI):**
-  - service functions with a mocked `AuthContext.supabase`
+  - service functions with a fake `AuthContext.db` (`lib/db/testing.ts` compiles real Postgres SQL and records it instead of sending it, so a test can assert on the query)
   - state-machine rules: can't update an issued invoice, can't mark a draft paid, can't cancel a paid invoice
-- **Database (against local Supabase, `supabase start`):**
+- **Database (against a throwaway Neon branch, see [../neon-overview.md](../neon-overview.md)):**
   - two concurrent `issue_invoice` calls produce **one** number and `next_invoice_number` advances by **one**
   - `markPaid` on a cancelled invoice fails
   - `replace_invoice_items` failing mid-way leaves the old items intact
@@ -271,18 +285,18 @@ export async function markPaidAction(invoiceId: string) {
 | Phase | Scope | Acceptance criteria | Teaching checkpoint |
 |---|---|---|---|
 | **F1: Migration + bug fixes** | `0004_foundation.sql`; fix bugs #1–#5 inside the *existing* actions; #6 lands via PR #1 | Concurrent-issue test gives one number. Mark-paid on cancelled or unknown id returns an error and writes no event. All existing Vitest tests pass | Students reproduce the race *before* the fix, then run the same script after |
-| **F2: Services + actions rewired** | `lib/auth/context.ts`, `lib/supabase/for-token.ts`, `lib/services/{errors,invoices,clients,business}.ts`; every action becomes an adapter | `grep -r "supabase.from" lib/actions` returns nothing. Smoke test and UI flows unchanged | Draw the kitchen/waiters diagram from [README.md](README.md) on the whiteboard, with real file names |
+| **F2: Services + actions rewired** | `lib/auth/context.ts`, `lib/db/scoped.ts`, `lib/services/{errors,invoices,clients,business}.ts`; every action becomes an adapter | `lib/actions/invoice.ts` and `lib/actions/send.ts` import nothing from `@/lib/db`. Smoke test and UI flows unchanged | Draw the kitchen/waiters diagram from [README.md](README.md) on the whiteboard, with real file names |
 | **F3: Missing operations** | `cancel`, `deleteDraft`, `list`, `events`, client CRUD; add Cancel and Delete-draft buttons to the invoice page; dashboard uses `invoices.list` | A cancelled invoice keeps its number, shows "Cancelled" on the public link, and can't be paid. The dashboard lists via the service | "Why can't we just delete an issued invoice?" (GST numbering) |
 
 ## 5. Security and abuse
 
-- **RLS remains the only tenant boundary.** Services always use a user-scoped Supabase client (session cookie, minted JWT or OAuth token); the secret key is never used for tenant data.
+- **RLS remains the only tenant boundary.** Services always use `ctx.db`, a `userDb()` handle (built from a session, an API key's owner, or later an OAuth token); the owner connection is never used for tenant data.
 - **SECURITY DEFINER functions** (`issue_invoice`, `replace_invoice_items`) must:
-  - re-check `owner_id = auth.uid()`
+  - re-check `owner_id = app.uid()`
   - pin `search_path = public`
   - revoke `execute` from `anon`, as `0002_lock_down_functions.sql` already does
 - **`requireScope` is called inside services, not only at the API edge**, so a future caller that forgets the check still can't exceed its scopes.
-- **Anonymous (guest) sessions** keep working in the web UI via `contextFromSession`, but the credential features in 01 refuse anonymous users.
+- **There are no anonymous (guest) sessions.** Guest mode existed on Supabase and was removed in the move to Neon, whose managed auth has no anonymous users. Every `AuthContext` belongs to a real account.
 - **Events carry `meta.actor`**, which gives an audit trail for "an AI assistant cancelled this invoice" before the full API audit log exists.
 
 ## 6. Open decisions

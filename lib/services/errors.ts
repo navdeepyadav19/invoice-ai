@@ -75,6 +75,29 @@ export function upstreamFailed(message: string): ServiceError {
 }
 
 /**
+ * Run a query and turn any database failure into a ServiceError.
+ *
+ * Kysely throws on failure rather than returning `{ data, error }`. This keeps call sites
+ * as short as they were — `await q(ctx.db.selectFrom(...).execute())` — and
+ * keeps the SQLSTATE mapping below the single place codes become statuses.
+ */
+export async function q<T>(query: Promise<T>): Promise<T> {
+  try {
+    return await query
+  } catch (error) {
+    throw toServiceError(error)
+  }
+}
+
+export function toServiceError(error: unknown): ServiceError {
+  if (error instanceof ServiceError) return error
+  // Kysely's executeTakeFirstOrThrow() — "no such row", which for a tenant
+  // includes "someone else's row" (RLS hid it).
+  if (error instanceof Error && error.name === 'NoResultError') return notFound()
+  return fromPostgres(error as { code?: string; message?: string })
+}
+
+/**
  * Postgres errors raised by our SECURITY DEFINER functions.
  *
  * issue_invoice() and replace_invoice_items() raise bare SQLSTATEs rather than

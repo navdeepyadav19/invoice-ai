@@ -33,7 +33,7 @@ export function LineItems({
   defaultTaxRate?: number
   /** The invoice currency — catalog prices in any other currency can't be added. */
   currency: string
-  /** Show "Add from catalog". Off for guests and when there are no active prices. */
+  /** Show "Add from catalog". Off when there are no active prices. */
   catalogEnabled?: boolean
 }) {
   const { control, register, watch, setValue, getValues } = useFormContext<InvoiceFormValues>()

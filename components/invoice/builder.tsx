@@ -65,7 +65,7 @@ export function InvoiceBuilder({
   status?: InvoiceStatus
   /** False when OPENAI_API_KEY is unset, so the prompt box is hidden entirely. */
   aiEnabled?: boolean
-  /** Which search pickers to offer. Hidden for guests and when there's nothing saved. */
+  /** Which search pickers to offer. Hidden when there's nothing saved. */
   pickers?: { customers: boolean; prices: boolean }
   /** Set when a stored draft bills a saved customer (see isSavedCustomerLink). */
   initialCustomer?: LinkedCustomer | null

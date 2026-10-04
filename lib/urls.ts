@@ -1,4 +1,4 @@
-import { siteUrl } from '@/lib/supabase/env'
+import { siteUrl } from '@/lib/env'
 
 /**
  * The public link a client opens. Lives here rather than in a 'use server'
