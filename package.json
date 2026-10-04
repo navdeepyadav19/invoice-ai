@@ -13,6 +13,7 @@
     "db:migrate": "tsx scripts/migrate.ts",
     "db:types": "kysely-codegen --config-file .kysely-codegenrc.json --env-file .env.local --url 'env(DATABASE_URL_UNPOOLED)'",
     "postman:gen": "tsx scripts/generate-postman.ts",
+    "postman:sync": "tsx scripts/sync-postman.ts",
     "openapi:gen": "tsx scripts/generate-openapi.ts",
     "api:key": "tsx scripts/create-api-key.ts"
   },
