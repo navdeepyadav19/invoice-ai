@@ -2,7 +2,10 @@
  * Publish docs/platform/postman/* to the public Postman workspace that the
  * docs' "Run in Postman" button points at. See lib/postman/sync.ts.
  *
- *   POSTMAN_API_KEY=… POSTMAN_WORKSPACE_ID=… pnpm postman:sync
+ *   POSTMAN_API_KEY=… pnpm postman:sync
+ *
+ * The workspace is found by name (POSTMAN_WORKSPACE_NAME, default
+ * "Invoice-AI API"), or set POSTMAN_WORKSPACE_ID to skip the lookup.
  *
  * Runs in CI (.github/workflows/postman-sync.yml) after every change to the
  * generated files on main. Run `pnpm postman:gen` first if the API changed.
@@ -20,10 +23,12 @@ async function main() {
   const result = await syncToPostman({
     apiKey: process.env.POSTMAN_API_KEY ?? '',
     workspaceId: process.env.POSTMAN_WORKSPACE_ID ?? '',
+    workspaceName: process.env.POSTMAN_WORKSPACE_NAME || 'Invoice-AI API',
     collection: read('invoice-ai.postman_collection.json'),
     environment: read('invoice-ai.postman_environment.json'),
   })
 
+  console.log(`workspace   ${result.workspaceId}`)
   console.log(`collection  ${result.collection.action}  ${result.collection.uid}`)
   console.log(`environment ${result.environment.action}  ${result.environment.uid}`)
 }
