@@ -187,6 +187,118 @@
     {
       "source": "/sdks/versioning",
       "destination": "/sdks/node#versioning"
+    },
+    {
+      "source": "/account-setup",
+      "destination": "/quickstart"
+    },
+    {
+      "source": "/concepts/invoices",
+      "destination": "/invoice-lifecycle"
+    },
+    {
+      "source": "/concepts/customers",
+      "destination": "/api-reference/customers/list-customers"
+    },
+    {
+      "source": "/concepts/products-and-prices",
+      "destination": "/api-reference/products/list-products"
+    },
+    {
+      "source": "/features/ai-invoice-creation",
+      "destination": "/introduction"
+    },
+    {
+      "source": "/features/invoice-lifecycle",
+      "destination": "/invoice-lifecycle"
+    },
+    {
+      "source": "/features/pdf-and-sharing",
+      "destination": "/api-reference/invoices/download-an-invoice-pdf"
+    },
+    {
+      "source": "/features/emailing-invoices",
+      "destination": "/api-reference/invoices/send-an-invoice"
+    },
+    {
+      "source": "/settings/business-profile",
+      "destination": "/api-reference/business/retrieve-the-business-profile"
+    },
+    {
+      "source": "/settings/api-keys",
+      "destination": "/authentication"
+    },
+    {
+      "source": "/settings/webhooks",
+      "destination": "/webhooks"
+    },
+    {
+      "source": "/api-reference/overview",
+      "destination": "/api-reference/introduction"
+    },
+    {
+      "source": "/api-reference/authentication",
+      "destination": "/authentication"
+    },
+    {
+      "source": "/api-reference/errors",
+      "destination": "/errors"
+    },
+    {
+      "source": "/api-reference/pagination",
+      "destination": "/pagination"
+    },
+    {
+      "source": "/api-reference/invoices/list",
+      "destination": "/api-reference/invoices/list-invoices"
+    },
+    {
+      "source": "/api-reference/invoices/create",
+      "destination": "/api-reference/invoices/create-a-draft-invoice"
+    },
+    {
+      "source": "/api-reference/invoices/retrieve",
+      "destination": "/api-reference/invoices/retrieve-an-invoice"
+    },
+    {
+      "source": "/api-reference/invoices/update",
+      "destination": "/api-reference/invoices/update-a-draft-invoice"
+    },
+    {
+      "source": "/api-reference/invoices/finalize",
+      "destination": "/api-reference/invoices/finalize-an-invoice"
+    },
+    {
+      "source": "/api-reference/invoices/pay",
+      "destination": "/api-reference/invoices/mark-an-invoice-paid"
+    },
+    {
+      "source": "/api-reference/invoices/void",
+      "destination": "/api-reference/invoices/void-an-invoice"
+    },
+    {
+      "source": "/api-reference/customers/overview",
+      "destination": "/api-reference/customers/list-customers"
+    },
+    {
+      "source": "/api-reference/products/overview",
+      "destination": "/api-reference/products/list-products"
+    },
+    {
+      "source": "/api-reference/prices/overview",
+      "destination": "/api-reference/prices/list-prices"
+    },
+    {
+      "source": "/api-reference/invoice-items/overview",
+      "destination": "/api-reference/invoice-items/list-invoice-items"
+    },
+    {
+      "source": "/api-reference/webhooks/overview",
+      "destination": "/webhooks"
+    },
+    {
+      "source": "/api-reference/webhooks/events",
+      "destination": "/webhooks"
     }
   ],
   "seo": {
