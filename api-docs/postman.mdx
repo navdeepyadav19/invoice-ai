@@ -1,32 +1,35 @@
 ---
 title: "Postman collection"
-description: "Run every endpoint end to end with the generated Postman collection."
+description: "Fork the Invoice-AI collection into Postman in one click."
 icon: "paper-plane"
 ---
 
-The repository has a Postman collection and environment, generated from the OpenAPI document. Run the collection in order and it takes an invoice through its whole lifecycle.
+Every endpoint, ready to run in Postman. The collection is generated from the OpenAPI document and republished on every API change, so it always matches the live API.
 
-| File | Contents |
-|---|---|
-| [`invoice-ai.postman_collection.json`](https://github.com/navdeepyadav19/invoice-ai/blob/main/docs/platform/postman/invoice-ai.postman_collection.json) | Every request, in run order, with tests |
-| [`invoice-ai.postman_environment.json`](https://github.com/navdeepyadav19/invoice-ai/blob/main/docs/platform/postman/invoice-ai.postman_environment.json) | `base_url` and `api_key` |
-
-## Run it
+[![Run in Postman](https://run.pstmn.io/button.svg)](https://app.getpostman.com/run-collection/17901267-6ef56bb0-3672-47c3-ae48-0a19ee64fdff?action=collection%2Ffork&source=rip_markdown&collection-url=entityId%3D17901267-6ef56bb0-3672-47c3-ae48-0a19ee64fdff%26entityType%3Dcollection%26workspaceId%3D17d25cfe-74bb-4f7d-bece-ab5d20ef7d32#?env%5BInvoice-AI%20%E2%80%94%20production%5D=W3sia2V5IjoiYmFzZV91cmwiLCJ2YWx1ZSI6Imh0dHBzOi8vaW52b2ljZS5ob3Jpem9ucGF5LmNvL2FwaS92MSIsImVuYWJsZWQiOnRydWUsInR5cGUiOiJkZWZhdWx0In0seyJrZXkiOiJhcGlfa2V5IiwidmFsdWUiOiIiLCJlbmFibGVkIjp0cnVlLCJ0eXBlIjoic2VjcmV0In1d)
 
 <Steps>
-  <Step title="Create a key">
-    In [Settings → API keys](https://invoice.horizonpay.co/settings/api-keys), create a key with every scope and a short expiry.
+  <Step title="Fork it">
+    Click **Run in Postman** and fork the **Invoice-AI API v1** collection and the **Invoice-AI — production** environment into your workspace.
   </Step>
-  <Step title="Import both files">
-    In Postman, choose **Import** and add the collection and the environment.
-  </Step>
-  <Step title="Set the key">
-    Select the **Invoice-AI — production** environment and set `api_key`.
+  <Step title="Add your key">
+    Create a key in [Settings → API keys](https://invoice.horizonpay.co/settings/api-keys) with every scope and a short expiry. In the **Invoice-AI — production** environment, paste it into `api_key`.
   </Step>
   <Step title="Run the collection">
     Open the **Collection Runner** and run the whole collection in order. Each request uses ids saved by the ones before it.
   </Step>
 </Steps>
+
+You can also browse it in the [public workspace](https://www.postman.com/gold-meadow-6657-1/invoice-ai-api/overview) without forking.
+
+## Without a Postman account
+
+Import the files from the repository: in Postman, choose **Import → Link** and paste each URL.
+
+| File | Contents |
+|---|---|
+| [`invoice-ai.postman_collection.json`](https://raw.githubusercontent.com/navdeepyadav19/invoice-ai/main/docs/platform/postman/invoice-ai.postman_collection.json) | Every request, in run order, with tests |
+| [`invoice-ai.postman_environment.json`](https://raw.githubusercontent.com/navdeepyadav19/invoice-ai/main/docs/platform/postman/invoice-ai.postman_environment.json) | `base_url` and `api_key` |
 
 Or use [Newman](https://github.com/postmanlabs/newman):
 
@@ -40,4 +43,4 @@ newman run invoice-ai.postman_collection.json \
   A run creates real, numbered invoices in your account and sends one real email to `delivered@resend.dev`. That email counts toward your [send limits](/rate-limits), and your account email must be verified.
 </Warning>
 
-To regenerate the collection after an API change, run `pnpm postman:gen` from the repository root.
+Maintainers: `pnpm postman:gen` regenerates the files after an API change, and the **Postman sync** workflow republishes them to the public workspace when they reach `main`. The button follows the published collection.
