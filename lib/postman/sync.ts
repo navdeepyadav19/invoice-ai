@@ -27,13 +27,16 @@ export interface PostmanCollectionFile {
 
 export interface SyncOptions {
   apiKey: string
-  workspaceId: string
+  /** The workspace UUID. When empty, the workspace is found by `workspaceName`. */
+  workspaceId?: string
+  workspaceName?: string
   collection: PostmanCollectionFile
   environment: PostmanEnvironmentFile
   fetch?: typeof fetch
 }
 
 export interface SyncResult {
+  workspaceId: string
   collection: { uid: string; action: 'created' | 'updated' }
   environment: { uid: string; action: 'created' | 'updated' }
 }
@@ -41,13 +44,17 @@ export interface SyncResult {
 type Kind = 'collection' | 'environment'
 
 export async function syncToPostman(options: SyncOptions): Promise<SyncResult> {
-  const { apiKey, workspaceId } = options
+  const { apiKey } = options
   if (!apiKey) throw new Error('POSTMAN_API_KEY is not set.')
-  if (!/^[0-9a-f-]{36}$/i.test(workspaceId)) {
-    throw new Error('POSTMAN_WORKSPACE_ID must be the workspace UUID (Workspace → Info in Postman).')
+  if (options.workspaceId && !UUID.test(options.workspaceId)) {
+    throw new Error('POSTMAN_WORKSPACE_ID must be the workspace UUID.')
+  }
+  if (!options.workspaceId && !options.workspaceName) {
+    throw new Error('Set POSTMAN_WORKSPACE_ID or POSTMAN_WORKSPACE_NAME.')
   }
 
   const call = postmanClient(apiKey, options.fetch ?? fetch)
+  const workspaceId = options.workspaceId || (await findWorkspace(call, options.workspaceName!))
 
   const collection = await upsert(call, 'collection', workspaceId, options.collection.info.name, {
     collection: options.collection,
@@ -66,7 +73,28 @@ export async function syncToPostman(options: SyncOptions): Promise<SyncResult> {
     },
   })
 
-  return { collection, environment }
+  return { workspaceId, collection, environment }
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/**
+ * The workspace UUID is buried in Postman's UI, so by default it is looked up
+ * by name among the workspaces the API key can see. Exactly one must match:
+ * publishing to the wrong one of two same-named workspaces would point the
+ * button at nothing.
+ */
+async function findWorkspace(call: ReturnType<typeof postmanClient>, name: string): Promise<string> {
+  const listed = (await call('GET', '/workspaces')) as { workspaces?: { id: string; name: string }[] }
+  const matches = (listed.workspaces ?? []).filter((w) => w.name === name)
+  if (matches.length !== 1) {
+    throw new Error(
+      matches.length
+        ? `${matches.length} workspaces are named "${name}". Set POSTMAN_WORKSPACE_ID to pick one.`
+        : `No workspace named "${name}" is visible to this API key.`,
+    )
+  }
+  return matches[0].id
 }
 
 async function upsert(

@@ -3,10 +3,10 @@
 # (api-docs/postman.mdx). The button follows the collection, so replacing it
 # in place here is what keeps the button current. See lib/postman/sync.ts.
 #
-# Needs, in this repo's settings:
-#   secret   POSTMAN_API_KEY        a Postman API key that can edit the workspace
-#   variable POSTMAN_WORKSPACE_ID   the workspace's UUID (Postman → workspace → Info)
-# Without them the job reports a notice and does nothing, so forks stay green.
+# Needs the repo secret POSTMAN_API_KEY (a Postman API key that can edit the
+# workspace). The workspace is found by name, "Invoice-AI API" unless the
+# variable POSTMAN_WORKSPACE_NAME says otherwise; POSTMAN_WORKSPACE_ID skips the
+# lookup. Without the key the job reports a notice and does nothing.
 name: Postman sync
 
 on:
@@ -37,9 +37,10 @@ jobs:
         env:
           POSTMAN_API_KEY: ${{ secrets.POSTMAN_API_KEY }}
           POSTMAN_WORKSPACE_ID: ${{ vars.POSTMAN_WORKSPACE_ID }}
+          POSTMAN_WORKSPACE_NAME: ${{ vars.POSTMAN_WORKSPACE_NAME }}
         run: |
-          if [ -z "$POSTMAN_API_KEY" ] || [ -z "$POSTMAN_WORKSPACE_ID" ]; then
-            echo "::notice::POSTMAN_API_KEY or POSTMAN_WORKSPACE_ID is not set; skipping the Postman sync."
+          if [ -z "$POSTMAN_API_KEY" ]; then
+            echo "::notice::POSTMAN_API_KEY is not set; skipping the Postman sync."
             exit 0
           fi
           pnpm postman:sync

@@ -12,7 +12,7 @@ interface Call {
 }
 
 /** A fake Postman API: `existing` is what the workspace already holds. */
-function fakePostman(existing: { collections?: object[]; environments?: object[] } = {}) {
+function fakePostman(existing: { collections?: object[]; environments?: object[]; workspaces?: object[] } = {}) {
   const calls: Call[] = []
   const impl = (async (url: string, init: RequestInit) => {
     const call: Call = {
@@ -26,6 +26,7 @@ function fakePostman(existing: { collections?: object[]; environments?: object[]
     const path = new URL(url).pathname
     let payload: unknown = {}
     if (call.method === 'GET') payload = { [path.slice(1)]: existing[path.slice(1) as 'collections'] ?? [] }
+    if (path === '/workspaces') payload = { workspaces: existing.workspaces ?? [] }
     if (call.method === 'POST') payload = { [path.slice(1, -1)]: { uid: `new-${path.slice(1, -1)}` } }
     return new Response(JSON.stringify(payload), { status: 200 })
   }) as unknown as typeof fetch
@@ -103,6 +104,38 @@ describe('syncToPostman', () => {
     const { impl, calls } = fakePostman()
     await expect(syncToPostman({ ...options(impl), apiKey: '' })).rejects.toThrow(/POSTMAN_API_KEY/)
     await expect(syncToPostman({ ...options(impl), workspaceId: 'my-workspace' })).rejects.toThrow(/UUID/)
+    await expect(syncToPostman({ ...options(impl), workspaceId: '' })).rejects.toThrow(/POSTMAN_WORKSPACE_NAME/)
     expect(calls).toHaveLength(0)
+  })
+
+  it('finds the workspace by name when no id is given', async () => {
+    const { impl, calls } = fakePostman({
+      workspaces: [
+        { id: WORKSPACE, name: 'Invoice-AI API' },
+        { id: '00000000-0000-4000-8000-000000000000', name: 'My Workspace' },
+      ],
+    })
+    const result = await syncToPostman({ ...options(impl), workspaceId: '', workspaceName: 'Invoice-AI API' })
+
+    expect(result.workspaceId).toBe(WORKSPACE)
+    expect(calls[0].url).toBe('https://api.postman.com/workspaces')
+    expect(calls.some((c) => c.url === `https://api.postman.com/collections?workspace=${WORKSPACE}`)).toBe(true)
+  })
+
+  it('refuses an unknown or ambiguous workspace name', async () => {
+    const none = fakePostman({ workspaces: [{ id: WORKSPACE, name: 'Other' }] })
+    await expect(
+      syncToPostman({ ...options(none.impl), workspaceId: '', workspaceName: 'Invoice-AI API' }),
+    ).rejects.toThrow(/No workspace named/)
+
+    const two = fakePostman({
+      workspaces: [
+        { id: WORKSPACE, name: 'Invoice-AI API' },
+        { id: '00000000-0000-4000-8000-000000000000', name: 'Invoice-AI API' },
+      ],
+    })
+    await expect(
+      syncToPostman({ ...options(two.impl), workspaceId: '', workspaceName: 'Invoice-AI API' }),
+    ).rejects.toThrow(/2 workspaces/)
   })
 })
