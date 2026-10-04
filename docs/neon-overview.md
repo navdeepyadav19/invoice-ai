@@ -86,11 +86,33 @@ signing key could forge any user, and it no longer exists.)
   authorized redirect URI is `{NEON_AUTH_BASE_URL}/callback/google`.
 - There is no guest mode: Neon's managed auth has no anonymous users.
 
+## Local development runs on the `dev` branch
+
+`.env.local` points at a Neon branch called `dev` (`br-cool-cake-b3iw0o41`),
+not at `main`. `main` is production. The branch is a copy-on-write clone, so
+`pnpm dev`, test sign-ups and trial migrations never touch real users. Things to
+know about it:
+
+- **It has its own Neon Auth.** Each branch gets its own Neon Auth instance with
+  a separate `NEON_AUTH_BASE_URL` (`https://ep-calm-dew-b3x43xxf.neonauth…`).
+  It also gets its own users and sessions, and copies main's OAuth provider,
+  SMTP and trusted-domain settings.
+- **Its `NEON_AUTH_COOKIE_SECRET` is local-only.** It differs from production's,
+  so a cookie minted locally is worthless against the live site.
+- **Don't run `vercel env pull .env.local`.** It writes production's values over
+  the branch ones. Pull into another file (`vercel env pull .env.vercel`) and
+  copy across only what you need.
+- **Reset it to production's current state** with
+  `neon branches reset dev --parent --project-id=frosty-recipe-40221070`. That
+  throws away everything written to the branch.
+- **Google sign-in on localhost** needs the branch's callback added as a second
+  redirect URI on the GCP client:
+  `https://ep-calm-dew-b3x43xxf.neonauth.c-4.ap-southeast-1.aws.neon.tech/neondb/auth/callback/google`
+
 ## Migrations
 
 ```bash
-vercel env pull .env.local     # DATABASE_URL, DATABASE_URL_UNPOOLED, NEON_AUTH_*
-pnpm db:migrate --status       # what is applied / pending
+pnpm db:migrate --status       # what is applied / pending (on whichever branch .env.local names)
 pnpm db:migrate                # apply new files in db/migrations/, in order
 pnpm db:types                  # regenerate lib/db/schema.ts from the live schema
 ```
@@ -105,12 +127,12 @@ pnpm db:types                  # regenerate lib/db/schema.ts from the live schem
 
 ### Test against a branch first
 
-Create a Neon branch, point `DATABASE_URL_UNPOOLED` at it, and run the
-migration there. The branch is a full copy (auth users included), so a bad
-migration costs nothing:
+With `.env.local` on `dev`, plain `pnpm db:migrate` already runs there first.
+A bad migration costs one branch reset. To apply to production once it's
+proven, point the runner at main explicitly:
 
 ```bash
-DATABASE_URL_UNPOOLED='<branch connection string>' pnpm db:migrate
+DATABASE_URL_UNPOOLED='<main branch direct connection string>' pnpm db:migrate
 ```
 
 ## Environment variables
