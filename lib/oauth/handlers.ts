@@ -120,18 +120,29 @@ export async function resolveClient(
 ): Promise<ResolvedClient | { error: string } | null> {
   const known = await deps.store.lookupClient(clientId)
   if (known?.kind === 'dcr') return known
-  const fresh = known && known.expiresAt && Date.parse(known.expiresAt) > deps.now()
-  if (fresh) return known
-  if (!isCimdClientId(clientId)) return known
-  // Server-to-server endpoints: use what the consent page cached, even if its
-  // cache window has passed — it was validated when the user approved.
-  if (!fetchAs) return known
+
+  const expiresAt = known?.expiresAt ? Date.parse(known.expiresAt) : 0
+  if (known && expiresAt > deps.now()) return known
+  if (!isCimdClientId(clientId)) return null
+
+  if (!fetchAs) {
+    // Server-to-server endpoints (token, revoke) never fetch. They may use a
+    // cached document past its cache window — the redirect_uri a code is
+    // redeemed against was captured from a fresh copy at consent, and a
+    // refresh token is tied to its grant — but only for as long as a refresh
+    // token can live. Older than that, the app must reconnect, which fetches
+    // the document again. Stale state is bounded, never trusted forever.
+    if (known && expiresAt + REFRESH_TOKEN_TTL_SECONDS * 1000 > deps.now()) return known
+    return null
+  }
 
   const host = new URL(clientId).host
   const perUser = await deps.rateLimit(`oauth-cimd-user:${fetchAs}`, 10, 60)
   const perHost = await deps.rateLimit(`oauth-cimd-host:${host}`, 30, 60)
   if (!perUser.ok || !perHost.ok) {
-    return known ?? { error: "Too many app lookups right now. Wait a minute and try connecting again." }
+    // Fail closed: consent is never shown from an expired copy, or someone
+    // could exhaust a host's budget on purpose to pin stale redirect URIs.
+    return { error: 'Too many app lookups right now. Wait a minute and try connecting again.' }
   }
 
   // A Client ID Metadata Document we haven't seen, or whose cache has lapsed.

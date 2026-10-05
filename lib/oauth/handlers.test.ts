@@ -13,7 +13,7 @@ import { hashOAuthSecret } from './tokens'
 const SITE = 'https://invoice.test'
 const CHALLENGE = 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM'
 
-function client(overrides: Partial<ResolvedClient> = {}): ResolvedClient & { expiresAt: string | null } {
+function client(overrides: Partial<ResolvedClient & { expiresAt: string | null }> = {}): ResolvedClient & { expiresAt: string | null } {
   return {
     id: 'client-uuid',
     clientId: 'oc_test',
@@ -298,5 +298,29 @@ describe('fetching Client ID Metadata Documents (SSRF budget)', () => {
 
     expect(response.status).toBe(429)
     expect(store.revokeToken).not.toHaveBeenCalled()
+  })
+})
+
+describe('stale client metadata (fail closed)', () => {
+  const cimdId = 'https://app.example/oauth/client.json'
+  const cimd = (expiresAt: number) =>
+    client({ id: 'cimd-uuid', clientId: cimdId, kind: 'cimd', expiresAt: new Date(expiresAt).toISOString() })
+
+  it('never shows consent from an expired copy when the fetch budget is spent', async () => {
+    const { resolveClient } = await import('./handlers')
+    store.lookupClient.mockResolvedValue(cimd(Date.now() - 1000))
+    deps.rateLimit = async () => ({ ok: false, retryAfter: 60 })
+
+    expect(await resolveClient(cimdId, deps, 'user-1')).toMatchObject({ error: expect.any(String) })
+    expect(deps.fetchMetadata).not.toHaveBeenCalled()
+  })
+
+  it('lets token/revoke use an expired copy only within the refresh-token lifetime', async () => {
+    const { resolveClient } = await import('./handlers')
+    store.lookupClient.mockResolvedValue(cimd(Date.now() - 24 * 3600_000))
+    expect(await resolveClient(cimdId, deps)).toMatchObject({ id: 'cimd-uuid' })
+
+    store.lookupClient.mockResolvedValue(cimd(Date.now() - 31 * 24 * 3600_000))
+    expect(await resolveClient(cimdId, deps)).toBeNull()
   })
 })
