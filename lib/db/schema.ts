@@ -272,6 +272,66 @@ export interface Invoices {
   updated_at: Generated<string>;
 }
 
+export interface OauthAuthorizationCodes {
+  client_id: string;
+  code_challenge: string;
+  code_challenge_method: Generated<string>;
+  code_hash: string;
+  consumed_at: string | null;
+  created_at: Generated<string>;
+  expires_at: Generated<string>;
+  grant_id: string;
+  id: Generated<string>;
+  owner_id: string;
+  redirect_uri: string;
+  replayed_at: string | null;
+  resource: string;
+  scopes: string[];
+}
+
+export interface OauthClients {
+  client_id: string;
+  client_name: string;
+  client_secret_hash: string | null;
+  client_uri: string | null;
+  created_at: Generated<string>;
+  grant_types: Generated<string[]>;
+  id: Generated<string>;
+  kind: string;
+  last_used_at: string | null;
+  logo_uri: string | null;
+  metadata: Json | null;
+  metadata_expires_at: string | null;
+  redirect_uris: string[];
+  token_endpoint_auth_method: string;
+}
+
+export interface OauthGrants {
+  client_id: string;
+  created_at: Generated<string>;
+  id: Generated<string>;
+  last_used_at: string | null;
+  owner_id: string;
+  revoked_at: string | null;
+  scopes: string[];
+  updated_at: Generated<string>;
+}
+
+export interface OauthTokens {
+  created_at: Generated<string>;
+  expires_at: string;
+  family_id: string;
+  grant_id: string;
+  id: Generated<string>;
+  kind: string;
+  parent_id: string | null;
+  resource: string;
+  revoked_at: string | null;
+  scopes: string[];
+  token_hash: string;
+  used_at: string | null;
+}
+
 export interface Prices {
   active: Generated<boolean>;
   created_at: Generated<string>;
@@ -358,6 +418,10 @@ export interface DB {
   invoice_events: InvoiceEvents;
   invoice_items: InvoiceItems;
   invoices: Invoices;
+  oauth_authorization_codes: OauthAuthorizationCodes;
+  oauth_clients: OauthClients;
+  oauth_grants: OauthGrants;
+  oauth_tokens: OauthTokens;
   prices: Prices;
   products: Products;
   profiles: Profiles;

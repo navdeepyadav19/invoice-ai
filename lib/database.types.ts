@@ -261,6 +261,92 @@ export type CliDeviceCodeRow = {
   last_polled_at: string | null
 }
 
+/*
+ * OAuth 2.1 (migration 0016). None of these is readable from a browser session
+ * except oauth_grants, and that only for its owner (RLS, SELECT only). Every
+ * write, and every other read, goes through the oauth_* functions. Codes,
+ * tokens and client secrets are stored as hex(HMAC-SHA256), never in the clear.
+ */
+
+export type OAuthClientKind = 'dcr' | 'cimd'
+export type OAuthTokenEndpointAuthMethod = 'none' | 'client_secret_basic' | 'client_secret_post'
+
+/** A DCR registration (client_id oc_…) or a cached CIMD document (client_id = its https URL). */
+export type OAuthClientRow = {
+  id: string
+  client_id: string
+  kind: OAuthClientKind
+  client_name: string
+  client_uri: string | null
+  /** cimd only. DCR logos are attacker-chosen and never stored. */
+  logo_uri: string | null
+  redirect_uris: string[]
+  grant_types: string[]
+  token_endpoint_auth_method: OAuthTokenEndpointAuthMethod
+  /** Null exactly when token_endpoint_auth_method is 'none'. */
+  client_secret_hash: string | null
+  metadata: Json | null
+  /** cimd only: refetch the document after this. */
+  metadata_expires_at: string | null
+  created_at: string
+  last_used_at: string | null
+}
+
+/** A connected app: one active grant per (owner, client). The ceiling for every token under it. */
+export type OAuthGrantRow = {
+  id: string
+  owner_id: string
+  /** oauth_clients.id (the uuid), not the wire client_id. */
+  client_id: string
+  scopes: string[]
+  created_at: string
+  updated_at: string
+  last_used_at: string | null
+  revoked_at: string | null
+}
+
+/** Single-use, 5-minute code. Its id is the family id of every token minted from it. */
+export type OAuthAuthorizationCodeRow = {
+  id: string
+  code_hash: string
+  grant_id: string
+  client_id: string
+  owner_id: string
+  redirect_uri: string
+  /** base64url(sha256(verifier)), 43 chars. */
+  code_challenge: string
+  code_challenge_method: 'S256'
+  scopes: string[]
+  /** The audience the tokens will be bound to (RFC 8707). */
+  resource: string
+  created_at: string
+  expires_at: string
+  /** Set by the first redemption attempt with the right code and client, pass or fail. */
+  consumed_at: string | null
+  /** First time a consumed code was presented again (its family was revoked then). */
+  replayed_at: string | null
+}
+
+export type OAuthTokenKind = 'access' | 'refresh'
+
+export type OAuthTokenRow = {
+  id: string
+  token_hash: string
+  kind: OAuthTokenKind
+  grant_id: string
+  /** The authorization code this lineage started from. */
+  family_id: string
+  /** The refresh token this one was rotated from. Null for the first pair. */
+  parent_id: string | null
+  scopes: string[]
+  resource: string
+  created_at: string
+  expires_at: string
+  /** Refresh tokens only: set when rotated. Seeing it again revokes the family. */
+  used_at: string | null
+  revoked_at: string | null
+}
+
 export type IdempotencyKeyRow = {
   owner_id: string
   key: string

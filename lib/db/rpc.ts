@@ -168,6 +168,252 @@ export function cliDeviceRelease(db: Db, deviceCodeHash: string): Promise<boolea
 }
 
 // ---------------------------------------------------------------------------
+// OAuth 2.1 (migration 0016)
+//
+// Every hash argument is hex(HMAC-SHA256) of the secret, 64 lowercase hex
+// chars; the tables reject anything else. `clientUuid` / `p_client` is
+// oauth_clients.id (from oauthClientLookup), never the wire client_id. Times
+// go in as ISO strings.
+// ---------------------------------------------------------------------------
+
+export type OAuthRegisterResult = 'created' | 'rate_limited'
+
+/** POST /oauth/register. Anon. Also sweeps stale OAuth rows. */
+export function oauthRegisterClient(
+  db: Db,
+  input: {
+    clientId: string
+    secretHash: string | null
+    authMethod: 'none' | 'client_secret_basic' | 'client_secret_post'
+    name: string
+    clientUri: string | null
+    redirectUris: string[]
+    grantTypes: string[]
+    metadata: unknown
+  },
+): Promise<OAuthRegisterResult> {
+  return scalar(
+    db,
+    sql<{ result: OAuthRegisterResult }>`
+      select public.oauth_register_client(
+        ${input.clientId}, ${input.secretHash}, ${input.authMethod}, ${input.name}, ${input.clientUri},
+        ${input.redirectUris}::text[], ${input.grantTypes}::text[], ${json(input.metadata)}::jsonb
+      ) as result
+    `,
+  )
+}
+
+/** Upserts a fetched Client ID Metadata Document; returns oauth_clients.id. Anon. */
+export function oauthCacheCimdClient(
+  db: Db,
+  input: {
+    clientId: string
+    name: string
+    clientUri: string | null
+    logoUri: string | null
+    redirectUris: string[]
+    metadata: unknown
+    expiresAt: string
+  },
+): Promise<string> {
+  return scalar(
+    db,
+    sql<{ result: string }>`
+      select public.oauth_cache_cimd_client(
+        ${input.clientId}, ${input.name}, ${input.clientUri}, ${input.logoUri},
+        ${input.redirectUris}::text[], ${json(input.metadata)}::jsonb, ${input.expiresAt}::timestamptz
+      ) as result
+    `,
+  )
+}
+
+export interface OAuthClientLookup {
+  id: string
+  client_id: string
+  kind: 'dcr' | 'cimd'
+  client_name: string
+  client_uri: string | null
+  logo_uri: string | null
+  redirect_uris: string[]
+  grant_types: string[]
+  token_endpoint_auth_method: 'none' | 'client_secret_basic' | 'client_secret_post'
+  client_secret_hash: string | null
+  metadata_expires_at: string | null
+}
+
+export async function oauthClientLookup(db: Db, clientId: string): Promise<OAuthClientLookup | null> {
+  const { rows } = await sql<OAuthClientLookup>`select * from public.oauth_client_lookup(${clientId})`.execute(db)
+  return rows[0] ?? null
+}
+
+/** Approve: upserts the caller's grant and stores the code. Authenticated only; returns the code id (= family id). */
+export function oauthAuthorize(
+  db: Db,
+  input: {
+    clientUuid: string
+    scopes: string[]
+    codeHash: string
+    redirectUri: string
+    codeChallenge: string
+    resource: string
+  },
+): Promise<string> {
+  return scalar(
+    db,
+    sql<{ result: string }>`
+      select public.oauth_authorize(
+        ${input.clientUuid}::uuid, ${input.scopes}::text[], ${input.codeHash},
+        ${input.redirectUri}, ${input.codeChallenge}, ${input.resource}
+      ) as result
+    `,
+  )
+}
+
+export type OAuthRedeemOutcome =
+  | 'ok'
+  | 'invalid'
+  | 'reused'
+  | 'expired'
+  | 'revoked'
+  | 'invalid_grant'
+  | 'invalid_target'
+
+/** Fields are null unless outcome is 'ok'. */
+export interface OAuthCodeRedemption {
+  outcome: OAuthRedeemOutcome
+  grant_id: string | null
+  owner_id: string | null
+  scopes: string[] | null
+  resource: string | null
+}
+
+/**
+ * grant_type=authorization_code, atomically: checks client, redirect_uri,
+ * resource and the PKCE verifier against the stored code, then mints the
+ * first pair with scopes, resource and grant copied from the code. Anon.
+ *
+ * Any attempt that names the right code and client consumes it, pass or fail;
+ * a replay revokes everything minted from it. `resource` null means "the one
+ * authorized". Pass refreshHash null to mint an access token only.
+ */
+export async function oauthRedeemCode(
+  db: Db,
+  input: {
+    codeHash: string
+    clientUuid: string
+    redirectUri: string
+    codeVerifier: string
+    resource: string | null
+    accessHash: string
+    accessExpiresAt: string
+    refreshHash: string | null
+    refreshExpiresAt: string | null
+  },
+): Promise<OAuthCodeRedemption | null> {
+  const { rows } = await sql<OAuthCodeRedemption>`
+    select * from public.oauth_redeem_code(
+      ${input.codeHash}, ${input.clientUuid}::uuid, ${input.redirectUri}, ${input.codeVerifier}, ${input.resource},
+      ${input.accessHash}, ${input.accessExpiresAt}::timestamptz,
+      ${input.refreshHash}, ${input.refreshExpiresAt}::timestamptz
+    )
+  `.execute(db)
+  return rows[0] ?? null
+}
+
+export type OAuthRotateOutcome = 'ok' | 'invalid' | 'expired' | 'revoked' | 'reused' | 'invalid_scope'
+
+/** Fields are null unless outcome is 'ok'. */
+export interface OAuthRefreshRotation {
+  outcome: OAuthRotateOutcome
+  grant_id: string | null
+  owner_id: string | null
+  scopes: string[] | null
+  resource: string | null
+}
+
+/**
+ * grant_type=refresh_token. Spends the old refresh token and mints a new pair.
+ * `scopes` null (or empty) keeps the old token's scopes; it may only narrow.
+ * Anon. A reused refresh token revokes its whole family.
+ */
+export async function oauthRotateRefresh(
+  db: Db,
+  input: {
+    refreshHash: string
+    clientUuid: string
+    scopes: string[] | null
+    accessHash: string
+    accessExpiresAt: string
+    newRefreshHash: string
+    refreshExpiresAt: string
+  },
+): Promise<OAuthRefreshRotation | null> {
+  const { rows } = await sql<OAuthRefreshRotation>`
+    select * from public.oauth_rotate_refresh(
+      ${input.refreshHash}, ${input.clientUuid}::uuid, ${input.scopes}::text[],
+      ${input.accessHash}, ${input.accessExpiresAt}::timestamptz,
+      ${input.newRefreshHash}, ${input.refreshExpiresAt}::timestamptz
+    )
+  `.execute(db)
+  return rows[0] ?? null
+}
+
+/** Everything the bearer authenticator needs; it decides, this only reads. */
+export interface OAuthTokenLookup {
+  token_id: string
+  kind: 'access' | 'refresh'
+  grant_id: string
+  owner_id: string
+  client_uuid: string
+  client_name: string
+  scopes: string[]
+  resource: string
+  expires_at: string
+  revoked_at: string | null
+  grant_scopes: string[]
+  grant_revoked_at: string | null
+}
+
+export async function oauthTokenLookup(db: Db, tokenHash: string): Promise<OAuthTokenLookup | null> {
+  const { rows } = await sql<OAuthTokenLookup>`select * from public.oauth_token_lookup(${tokenHash})`.execute(db)
+  return rows[0] ?? null
+}
+
+/** Fire-and-forget "last used", throttled to once a minute in SQL. */
+export async function oauthTouchGrant(db: Db, grantId: string): Promise<void> {
+  await sql`select public.oauth_touch_grant(${grantId}::uuid)`.execute(db)
+}
+
+/** RFC 7009. Unknown or another client's token is a silent no-op. Anon. */
+export async function oauthRevokeToken(db: Db, tokenHash: string, clientUuid: string): Promise<void> {
+  await sql`select public.oauth_revoke_token(${tokenHash}, ${clientUuid}::uuid)`.execute(db)
+}
+
+/** Settings → Revoke. Authenticated owner only; false if not theirs or already revoked. */
+export function oauthRevokeGrant(db: Db, grantId: string): Promise<boolean> {
+  return scalar(db, sql<{ result: boolean }>`select public.oauth_revoke_grant(${grantId}::uuid) as result`)
+}
+
+export interface OAuthGrantListItem {
+  id: string
+  client_uuid: string
+  client_name: string
+  client_kind: 'dcr' | 'cimd'
+  client_id_text: string
+  client_uri: string | null
+  scopes: string[]
+  created_at: string
+  last_used_at: string | null
+  revoked_at: string | null
+}
+
+/** The caller's connected apps, active first. Authenticated only. */
+export async function oauthListGrants(db: Db, includeRevoked = false): Promise<OAuthGrantListItem[]> {
+  const { rows } = await sql<OAuthGrantListItem>`select * from public.oauth_list_grants(${includeRevoked}::boolean)`.execute(db)
+  return rows
+}
+
+// ---------------------------------------------------------------------------
 // Webhook delivery worker — owner connection only (lib/db/system.ts)
 // ---------------------------------------------------------------------------
 
