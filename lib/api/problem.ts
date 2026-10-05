@@ -92,6 +92,15 @@ export function problem(
   })
 }
 
+/**
+ * The HTTP status problemFromError would answer with, without building the
+ * response. The pipeline needs it for the audit row of a call that is not
+ * HTTP at all (an MCP tool), and it must agree with the response REST sends.
+ */
+export function statusForError(cause: unknown): number {
+  return isServiceError(cause) ? STATUS_BY_CODE[cause.code] : 500
+}
+
 /** Map anything thrown inside a handler to a response. */
 export function problemFromError(cause: unknown, requestId: string): Response {
   if (isServiceError(cause)) {

@@ -1,5 +1,3 @@
-import { after } from 'next/server'
-
 import { authenticate } from '@/lib/api/authenticate'
 import {
   idempotencyKeyRequired,
@@ -8,13 +6,9 @@ import {
   unauthorized,
 } from '@/lib/api/problem'
 import * as idempotency from '@/lib/api/idempotency'
-import {
-  checkRateLimit,
-  DEFAULT_RULES,
-  rateLimitHeaders,
-  type RateLimitRule,
-} from '@/lib/api/rate-limit'
-import { newRequestId, requireScope, type AuthContext } from '@/lib/auth/context'
+import { clientIp, readRequestId, runOperation } from '@/lib/api/pipeline'
+import { rateLimitHeaders, type RateLimitRule } from '@/lib/api/rate-limit'
+import type { AuthContext } from '@/lib/auth/context'
 import type { Scope } from '@/lib/auth/scopes'
 
 /**
@@ -32,6 +26,11 @@ import type { Scope } from '@/lib/auth/scopes'
  *   6. handler       calls a service, which checks the scope again
  *   7. map errors    ServiceError → problem+json
  *   8. audit         one row, after the response is sent
+ *
+ * Steps 3–6 and 8 live in runOperation (lib/api/pipeline.ts), shared with the
+ * MCP server, so a tool call is held to exactly the rules an API request is.
+ * This file is the HTTP half: reading the request, and turning each outcome
+ * into a Response.
  */
 
 export interface ApiRouteContext<P = unknown> {
@@ -68,96 +67,62 @@ export function withApi<P = unknown>(options: WithApiOptions, handler: ApiHandle
     // their logs and ours. Ours is the fallback, not the override.
     const requestId = readRequestId(request)
     const startedAt = Date.now()
-    const url = new URL(request.url)
 
     const auth = await authenticate(request, requestId)
     if (!auth.ok) return unauthorized(auth.detail, requestId)
 
     const ctx = auth.ctx
-    const credentialId = ctx.apiKeyId ?? ctx.clientId ?? ctx.userId
+    const outcome = await runOperation(
+      ctx,
+      options,
+      {
+        method: request.method,
+        route: new URL(request.url).pathname,
+        startedAt,
+        idempotencyKey: idempotency.readKey(request),
+        // The body has to be read to hash it, and a Request body can only be
+        // read once — so the hash reads a clone and the handler the original.
+        body: () => request.clone().text(),
+        clientIp: clientIp(request),
+      },
+      () => handler(ctx, request, routeContext),
+      (response) => ({
+        status: response.status,
+        stored: () => response.clone().json().catch(() => null),
+      }),
+    )
 
-    // --- 3. rate limit ----------------------------------------------------
-    const rule = options.rateLimit ?? DEFAULT_RULES.request
-    const bucket = options.rateLimitBucket ?? 'request'
-    const limit = await checkRateLimit(credentialId, bucket, rule)
+    const headers = { ...rateLimitHeaders(outcome.limit), 'x-request-id': requestId }
 
-    if (!limit.ok) {
-      const response = rateLimited(
-        `Rate limit of ${rule.limit} per ${rule.windowSeconds}s exceeded.`,
-        requestId,
-        limit.retryAfter,
-      )
-      after(() => audit(ctx, request, url, 429, Date.now() - startedAt, null))
-      return mergeHeaders(response, rateLimitHeaders(limit))
-    }
+    switch (outcome.kind) {
+      case 'rate_limited':
+        return mergeHeaders(
+          rateLimited(
+            `Rate limit of ${outcome.rule.limit} per ${outcome.rule.windowSeconds}s exceeded.`,
+            requestId,
+            outcome.limit.retryAfter,
+          ),
+          rateLimitHeaders(outcome.limit),
+        )
 
-    const headers = { ...rateLimitHeaders(limit), 'x-request-id': requestId }
-    const mode: idempotency.IdempotencyMode = options.idempotent ?? 'none'
-    let claimedKey: string | null = null
+      case 'idempotency_key_required':
+        return mergeHeaders(idempotencyKeyRequired(requestId), headers)
 
-    try {
-      // --- 4. scope -------------------------------------------------------
-      // Checked here so a 403 costs nothing, and again inside the service so a
-      // future caller that skips this wrapper still cannot exceed its scopes.
-      requireScope(ctx, options.scope)
+      case 'replayed':
+        return json(outcome.body, {
+          status: outcome.status,
+          // The one header that tells a caller their retry was a no-op.
+          // Without it, a client cannot distinguish "issued now" from "issued
+          // the first time" — which matters when the response carries an
+          // invoice number they are about to act on.
+          headers: { ...headers, 'idempotent-replayed': 'true' },
+        })
 
-      // --- 5. idempotency -------------------------------------------------
-      if (mode !== 'none') {
-        const key = idempotency.readKey(request)
+      case 'done':
+        return mergeHeaders(outcome.result, headers)
 
-        if (!key && mode === 'required') {
-          after(() => audit(ctx, request, url, 428, Date.now() - startedAt, null))
-          return mergeHeaders(idempotencyKeyRequired(requestId), headers)
-        }
-
-        if (key) {
-          // The body has to be read here to hash it, and a Request body can only
-          // be read once — so the handler is given a clone.
-          const body = await request.clone().text()
-          const hash = idempotency.requestHash(request.method, url.pathname, body)
-          const claim = await idempotency.claim(ctx, key, request.method, url.pathname, hash)
-
-          if (claim.replay) {
-            after(() => audit(ctx, request, url, claim.replay!.status, Date.now() - startedAt, key))
-            return json(claim.replay.body, {
-              status: claim.replay.status,
-              // The one header that tells a caller their retry was a no-op.
-              // Without it, a client cannot distinguish "issued now" from
-              // "issued the first time" — which matters when the response
-              // carries an invoice number they are about to act on.
-              headers: { ...headers, 'idempotent-replayed': 'true' },
-            })
-          }
-
-          claimedKey = key
-        }
-      }
-
-      // --- 6. handler -----------------------------------------------------
-      const response = await handler(ctx, request, routeContext)
-
-      if (claimedKey) {
-        // Only successful responses are stored. Replaying a 500 would make a
-        // transient failure permanent for 24 hours.
-        if (response.status < 400) {
-          const stored = await response.clone().json().catch(() => null)
-          await idempotency.complete(ctx, claimedKey, response.status, stored)
-        } else {
-          await idempotency.release(ctx, claimedKey)
-        }
-      }
-
-      after(() => audit(ctx, request, url, response.status, Date.now() - startedAt, claimedKey))
-
-      return mergeHeaders(response, headers)
-    } catch (cause) {
-      // Leave the key free so the caller's retry can actually run.
-      if (claimedKey) await idempotency.release(ctx, claimedKey)
-
-      const response = problemFromError(cause, requestId)
-      after(() => audit(ctx, request, url, response.status, Date.now() - startedAt, claimedKey))
-
-      return mergeHeaders(response, headers)
+      case 'failed':
+        return mergeHeaders(problemFromError(outcome.error, requestId), headers)
     }
   }
 }
@@ -193,14 +158,6 @@ export function noContent(headers: Record<string, string> = {}): Response {
 
 // ---------------------------------------------------------------------------
 
-function readRequestId(request: Request): string {
-  const supplied = request.headers.get('x-request-id')?.trim()
-  // Bounded: this value is echoed into responses and written to the audit
-  // table, so an unbounded header would be a cheap way to write junk.
-  if (supplied && supplied.length <= 200) return supplied
-  return newRequestId()
-}
-
 /** Headers on a Response are immutable, so adding to one means copying it. */
 function mergeHeaders(response: Response, extra: Record<string, string>): Response {
   const headers = new Headers(response.headers)
@@ -211,55 +168,4 @@ function mergeHeaders(response: Response, extra: Record<string, string>): Respon
     statusText: response.statusText,
     headers,
   })
-}
-
-/**
- * One audit row per request.
- *
- * Runs in `after()`, so it adds no latency and cannot fail the request it
- * records. "Which app issued this invoice?" has to have an answer, and
- * invoice_events can't give it for reads.
- */
-async function audit(
-  ctx: AuthContext,
-  request: Request,
-  url: URL,
-  status: number,
-  durationMs: number,
-  idempotencyKey: string | null,
-): Promise<void> {
-  try {
-    await ctx.db
-      .insertInto('api_requests')
-      .values({
-        request_id: ctx.requestId,
-        owner_id: ctx.userId,
-        via: ctx.via,
-        api_key_id: ctx.apiKeyId ?? null,
-        client_id: ctx.clientId ?? null,
-        method: request.method,
-        route: url.pathname,
-        status,
-        duration_ms: durationMs,
-        idempotency_key: idempotencyKey,
-        ip_hash: await hashIp(request),
-      })
-      .execute()
-  } catch (error) {
-    console.error('[api] audit insert failed for %s: %s', ctx.requestId, (error as Error).message)
-  }
-}
-
-/**
- * An IP is personal data, and we only ever need "was this the same caller?".
- * A salted hash answers that without storing the address itself.
- */
-async function hashIp(request: Request): Promise<string | null> {
-  const forwarded = request.headers.get('x-forwarded-for')
-  const ip = forwarded?.split(',')[0]?.trim()
-  if (!ip) return null
-
-  const salt = process.env.API_KEY_PEPPER ?? ''
-  const { createHash } = await import('node:crypto')
-  return createHash('sha256').update(`${salt}:${ip}`).digest('hex').slice(0, 32)
 }
