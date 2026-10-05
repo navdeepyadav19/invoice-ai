@@ -34,6 +34,18 @@ export function ConsentForm({
 }) {
   const { client } = request
   const verifiedDomain = client.kind === 'cimd' ? new URL(client.clientId).host : null
+  const returnHost = redirectHost(request.redirectUri)
+  const returnsToThisComputer = /^(127\.0\.0\.1|\[::1\]|localhost)(:|$)/.test(returnHost)
+  // A verified app should send you back to its own site. If it doesn't (or it
+  // returns to a program on this computer, which any local program can
+  // claim to be), say so: the verified name alone is not the whole story.
+  const returnWarning = verifiedDomain
+    ? returnsToThisComputer
+      ? 'This sign-in returns to a program on this computer. Approve only if you just started it yourself.'
+      : returnHost !== verifiedDomain && !returnHost.endsWith(`.${verifiedDomain}`)
+        ? `After you approve, you'll be sent to ${returnHost}, not ${verifiedDomain}.`
+        : null
+    : null
   const preTicked = new Set(request.requestedScopes.filter((s) => !(MCP_LIFECYCLE_SCOPES as readonly Scope[]).includes(s)))
 
   const groups: Array<{ title: string; note?: string; scopes: readonly Scope[] }> =
@@ -58,24 +70,37 @@ export function ConsentForm({
         <div className="flex size-11 items-center justify-center rounded-lg bg-muted text-lg font-semibold" aria-hidden>
           {client.name.slice(0, 1).toUpperCase()}
         </div>
+        {/* An unverified app chose its own name, so the heading says so
+            rather than presenting "Claude" (or any brand) as fact. */}
         <h1 className="text-lg font-semibold leading-snug">
-          {client.name} wants to access your Invoice-AI account
+          {verifiedDomain ? (
+            <>{client.name} wants to access your Invoice-AI account</>
+          ) : (
+            <>An app calling itself &ldquo;{client.name}&rdquo; wants to access your Invoice-AI account</>
+          )}
         </h1>
         {verifiedDomain ? (
           <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
             <BadgeCheck className="size-4 text-emerald-600" aria-hidden />
             Verified domain: <span className="font-medium text-foreground">{verifiedDomain}</span>
           </p>
-        ) : (
+        ) : null}
+        {verifiedDomain && returnWarning ? (
+          <p className="flex items-start gap-1.5 rounded-md border border-amber-300 bg-amber-50 p-2 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
+            <ShieldAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
+            {returnWarning}
+          </p>
+        ) : null}
+        {verifiedDomain ? null : (
           <div className="space-y-1.5 text-sm text-muted-foreground">
             <Badge variant="outline" className="gap-1">
               <ShieldAlert className="size-3.5" aria-hidden />
               Unverified app
             </Badge>
             <p>
-              Invoice-AI can&rsquo;t confirm who made this app. After you approve, it will be sent to{' '}
-              <span className="font-medium text-foreground">{redirectHost(request.redirectUri)}</span>. Only continue if
-              you started this from an app you trust.
+              Invoice-AI can&rsquo;t confirm who made this app or that its name is real. After you approve, it will
+              be sent to <span className="font-medium text-foreground">{returnHost}</span>. Only continue if you
+              started this yourself, from an app you trust.
             </p>
           </div>
         )}

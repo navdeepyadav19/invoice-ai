@@ -28,7 +28,8 @@ export default async function AuthorizePage({ searchParams }: PageProps<'/oauth/
   }
 
   const deps = oauthDeps()
-  const parsed = await parseAuthorizeRequest(query, (id) => resolveClient(id, deps))
+  const user = await getCurrentUser()
+  const parsed = await parseAuthorizeRequest(query, (id) => resolveClient(id, deps, user?.id))
 
   if (parsed.kind === 'redirect_error') redirect(parsed.url)
   if (parsed.kind === 'show_error') {
@@ -40,7 +41,6 @@ export default async function AuthorizePage({ searchParams }: PageProps<'/oauth/
     )
   }
 
-  const user = await getCurrentUser()
   const canonical = query.toString()
 
   return (

@@ -103,14 +103,36 @@ export interface OAuthDeps {
 // Resolving a client_id
 // ---------------------------------------------------------------------------
 
+/**
+ * Turn a client_id into a client.
+ *
+ * Fetching a Client ID Metadata Document means our server makes a request to
+ * a URL the caller chose. That is only ever done for the consent page (a
+ * signed-in user, `fetchAs`), and on a budget — per user and per target host —
+ * so Invoice-AI can't be used to hammer someone else's site. The public token
+ * and revoke endpoints never fetch: a client reaches them only after the
+ * consent page has already fetched and cached its document.
+ */
 export async function resolveClient(
   clientId: string,
   deps: OAuthDeps,
+  fetchAs?: string,
 ): Promise<ResolvedClient | { error: string } | null> {
   const known = await deps.store.lookupClient(clientId)
-  const fresh = known && (known.kind === 'dcr' || (known.expiresAt && Date.parse(known.expiresAt) > deps.now()))
+  if (known?.kind === 'dcr') return known
+  const fresh = known && known.expiresAt && Date.parse(known.expiresAt) > deps.now()
   if (fresh) return known
   if (!isCimdClientId(clientId)) return known
+  // Server-to-server endpoints: use what the consent page cached, even if its
+  // cache window has passed — it was validated when the user approved.
+  if (!fetchAs) return known
+
+  const host = new URL(clientId).host
+  const perUser = await deps.rateLimit(`oauth-cimd-user:${fetchAs}`, 10, 60)
+  const perHost = await deps.rateLimit(`oauth-cimd-host:${host}`, 30, 60)
+  if (!perUser.ok || !perHost.ok) {
+    return known ?? { error: "Too many app lookups right now. Wait a minute and try connecting again." }
+  }
 
   // A Client ID Metadata Document we haven't seen, or whose cache has lapsed.
   const fetched = await deps.fetchMetadata(clientId)
@@ -293,6 +315,9 @@ function tokenResponse(access: string, refresh: string | null, scopes: string[])
 export async function handleRevoke(request: Request, deps: OAuthDeps): Promise<Response> {
   if (!deps.ready()) return oauthError('temporarily_unavailable', 'Revocation is not configured on this server.', 503)
 
+  const limit = await deps.rateLimit(`oauth-revoke:${deps.clientIp(request) ?? 'unknown'}`, 60, 60)
+  if (!limit.ok) return oauthError('temporarily_unavailable', 'Too many revocation requests. Slow down.', 429, { 'retry-after': String(limit.retryAfter) })
+
   const form = await readForm(request)
   if (!form) return oauthError('invalid_request', 'Send the request as application/x-www-form-urlencoded.')
 
@@ -338,7 +363,7 @@ export async function handleDecision(request: Request, deps: OAuthDeps): Promise
   if (!limit.ok) return new Response('Too many approvals. Wait a minute and try again.', { status: 429 })
 
   // Re-read the request rather than trusting anything else the form carries.
-  const parsed = await parseAuthorizeRequest(new URLSearchParams(query), (id) => resolveClient(id, deps))
+  const parsed = await parseAuthorizeRequest(new URLSearchParams(query), (id) => resolveClient(id, deps, user.id))
   if (parsed.kind === 'show_error') return new Response(parsed.message, { status: 400 })
   if (parsed.kind === 'redirect_error') return seeOther(parsed.url)
   const r = parsed.request

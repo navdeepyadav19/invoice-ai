@@ -261,3 +261,42 @@ describe('POST /oauth/authorize/decision', () => {
     expect(response.status).toBe(400)
   })
 })
+
+describe('fetching Client ID Metadata Documents (SSRF budget)', () => {
+  const cimdId = 'https://victim.example/oauth/client.json'
+
+  it('never fetches from the public token endpoint, even for an unseen URL client id', async () => {
+    store.lookupClient.mockResolvedValue(null)
+    const response = await handleToken(
+      form({ grant_type: 'authorization_code', code: 'c', code_verifier: 'v'.repeat(43), client_id: cimdId, redirect_uri: 'https://x/cb' }),
+      deps,
+    )
+
+    expect(response.status).toBe(401)
+    expect(deps.fetchMetadata).not.toHaveBeenCalled()
+  })
+
+  it('fetches for a signed-in user on the consent page, within a per-user and per-host budget', async () => {
+    store.lookupClient.mockResolvedValue(null)
+    const { resolveClient } = await import('./handlers')
+    const budget = new Map<string, number>()
+    deps.rateLimit = async (key, limit) => {
+      budget.set(key, (budget.get(key) ?? 0) + 1)
+      return { ok: budget.get(key)! <= limit, retryAfter: 60 }
+    }
+    ;(deps.fetchMetadata as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: false, reason: 'nope' })
+
+    for (let i = 0; i < 15; i++) await resolveClient(cimdId, deps, 'user-1')
+
+    expect(deps.fetchMetadata).toHaveBeenCalledTimes(10)
+    expect(await resolveClient(cimdId, deps, 'user-1')).toMatchObject({ error: expect.stringContaining('Too many') })
+  })
+
+  it('rate-limits the revocation endpoint', async () => {
+    deps.rateLimit = async () => ({ ok: false, retryAfter: 30 })
+    const response = await handleRevoke(form({ token: 'inv_oat_x', client_id: 'oc_test' }), deps)
+
+    expect(response.status).toBe(429)
+    expect(store.revokeToken).not.toHaveBeenCalled()
+  })
+})
