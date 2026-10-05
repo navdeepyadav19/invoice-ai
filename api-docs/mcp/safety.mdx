@@ -42,10 +42,10 @@ A tool that doesn't exist is a mistake the assistant can't make.
 |---|---|---|
 | 300 requests per 60 seconds | Every request to `/mcp`, including listing tools | Connection |
 | 120 requests per 60 seconds | Every tool except `send_invoice` | Connection |
-| 10 calls per hour | `send_invoice`, previews included | Connection |
+| 10 calls per hour | Confirmed `send_invoice` calls (previews don't count) | Connection |
 | 50 emails per hour | Every invoice email, from any app, key or the dashboard | Account |
 
-A connection is one connected app (OAuth) or one API key. A key used for both MCP and the REST API shares one budget. Over a tool limit, the tool returns an error saying how long to wait. See [Rate limits](/rate-limits).
+A connection is one connected app (OAuth) or one API key. A key used for both MCP and the REST API shares one budget. Over a tool limit, the tool returns an error saying how long to wait. Over the 300-per-minute limit, `/mcp` answers `429` with `Retry-After`; your client keeps its sign-in. See [Rate limits](/rate-limits).
 
 ## Audit log
 
