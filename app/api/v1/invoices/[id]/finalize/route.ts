@@ -1,6 +1,5 @@
 import { json, withApi } from '@/lib/api/handler'
-import { serializeInvoice } from '@/lib/api/serialize'
-import * as invoices from '@/lib/services/invoices'
+import { finalizeInvoice } from '@/lib/operations/invoices'
 
 type Params = { id: string }
 
@@ -23,10 +22,6 @@ export const POST = withApi<Params>(
   { scope: 'invoices:finalize', idempotent: 'required' },
   async (ctx, _request, route) => {
     const { id } = await route.params
-    await invoices.finalize(ctx, id)
-    const { invoice, items } = await invoices.get(ctx, id)
-    const refs = await invoices.refsForInvoice(ctx, invoice, items)
-
-    return json({ data: serializeInvoice(invoice, items, refs) })
+    return json(await finalizeInvoice(ctx, id))
   },
 )

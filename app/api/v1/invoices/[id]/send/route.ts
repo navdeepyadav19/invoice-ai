@@ -1,7 +1,6 @@
 import { json, readJson, withApi } from '@/lib/api/handler'
 import { DEFAULT_RULES } from '@/lib/api/rate-limit'
-import { serializeInvoice } from '@/lib/api/serialize'
-import * as invoices from '@/lib/services/invoices'
+import { sendInvoice } from '@/lib/operations/invoices'
 
 type Params = { id: string }
 
@@ -28,10 +27,6 @@ export const POST = withApi<Params>(
     const { id } = await route.params
     const body = (await readJson(request)) as { to?: string }
 
-    const result = await invoices.send(ctx, id, { to: body?.to })
-    const { invoice, items } = await invoices.get(ctx, id)
-    const refs = await invoices.refsForInvoice(ctx, invoice, items)
-
-    return json({ data: serializeInvoice(invoice, items, refs), emailed_to: result.emailedTo })
+    return json(await sendInvoice(ctx, id, { to: body?.to }))
   },
 )

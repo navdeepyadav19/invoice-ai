@@ -1,6 +1,5 @@
 import { json, withApi } from '@/lib/api/handler'
-import { serializeBusiness } from '@/lib/api/serialize'
-import * as businesses from '@/lib/services/business'
+import { retrieveBusiness } from '@/lib/operations/catalog'
 
 /**
  * GET /api/v1/business
@@ -11,6 +10,5 @@ import * as businesses from '@/lib/services/business'
  * *next* write, which is a confusing place to find out.
  */
 export const GET = withApi({ scope: 'business:read' }, async (ctx) => {
-  const business = await businesses.getPrimary(ctx)
-  return json({ data: serializeBusiness(business) })
+  return json(await retrieveBusiness(ctx))
 })

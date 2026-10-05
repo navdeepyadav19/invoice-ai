@@ -1,6 +1,5 @@
 import { json, readJson, withApi } from '@/lib/api/handler'
-import { serializeInvoice } from '@/lib/api/serialize'
-import * as invoices from '@/lib/services/invoices'
+import { payInvoice } from '@/lib/operations/invoices'
 
 type Params = { id: string }
 
@@ -18,12 +17,6 @@ export const POST = withApi<Params>(
     const { id } = await route.params
     const body = (await readJson(request)) as { paid_on?: string; reference?: string }
 
-    const invoice = await invoices.pay(ctx, id, {
-      paidOn: body?.paid_on,
-      reference: body?.reference,
-    })
-    const refs = await invoices.refsForInvoice(ctx, invoice, [])
-
-    return json({ data: serializeInvoice(invoice, undefined, refs) })
+    return json(await payInvoice(ctx, id, { paid_on: body?.paid_on, reference: body?.reference }))
   },
 )

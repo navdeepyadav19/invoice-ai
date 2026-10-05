@@ -1,6 +1,5 @@
 import { json, withApi } from '@/lib/api/handler'
-import { serializeEvent } from '@/lib/api/serialize'
-import * as invoices from '@/lib/services/invoices'
+import { listInvoiceEvents } from '@/lib/operations/invoices'
 
 type Params = { id: string }
 
@@ -19,10 +18,10 @@ type Params = { id: string }
 export const GET = withApi<Params>({ scope: 'invoices:read' }, async (ctx, request, route) => {
   const { id } = await route.params
   const params = new URL(request.url).searchParams
-  const page = await invoices.events(ctx, id, {
-    cursor: params.get('cursor'),
-    limit: params.get('limit') ? Number(params.get('limit')) : undefined,
-  })
-
-  return json({ data: page.data.map(serializeEvent), next_cursor: page.next_cursor })
+  return json(
+    await listInvoiceEvents(ctx, id, {
+      cursor: params.get('cursor'),
+      limit: params.get('limit') ? Number(params.get('limit')) : undefined,
+    }),
+  )
 })
