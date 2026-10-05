@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   Activity,
+  Bot,
   Building2,
   FilePlus2,
   FileText,
@@ -40,6 +41,7 @@ const PRIMARY_NAV: readonly NavItem[] = [
 const SETTINGS_NAV: readonly NavItem[] = [
   { href: '/settings/business', label: 'Business', icon: Building2 },
   { href: '/settings/api-keys', label: 'API keys', icon: KeyRound },
+  { href: '/settings/ai-assistants', label: 'AI assistants', icon: Bot },
   { href: '/settings/webhooks', label: 'Webhooks', icon: Webhook },
   { href: '/settings/activity', label: 'Activity', icon: Activity },
 ]
