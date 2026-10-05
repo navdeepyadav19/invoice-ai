@@ -28,6 +28,12 @@ export interface AuthContext {
   apiKeyId?: string
   /** Set when `via` is 'oauth'. The third-party app acting for the user. */
   clientId?: string
+  /**
+   * Set when `via` is 'oauth': this user's grant to that app. Rate limits key
+   * on it, not on clientId — clientId is shared by everyone who connected the
+   * same app, and one user's busy assistant must not spend another's budget.
+   */
+  grantId?: string
   requestId: string
 }
 
