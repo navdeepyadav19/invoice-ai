@@ -1,5 +1,14 @@
 import { anonDb, userDb } from '@/lib/db'
-import { apiKeyByPrefix, touchApiKey, type ApiKeyLookup } from '@/lib/db/rpc'
+import {
+  apiKeyByPrefix,
+  oauthTokenLookup,
+  oauthTouchGrant,
+  touchApiKey,
+  type ApiKeyLookup,
+  type OAuthTokenLookup,
+} from '@/lib/db/rpc'
+import { normaliseResource, resourceFor } from '@/lib/oauth/config'
+import { hashOAuthSecret } from '@/lib/oauth/tokens'
 import { checkValidity, parseApiKey, secretMatches } from '@/lib/auth/api-key'
 import { parseScopes } from '@/lib/auth/scopes'
 import type { AuthContext } from '@/lib/auth/context'
@@ -72,8 +81,59 @@ export async function authenticateBearer(
     return { ok: false, detail: 'A refresh token cannot be used as a bearer credential. Exchange it at /oauth/token.' }
   }
 
-  void options
-  return { ok: false, detail: 'Unrecognised credential. Expected an Invoice-AI API key.' }
+  if (token.startsWith('inv_oat_')) return authenticateOAuth(token, requestId, options.audience)
+
+  return { ok: false, detail: 'Unrecognised credential. Expected an Invoice-AI API key or OAuth access token.' }
+}
+
+/**
+ * An OAuth access token: issued to a connected app (Claude, ChatGPT…) after
+ * the user approved it on the consent screen.
+ *
+ * Checked in the order that keeps answers honest without helping a guesser:
+ * the token must exist and be an access token before we say anything more
+ * specific than "invalid".
+ */
+async function authenticateOAuth(token: string, requestId: string, audience: Audience): Promise<AuthResult> {
+  let row: OAuthTokenLookup | null
+  try {
+    row = await oauthTokenLookup(anonDb(), hashOAuthSecret(token))
+  } catch (cause) {
+    console.error('[api] oauth token lookup failed on %s', requestId, cause)
+    return { ok: false, detail: 'Could not verify the access token.' }
+  }
+
+  if (!row || row.kind !== 'access') return { ok: false, detail: 'Invalid access token.' }
+  if (row.revoked_at || row.grant_revoked_at) {
+    return { ok: false, detail: 'This connection was revoked. Reconnect the app to continue.' }
+  }
+  if (Date.parse(row.expires_at) <= Date.now()) return { ok: false, detail: 'The access token has expired. Refresh it.' }
+
+  // Audience binding (RFC 8707): a token for the MCP server is not an API key.
+  if (normaliseResource(row.resource) !== resourceFor(audience)) {
+    return { ok: false, detail: 'This token was issued for a different resource.' }
+  }
+
+  // What the token says it may do, narrowed by the grant as it stands now —
+  // so removing a permission from a connection takes effect immediately.
+  const scopes = parseScopes(row.scopes).filter((scope) => row.grant_scopes.includes(scope))
+  if (!scopes.length) return { ok: false, detail: 'This connection has no usable permissions left.' }
+
+  void oauthTouchGrant(anonDb(), row.grant_id).catch(() => {})
+
+  return {
+    ok: true,
+    expiresAt: Math.floor(Date.parse(row.expires_at) / 1000),
+    ctx: {
+      userId: row.owner_id,
+      db: userDb(row.owner_id),
+      via: 'oauth',
+      scopes: new Set(scopes),
+      clientId: row.client_uuid,
+      grantId: row.grant_id,
+      requestId,
+    },
+  }
 }
 
 async function authenticateApiKey(token: string, requestId: string): Promise<AuthResult> {

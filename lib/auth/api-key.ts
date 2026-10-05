@@ -141,7 +141,8 @@ function pepper(): string {
   return value
 }
 
-function randomString(length: number): string {
+/** Uniform base62. Shared with OAuth (lib/oauth/tokens.ts), which mints its secrets the same way. */
+export function randomString(length: number): string {
   // rejection-free: 62 does not divide 256, so mapping bytes with % 62 biases
   // the first 8 characters of the alphabet. Drawing from a 4x buffer and
   // rejecting out-of-range bytes keeps the distribution uniform.

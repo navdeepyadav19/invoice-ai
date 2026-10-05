@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server'
 
 import { getAuth } from '@/lib/auth/server'
+import { isResumablePath, RETURN_TO_COOKIE, RETURN_TO_MAX_AGE_SECONDS } from '@/lib/auth/return-to'
 
 /**
  * Next.js 16 renamed Middleware to Proxy. Same execution model, new filename
@@ -61,6 +62,13 @@ const PUBLIC_PREFIXES = [
   // entry an assistant's valid token would get a 307 to an HTML login page
   // instead of the 401 challenge that tells it how to sign in.
   '/mcp',
+  // OAuth endpoints an app calls server-to-server, authenticated by the
+  // client's own credentials (or PKCE). The consent page, /oauth/authorize,
+  // is deliberately NOT here: it needs the user's session, and a signed-out
+  // visitor must go through /login?next=… with the full request preserved.
+  '/oauth/token',
+  '/oauth/register',
+  '/oauth/revoke',
 ]
 
 const SESSION_VERIFIER_PARAM = 'neon_auth_session_verifier'
@@ -78,6 +86,18 @@ export async function proxy(request: NextRequest) {
   }
 
   const response = await getAuth().middleware({ loginUrl: '/login' })(request)
+
+  // A flow another app is waiting on: remember it, so a new user who has to
+  // sign up and onboard first still ends up back here (lib/auth/return-to.ts).
+  if (isResumablePath(pathname)) {
+    response.cookies.set(RETURN_TO_COOKIE, pathname + search, {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: request.nextUrl.protocol === 'https:',
+      path: '/',
+      maxAge: RETURN_TO_MAX_AGE_SECONDS,
+    })
+  }
 
   // Neon's middleware copies the original query onto the login URL. We want
   // the whole destination in `next` instead: /cli/authorize?code=WXYZ-2345
