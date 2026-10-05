@@ -4,6 +4,14 @@ description: "Changes to the Invoice-AI API, SDKs and CLI."
 icon: "clock-rotate-left"
 ---
 
+<Update label="October 2026" description="MCP server">
+  - A remote MCP server at `https://invoice.horizonpay.co/mcp`, so Claude, ChatGPT, Cursor and other assistants can work in your account. See [MCP server](/mcp/overview).
+  - 16 tools: look up customers, products and invoices, create customers and drafts, and finalize, email, mark paid or void. Each runs the same operation as its REST endpoint. See [Tools](/mcp/tools).
+  - Sign in with OAuth 2.1 (PKCE, Client ID Metadata Documents and dynamic registration) and a consent screen where you choose permissions. Finalizing, emailing and recording payments are opt-in. API keys work too. See [Authentication](/mcp/authentication).
+  - Finalize, send, mark paid and void need a confirmation: the first call returns a preview and a token, and only a second call with the token acts.
+  - Connect and disconnect assistants in **Settings → AI assistants**. Tool calls appear in **Settings → Activity**.
+</Update>
+
 <Update label="October 2026" description="SDKs & CLI 0.1.0 (beta) published">
   - `npm install @horizonpay/invoice-ai` and `pip install horizonpay-invoice-ai`: typed clients with retries, idempotency keys, pagination and webhook verification. See [Node.js](/sdks/node) and [Python](/sdks/python).
   - `npm install -g @horizonpay/invoice-ai-cli`: the `invoice-ai` command with browser login. See [CLI](/cli/overview).

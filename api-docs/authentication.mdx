@@ -54,6 +54,10 @@ Give each integration only the scopes it needs.
 
 A missing, malformed, unknown, revoked or expired key returns `401 unauthorized`. The `detail` says which, for example `This API key has been revoked.` See [Errors](/errors).
 
+## OAuth
+
+Apps can also act on a user's behalf with OAuth 2.1 instead of an API key. The user signs in and chooses what the app may do. This is how AI assistants connect to the [MCP server](/mcp/overview), and it works for the REST API too. See [MCP authentication](/mcp/authentication).
+
 ## Rotate a key
 
 1. Create a new key with the same scopes.

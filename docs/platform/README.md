@@ -11,10 +11,10 @@ Most of the plan has been built. Each module doc opens with a status note; the s
 | Module | Status |
 |---|---|
 | 00 Foundation | Built: `lib/auth/context.ts`, `lib/services/*`, atomic `issue_invoice()` |
-| 01 API | Built: keys, scopes, idempotency, webhooks, rate limits, audit. **OAuth (A4) is not built** |
+| 01 API | Built: keys, scopes, idempotency, webhooks, rate limits, audit, OAuth 2.1 (`lib/oauth/`, `0016_oauth.sql`) |
 | 02 SDK | Built in [navdeepyadav19/invoice-ai-sdk](https://github.com/navdeepyadav19/invoice-ai-sdk): TypeScript and Python, generated from `api-docs/openapi.json`. Publishing pending |
 | 03 CLI | Built in the same repo (`invoice-ai`, browser device login). The server half is here: `app/api/cli/`, `lib/cli-auth/` |
-| 04 MCP | Not built |
+| 04 MCP | Built: remote server at `/mcp` (`app/mcp/route.ts`, `lib/mcp/`), 16 tools, OAuth or API key, server-enforced confirmations. Docs: [docs.horizonpay.co/mcp/overview](https://docs.horizonpay.co/mcp/overview) |
 
 Two decisions taken after this was written change the vocabulary throughout:
 

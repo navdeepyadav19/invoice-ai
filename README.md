@@ -214,6 +214,22 @@ sign-up verification emails don't go out. To enable:
 Until a domain is verified, Resend only delivers to your own address from
 `onboarding@resend.dev`.
 
+## Use it from Claude / ChatGPT
+
+Invoice-AI has a remote MCP server, so an AI assistant can look up, draft and
+manage invoices in your account:
+
+```
+https://invoice.horizonpay.co/mcp
+```
+
+Add it as a custom connector in Claude, ChatGPT, Claude Code or Cursor, then
+approve what it may do. Finalizing, emailing, marking paid and voiding always
+ask you to confirm in the chat. Per-client steps are in
+**Settings → AI assistants**, where you can also disconnect an app, and in the
+[MCP docs](https://docs.horizonpay.co/mcp/overview). The code is in
+`app/mcp/route.ts`, `lib/mcp/` and `lib/oauth/`.
+
 ## Not built yet
 
 - Payment links and marking paid from a webhook
