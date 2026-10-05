@@ -269,53 +269,55 @@ export function oauthAuthorize(
   )
 }
 
-export type OAuthExchangeOutcome = 'ok' | 'invalid' | 'expired' | 'reused' | 'revoked'
+export type OAuthRedeemOutcome =
+  | 'ok'
+  | 'invalid'
+  | 'reused'
+  | 'expired'
+  | 'revoked'
+  | 'invalid_grant'
+  | 'invalid_target'
 
 /** Fields are null unless outcome is 'ok'. */
-export interface OAuthCodeExchange {
-  outcome: OAuthExchangeOutcome
-  code_id: string | null
+export interface OAuthCodeRedemption {
+  outcome: OAuthRedeemOutcome
   grant_id: string | null
   owner_id: string | null
   scopes: string[] | null
-  redirect_uri: string | null
-  code_challenge: string | null
   resource: string | null
 }
 
-/** Consumes the code (single use). Anon. A replayed code revokes its token family. */
-export async function oauthExchangeCode(db: Db, codeHash: string, clientUuid: string): Promise<OAuthCodeExchange | null> {
-  const { rows } = await sql<OAuthCodeExchange>`
-    select * from public.oauth_exchange_code(${codeHash}, ${clientUuid}::uuid)
-  `.execute(db)
-  return rows[0] ?? null
-}
-
 /**
- * Mints the first pair for a just-exchanged code. Scopes, resource and grant
- * are copied from the code inside the function. Pass refreshHash null to mint
- * an access token only. Anon. False = refused (stale, replayed, revoked, or
- * already minted).
+ * grant_type=authorization_code, atomically: checks client, redirect_uri,
+ * resource and the PKCE verifier against the stored code, then mints the
+ * first pair with scopes, resource and grant copied from the code. Anon.
+ *
+ * Any attempt that names the right code and client consumes it, pass or fail;
+ * a replay revokes everything minted from it. `resource` null means "the one
+ * authorized". Pass refreshHash null to mint an access token only.
  */
-export function oauthIssueTokens(
+export async function oauthRedeemCode(
   db: Db,
   input: {
-    familyId: string
+    codeHash: string
+    clientUuid: string
+    redirectUri: string
+    codeVerifier: string
+    resource: string | null
     accessHash: string
     accessExpiresAt: string
     refreshHash: string | null
     refreshExpiresAt: string | null
   },
-): Promise<boolean> {
-  return scalar(
-    db,
-    sql<{ result: boolean }>`
-      select public.oauth_issue_tokens(
-        ${input.familyId}::uuid, ${input.accessHash}, ${input.accessExpiresAt}::timestamptz,
-        ${input.refreshHash}, ${input.refreshExpiresAt}::timestamptz
-      ) as result
-    `,
-  )
+): Promise<OAuthCodeRedemption | null> {
+  const { rows } = await sql<OAuthCodeRedemption>`
+    select * from public.oauth_redeem_code(
+      ${input.codeHash}, ${input.clientUuid}::uuid, ${input.redirectUri}, ${input.codeVerifier}, ${input.resource},
+      ${input.accessHash}, ${input.accessExpiresAt}::timestamptz,
+      ${input.refreshHash}, ${input.refreshExpiresAt}::timestamptz
+    )
+  `.execute(db)
+  return rows[0] ?? null
 }
 
 export type OAuthRotateOutcome = 'ok' | 'invalid' | 'expired' | 'revoked' | 'reused' | 'invalid_scope'

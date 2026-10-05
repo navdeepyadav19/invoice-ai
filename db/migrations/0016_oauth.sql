@@ -38,7 +38,7 @@
 -- and we cannot tell which is which, so the whole family is revoked. The same
 -- applies to a replayed authorization code (RFC 6749 §4.1.2).
 --
---   code ──exchange──▶ access₁ + refresh₁ ──rotate──▶ access₂ + refresh₂ ──▶ …
+--   code ──redeem────▶ access₁ + refresh₁ ──rotate──▶ access₂ + refresh₂ ──▶ …
 --     │                                │
 --     └─ replayed? revoke family       └─ refresh₁ replayed? revoke family
 --
@@ -214,10 +214,10 @@ comment on table public.oauth_grants is
 -- from oauth_tokens.family_id back here: codes are swept after a day, refresh
 -- tokens live for 30.
 --
--- replayed_at is set when a consumed code is presented again. oauth_issue_tokens
--- refuses to mint for a replayed code, which closes the gap between "exchange
--- said ok" and "tokens inserted": a replay landing in that gap would otherwise
--- revoke an empty family and let the tokens appear afterwards.
+-- consumed_at is set by the first redemption attempt that names the right
+-- code and client, successful or not. replayed_at records the first time a
+-- consumed code was presented again — the theft signal that revoked its
+-- family — so an investigation can see it on the code itself.
 -- ---------------------------------------------------------------------------
 
 create table if not exists public.oauth_authorization_codes (
@@ -591,39 +591,73 @@ revoke execute on function public.oauth_authorize(uuid, text[], text, text, text
 grant execute on function public.oauth_authorize(uuid, text[], text, text, text, text) to authenticated;
 
 -- ---------------------------------------------------------------------------
--- 9. oauth_exchange_code — POST /oauth/token, grant_type=authorization_code
+-- 9. oauth_redeem_code — POST /oauth/token, grant_type=authorization_code
 --
--- Possession of the code is the credential, so this is open to anon. The
--- FOR UPDATE lock makes the code single-use: two concurrent exchanges
--- serialise on the row, the first sets consumed_at, the second sees it.
+-- The whole redemption in one statement: find the code, check everything the
+-- client presented against it, and mint the first token pair, all under one
+-- row lock. There is deliberately no "exchange now, mint later" split: with
+-- two calls, whatever links them (the family id) becomes a bearer credential
+-- in between, and correctness hangs on the app calling them in the right
+-- order with the right checks between. Here the database refuses to mint
+-- unless every check passed in the same transaction.
 --
--- Outcomes (checked in this order):
+-- Open to anon: possession of the code plus its PKCE verifier is the
+-- credential. The caller supplies only what the client sent and the hashes
+-- and expiries of the new tokens; scopes, resource and grant are copied from
+-- the code, so nothing upstream can widen them.
 --
---   invalid  unknown code, or presented by a different client
---   reused   already consumed. Somebody is replaying it: revoke every token
---            minted from it (the family) and mark it replayed, so a mint that
---            hasn't happened yet never will. Checked before expiry on purpose
---            — a replay six minutes later is just as suspicious.
---   expired  older than 5 minutes
---   revoked  the user revoked the grant between Approve and now
---   ok       THIS call consumed the code. redirect_uri, code_challenge and
---            resource come back for the app to verify (PKCE needs the
---            verifier, which only the app sees). A failed check there leaves
---            the code consumed — a wrong verifier should burn it.
+-- Outcomes, checked in this order under FOR UPDATE on the code row:
 --
--- Minting is a separate call (oauth_issue_tokens) so the app can verify PKCE
--- in between, in TypeScript, with a constant-time comparison.
+--   invalid         unknown code, or presented by a different client. The
+--                   code is left untouched: a stranger can't burn it.
+--   reused          already consumed. Somebody is replaying it: revoke every
+--                   token minted from it (the family), record replayed_at.
+--                   Checked before expiry on purpose — a replay six minutes
+--                   later is just as suspicious.
+--
+--   ── from here on the code is consumed, whatever the outcome. A request that
+--      got this far named the right code and client; if anything else about it
+--      is wrong, the code must not survive to be tried again (RFC 6749
+--      §4.1.2, OAuth 2.1 §4.1.3). ──
+--
+--   expired         older than 5 minutes
+--   revoked         the user revoked the grant between Approve and now
+--   invalid_grant   redirect_uri differs from the one authorized, or the PKCE
+--                   verifier is malformed or doesn't hash to the challenge
+--   invalid_target  a resource was sent and differs from the authorized one
+--                   (RFC 8707). Null means "the one I asked for at authorize".
+--   ok              tokens minted; grant, owner, scopes and resource returned
+--
+-- PKCE S256 (RFC 7636 §4.6): base64url(sha256(ascii(verifier))) without
+-- padding must equal code_challenge. sha256() is built into Postgres (11+),
+-- so this needs no extension. The comparison is not constant-time, and need
+-- not be: what it compares against, the challenge, was public in the
+-- authorize URL.
+--
+-- p_refresh_hash may be null for a client registered without the
+-- refresh_token grant type; then only an access token is minted.
+--
+-- replayed_at no longer guards anything (minting can't happen after the code
+-- is consumed); it stays as the record of when a theft signal was seen.
 -- ---------------------------------------------------------------------------
 
-create or replace function public.oauth_exchange_code(p_code_hash text, p_client uuid)
+
+create or replace function public.oauth_redeem_code(
+  p_code_hash text,
+  p_client uuid,
+  p_redirect_uri text,
+  p_code_verifier text,
+  p_resource text,
+  p_access_hash text,
+  p_access_expires timestamptz,
+  p_refresh_hash text,
+  p_refresh_expires timestamptz
+)
 returns table (
   outcome text,
-  code_id uuid,
   grant_id uuid,
   owner_id uuid,
   scopes text[],
-  redirect_uri text,
-  code_challenge text,
   resource text
 )
 language plpgsql
@@ -636,13 +670,22 @@ declare
   v_code public.oauth_authorization_codes%rowtype;
   v_grant_revoked timestamptz;
 begin
+  -- Caller bugs, not client errors: raise before touching anything.
+  if p_access_expires is null or p_access_expires <= now() then
+    raise exception 'Access token expiry must be in the future';
+  end if;
+
+  if p_refresh_hash is not null and (p_refresh_expires is null or p_refresh_expires <= now()) then
+    raise exception 'Refresh token expiry must be in the future';
+  end if;
+
   select * into v_code
   from public.oauth_authorization_codes c
   where c.code_hash = p_code_hash
   for update;
 
   if not found or v_code.client_id <> p_client then
-    return query select 'invalid'::text, null::uuid, null::uuid, null::uuid, null::text[], null::text, null::text, null::text;
+    return query select 'invalid'::text, null::uuid, null::uuid, null::text[], null::text;
     return;
   end if;
 
@@ -655,21 +698,7 @@ begin
     set replayed_at = coalesce(c.replayed_at, now())
     where c.id = v_code.id;
 
-    return query select 'reused'::text, null::uuid, null::uuid, null::uuid, null::text[], null::text, null::text, null::text;
-    return;
-  end if;
-
-  if v_code.expires_at <= now() then
-    return query select 'expired'::text, null::uuid, null::uuid, null::uuid, null::text[], null::text, null::text, null::text;
-    return;
-  end if;
-
-  select g.revoked_at into v_grant_revoked
-  from public.oauth_grants g
-  where g.id = v_code.grant_id;
-
-  if v_grant_revoked is not null then
-    return query select 'revoked'::text, null::uuid, null::uuid, null::uuid, null::text[], null::text, null::text, null::text;
+    return query select 'reused'::text, null::uuid, null::uuid, null::text[], null::text;
     return;
   end if;
 
@@ -677,71 +706,41 @@ begin
   set consumed_at = now()
   where c.id = v_code.id;
 
-  return query select 'ok'::text, v_code.id, v_code.grant_id, v_code.owner_id, v_code.scopes,
-                      v_code.redirect_uri, v_code.code_challenge, v_code.resource;
-end;
-$$;
-
-revoke all on function public.oauth_exchange_code(text, uuid) from public;
-grant execute on function public.oauth_exchange_code(text, uuid) to anon;
-
--- ---------------------------------------------------------------------------
--- 10. oauth_issue_tokens — mint the first access + refresh pair
---
--- Called right after a successful exchange and PKCE check. The caller passes
--- only hashes and expiries: scopes, resource and grant are copied from the
--- code, so a bug (or a hostile caller) upstream cannot widen anything.
---
--- Guards, all under a lock on the code row:
---   * the code was consumed in the last 60 seconds (by the exchange above)
---   * it was not replayed since (see replayed_at)
---   * the grant is still active
---   * the family is still empty — one code, one pair, ever
---
--- p_refresh_hash may be null for a client registered without the
--- refresh_token grant type; then only an access token is minted.
---
--- Returns true when tokens were inserted, false otherwise.
--- ---------------------------------------------------------------------------
-
-create or replace function public.oauth_issue_tokens(
-  p_family uuid,
-  p_access_hash text,
-  p_access_expires timestamptz,
-  p_refresh_hash text,
-  p_refresh_expires timestamptz
-)
-returns boolean
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  v_code public.oauth_authorization_codes%rowtype;
-begin
-  if p_access_expires is null or p_access_expires <= now() then
-    raise exception 'Access token expiry must be in the future';
+  if v_code.expires_at <= now() then
+    return query select 'expired'::text, null::uuid, null::uuid, null::text[], null::text;
+    return;
   end if;
 
-  if p_refresh_hash is not null and (p_refresh_expires is null or p_refresh_expires <= now()) then
-    raise exception 'Refresh token expiry must be in the future';
+  -- FOR SHARE: a concurrent oauth_revoke_grant waits for this transaction, so
+  -- its token sweep sees the tokens minted below.
+  select g.revoked_at into v_grant_revoked
+  from public.oauth_grants g
+  where g.id = v_code.grant_id
+  for share;
+
+  if v_grant_revoked is not null then
+    return query select 'revoked'::text, null::uuid, null::uuid, null::text[], null::text;
+    return;
   end if;
 
-  select c.* into v_code
-  from public.oauth_authorization_codes c
-  join public.oauth_grants g on g.id = c.grant_id
-  where c.id = p_family
-    and c.consumed_at > now() - interval '60 seconds'
-    and c.replayed_at is null
-    and g.revoked_at is null
-  for update of c;
-
-  if not found then
-    return false;
+  if p_redirect_uri is distinct from v_code.redirect_uri then
+    return query select 'invalid_grant'::text, null::uuid, null::uuid, null::text[], null::text;
+    return;
   end if;
 
-  if exists (select 1 from public.oauth_tokens t where t.family_id = p_family) then
-    return false;
+  if p_resource is not null and p_resource <> v_code.resource then
+    return query select 'invalid_target'::text, null::uuid, null::uuid, null::text[], null::text;
+    return;
+  end if;
+
+  if p_code_verifier is null
+    or p_code_verifier !~ '^[A-Za-z0-9._~-]{43,128}$'
+    or translate(
+         rtrim(encode(pg_catalog.sha256(convert_to(p_code_verifier, 'UTF8')), 'base64'), '='),
+         '+/', '-_'
+       ) <> v_code.code_challenge then
+    return query select 'invalid_grant'::text, null::uuid, null::uuid, null::text[], null::text;
+    return;
   end if;
 
   insert into public.oauth_tokens (token_hash, kind, grant_id, family_id, scopes, resource, expires_at)
@@ -752,20 +751,20 @@ begin
     values (p_refresh_hash, 'refresh', v_code.grant_id, v_code.id, v_code.scopes, v_code.resource, p_refresh_expires);
   end if;
 
-  update public.oauth_clients set last_used_at = now() where id = v_code.client_id;
+  update public.oauth_clients c set last_used_at = now() where c.id = v_code.client_id;
 
-  return true;
+  return query select 'ok'::text, v_code.grant_id, v_code.owner_id, v_code.scopes, v_code.resource;
 end;
 $$;
 
-revoke all on function public.oauth_issue_tokens(uuid, text, timestamptz, text, timestamptz) from public;
-grant execute on function public.oauth_issue_tokens(uuid, text, timestamptz, text, timestamptz) to anon;
+revoke all on function public.oauth_redeem_code(text, uuid, text, text, text, text, timestamptz, text, timestamptz) from public;
+grant execute on function public.oauth_redeem_code(text, uuid, text, text, text, text, timestamptz, text, timestamptz) to anon;
 
 -- ---------------------------------------------------------------------------
--- 11. oauth_rotate_refresh — POST /oauth/token, grant_type=refresh_token
+-- 10. oauth_rotate_refresh — POST /oauth/token, grant_type=refresh_token
 --
 -- The refresh token is spent and replaced on every use. FOR UPDATE on its row
--- makes that single-use the same way the code exchange is.
+-- makes that single-use the same way code redemption is.
 --
 -- Outcomes (checked in this order):
 --
@@ -887,7 +886,7 @@ revoke all on function public.oauth_rotate_refresh(text, uuid, text[], text, tim
 grant execute on function public.oauth_rotate_refresh(text, uuid, text[], text, timestamptz, text, timestamptz) to anon;
 
 -- ---------------------------------------------------------------------------
--- 12. oauth_token_lookup — authenticate a request carrying a bearer token
+-- 11. oauth_token_lookup — authenticate a request carrying a bearer token
 --
 -- The OAuth twin of api_key_by_prefix: anon in, just enough out for the
 -- authenticator to decide. It returns revoked and expired rows too, with the
@@ -929,7 +928,7 @@ revoke all on function public.oauth_token_lookup(text) from public;
 grant execute on function public.oauth_token_lookup(text) to anon, authenticated;
 
 -- ---------------------------------------------------------------------------
--- 13. oauth_touch_grant — "last used" for Settings
+-- 12. oauth_touch_grant — "last used" for Settings
 --
 -- Fire-and-forget like touch_api_key, and throttled to one write a minute: an
 -- MCP session can make dozens of calls a minute, and each would otherwise be
@@ -952,7 +951,7 @@ revoke all on function public.oauth_touch_grant(uuid) from public;
 grant execute on function public.oauth_touch_grant(uuid) to anon, authenticated;
 
 -- ---------------------------------------------------------------------------
--- 14. oauth_revoke_token — POST /oauth/revoke (RFC 7009)
+-- 13. oauth_revoke_token — POST /oauth/revoke (RFC 7009)
 --
 -- The client revokes its own token. Revoking a refresh token takes its whole
 -- family (RFC 7009 §2.1: the access tokens from the same grant SHOULD go too);
@@ -995,10 +994,10 @@ revoke all on function public.oauth_revoke_token(text, uuid) from public;
 grant execute on function public.oauth_revoke_token(text, uuid) to anon;
 
 -- ---------------------------------------------------------------------------
--- 15. oauth_revoke_grant — Settings → AI assistants → Revoke
+-- 14. oauth_revoke_grant — Settings → AI assistants → Revoke
 --
 -- The user disconnects an app. The grant and every token under it are revoked
--- in one statement each; unconsumed codes die with it (oauth_exchange_code
+-- in one statement each; unconsumed codes die with it (oauth_redeem_code
 -- answers 'revoked'). Only the owner can revoke; anyone else gets false, as
 -- does an already-revoked grant.
 -- ---------------------------------------------------------------------------
@@ -1037,7 +1036,7 @@ revoke execute on function public.oauth_revoke_grant(uuid) from anon;
 grant execute on function public.oauth_revoke_grant(uuid) to authenticated;
 
 -- ---------------------------------------------------------------------------
--- 16. oauth_list_grants — the "Connected apps" list
+-- 15. oauth_list_grants — the "Connected apps" list
 --
 -- The caller's grants with their client's display fields. A function rather
 -- than a select on oauth_grants because oauth_clients is not readable from a

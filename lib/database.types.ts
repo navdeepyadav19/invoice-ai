@@ -321,8 +321,9 @@ export type OAuthAuthorizationCodeRow = {
   resource: string
   created_at: string
   expires_at: string
+  /** Set by the first redemption attempt with the right code and client, pass or fail. */
   consumed_at: string | null
-  /** Set when a consumed code is presented again; blocks any later mint. */
+  /** First time a consumed code was presented again (its family was revoked then). */
   replayed_at: string | null
 }
 
