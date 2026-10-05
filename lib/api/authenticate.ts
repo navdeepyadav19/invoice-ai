@@ -13,10 +13,29 @@ import type { AuthContext } from '@/lib/auth/context'
  */
 
 export type AuthResult =
-  | { ok: true; ctx: AuthContext }
+  /** `expiresAt` (unix seconds) is set for credentials that expire on their own, like OAuth access tokens. */
+  | { ok: true; ctx: AuthContext; expiresAt?: number }
   | { ok: false; detail: string }
 
-export async function authenticate(request: Request, requestId: string): Promise<AuthResult> {
+/**
+ * Which door the credential is being presented at.
+ *
+ * API keys work at both. OAuth access tokens are bound to one audience when
+ * they're issued (RFC 8707): a token minted for an assistant's MCP connection
+ * must not double as a REST credential, and vice versa — otherwise handing an
+ * assistant "drafts" access would quietly hand every script it writes the same.
+ */
+export type Audience = 'api' | 'mcp'
+
+export interface AuthenticateOptions {
+  audience: Audience
+}
+
+export async function authenticate(
+  request: Request,
+  requestId: string,
+  options: AuthenticateOptions = { audience: 'api' },
+): Promise<AuthResult> {
   const header = request.headers.get('authorization')
 
   if (!header) {
@@ -28,15 +47,33 @@ export async function authenticate(request: Request, requestId: string): Promise
     return { ok: false, detail: 'Authorization header must use the Bearer scheme.' }
   }
 
-  const token = match[1].trim()
+  return authenticateBearer(match[1].trim(), requestId, options)
+}
 
-  // OAuth access tokens (phase A4) will also arrive here and are distinguished
-  // by *not* carrying our key prefix. Until then, anything else is a 401.
-  if (!token.startsWith('inv_live_')) {
-    return { ok: false, detail: 'Unrecognised credential. Expected an Invoice-AI API key.' }
+/**
+ * The credential itself, already taken out of its header. The MCP route needs
+ * this form: its auth wrapper has parsed the header before calling us.
+ *
+ * Credentials are told apart by prefix, which is also what lets secret
+ * scanners recognise a leaked one:
+ *
+ *   inv_live_…   API key                 any audience
+ *   inv_oat_…    OAuth access token      the audience it was issued for
+ *   inv_ort_…    OAuth refresh token     never a bearer credential
+ */
+export async function authenticateBearer(
+  token: string,
+  requestId: string,
+  options: AuthenticateOptions = { audience: 'api' },
+): Promise<AuthResult> {
+  if (token.startsWith('inv_live_')) return authenticateApiKey(token, requestId)
+
+  if (token.startsWith('inv_ort_')) {
+    return { ok: false, detail: 'A refresh token cannot be used as a bearer credential. Exchange it at /oauth/token.' }
   }
 
-  return authenticateApiKey(token, requestId)
+  void options
+  return { ok: false, detail: 'Unrecognised credential. Expected an Invoice-AI API key.' }
 }
 
 async function authenticateApiKey(token: string, requestId: string): Promise<AuthResult> {

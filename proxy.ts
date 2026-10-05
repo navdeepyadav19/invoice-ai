@@ -56,6 +56,11 @@ const PUBLIC_PREFIXES = [
   '/api/cron/',
   // OAuth discovery documents, served unauthenticated by definition.
   '/.well-known/',
+  // The MCP server. Like /api/v1, it authenticates from a bearer token in the
+  // Authorization header, which this proxy knows nothing about — without this
+  // entry an assistant's valid token would get a 307 to an HTML login page
+  // instead of the 401 challenge that tells it how to sign in.
+  '/mcp',
 ]
 
 const SESSION_VERIFIER_PARAM = 'neon_auth_session_verifier'

@@ -2,6 +2,7 @@ import { json, readJson, withApi } from '@/lib/api/handler'
 import { parseWire } from '@/lib/api/validate'
 import { serializeCustomer } from '@/lib/api/serialize'
 import * as clients from '@/lib/services/clients'
+import { retrieveCustomer } from '@/lib/operations/customers'
 import {
   customerWirePartialToClient,
   customerWireSchema,
@@ -13,7 +14,7 @@ type Params = { id: string }
 /** GET /api/v1/customers/{id} — `cus_…` or UUID. */
 export const GET = withApi<Params>({ scope: 'clients:read' }, async (ctx, _request, route) => {
   const { id } = await route.params
-  return json({ data: serializeCustomer(await clients.get(ctx, id)) })
+  return json(await retrieveCustomer(ctx, id))
 })
 
 /**
