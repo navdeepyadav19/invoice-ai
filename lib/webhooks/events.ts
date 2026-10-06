@@ -19,6 +19,12 @@ export const WEBHOOK_EVENTS = [
   'invoice.downloaded',
   'invoice.paid',
   'invoice.voided',
+  'invoice.payment_succeeded',
+  'invoice.payment_failed',
+  'invoice.refunded',
+  'invoice.credited',
+  'invoice.dispute_opened',
+  'invoice.dispute_closed',
 ] as const
 
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number]
@@ -36,8 +42,14 @@ export const WEBHOOK_EVENT_LABELS: Record<WebhookEvent, string> = {
   'invoice.email_failed': 'The email provider rejected an invoice email',
   'invoice.viewed': 'A client opened the invoice link',
   'invoice.downloaded': 'A client downloaded the PDF',
-  'invoice.paid': 'An invoice was marked paid',
+  'invoice.paid': 'An invoice was paid in full',
   'invoice.voided': 'An invoice was voided',
+  'invoice.payment_succeeded': 'A payment was received (full or partial)',
+  'invoice.payment_failed': 'An online payment attempt failed',
+  'invoice.refunded': 'A payment was refunded',
+  'invoice.credited': 'An amount was credited, so the client no longer owes it',
+  'invoice.dispute_opened': 'A client disputed a card payment',
+  'invoice.dispute_closed': 'A payment dispute was resolved',
 }
 
 /**

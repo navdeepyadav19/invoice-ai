@@ -1,6 +1,6 @@
 import { requireScope, type AuthContext } from '@/lib/auth/context'
 import type { Db } from '@/lib/db'
-import { issueInvoice, replaceInvoiceItems } from '@/lib/db/rpc'
+import { issueInvoice, recordManualPayment, replaceInvoiceItems } from '@/lib/db/rpc'
 import { invalidState, notFound, q, rateLimitedError, ServiceError, upstreamFailed } from '@/lib/services/errors'
 import { afterPosition, clampLimit, parseCursor, toPage, type Page } from '@/lib/services/pagination'
 import * as businesses from '@/lib/services/business'
@@ -396,10 +396,19 @@ async function finalizeForSend(ctx: AuthContext, id: string): Promise<string> {
   return data
 }
 
+/**
+ * Record a payment received outside Invoice-AI (bank transfer, cash, cheque).
+ *
+ * `amountMinor` is in minor units of the invoice currency, as on the wire. Left
+ * out, the whole remaining balance is paid — POST /pay's original meaning. A
+ * smaller amount is a partial payment: the invoice stays open with a balance.
+ * The ledger function (0017 record_manual_payment) locks the invoice row, so a
+ * manual payment and an online one landing together cannot double-count.
+ */
 export async function pay(
   ctx: AuthContext,
   id: string,
-  options: { paidOn?: string; reference?: string } = {},
+  options: { paidOn?: string; reference?: string; amountMinor?: number } = {},
 ): Promise<InvoiceRow> {
   requireScope(ctx, 'payments:write')
 
@@ -413,33 +422,37 @@ export async function pay(
       { path: 'reference', message: 'At most 200 characters.' },
     ])
   }
-
-  const { invoice: openInvoice } = await load(ctx, id)
-
-  const data = await q(
-    ctx.db
-      .updateTable('invoices')
-      .set({ status: 'paid', paid_at: options.paidOn ?? new Date().toISOString() })
-      .where('id', '=', openInvoice.id)
-      // Not `status <> 'draft'`. That let a void invoice be flipped to paid.
-      .where('status', '=', 'open')
-      .returningAll()
-      .executeTakeFirst(),
-  )
-
-  // Nothing changed. Work out why, so the caller gets a 404 or a 409 rather
-  // than a success that did nothing.
-  if (!data) {
-    const { invoice } = await load(ctx, openInvoice.id)
-    throw invalidState(`Invoice is ${invoice.status} and cannot be marked paid.`)
+  if (options.amountMinor != null && (!Number.isSafeInteger(options.amountMinor) || options.amountMinor <= 0)) {
+    throw new ServiceError('validation', 'amount must be a positive integer in minor units.', [
+      { path: 'amount', message: 'Expected a whole number of minor units greater than zero, e.g. 150000 for $1,500.00.' },
+    ])
   }
 
-  await writeEvent(ctx, openInvoice.id, 'paid', {
-    ...actorMeta(ctx),
-    ...(options.reference ? { reference: options.reference } : {}),
-  })
+  const { invoice } = await load(ctx, id)
 
-  return data as unknown as InvoiceRow
+  if (invoice.status !== 'open') {
+    throw invalidState(`Invoice is ${invoice.status} and cannot take a payment.`)
+  }
+
+  const amount = options.amountMinor != null ? wireMinorToMajor(options.amountMinor, invoice.currency, 'amount') : null
+  const remaining = invoice.total - (invoice.amount_credited ?? 0) - (invoice.amount_paid ?? 0)
+  if (amount != null && amount > remaining + 1e-9) {
+    throw new ServiceError('validation', 'The payment is larger than the balance due.', [
+      { path: 'amount', message: 'At most the remaining balance (amount_remaining).' },
+    ])
+  }
+
+  await q(
+    recordManualPayment(ctx.db, invoice.id, {
+      amount,
+      paidAt: options.paidOn ?? null,
+      reference: options.reference ?? null,
+      meta: actorMeta(ctx),
+    }),
+  )
+
+  const { invoice: updated } = await load(ctx, invoice.id)
+  return updated
 }
 
 /**
@@ -465,6 +478,11 @@ export async function voidInvoice(ctx: AuthContext, id: string, options: { reaso
   }
 
   const { invoice: openInvoice } = await load(ctx, id)
+
+  // A document that has collected money can't simply disappear from the books.
+  if ((openInvoice.amount_paid ?? 0) > 0) {
+    throw invalidState('This invoice has payments recorded. Refund them before voiding it.')
+  }
 
   const data = await q(
     ctx.db

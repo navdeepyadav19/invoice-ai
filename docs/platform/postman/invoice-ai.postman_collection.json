@@ -1233,7 +1233,7 @@
                 "value": "{{idempotency_key}}"
               }
             ],
-            "description": "Marks an `open` (or overdue) invoice paid outside Invoice-AI — no money moves. `paid_on` is an ISO 8601 date or timestamp (defaults to now); `reference` is up to 200 characters. Drafts, void and already-paid invoices return `409`. The response omits `lines`. Emits `invoice.paid`, with `reference` in its meta.\n\n**Scope:** `payments:write`\n\n**Idempotency:** `Idempotency-Key` **required** (`428` without it). A retry with the same key and body replays the first response (`Idempotent-Replayed: true`); the same key with a different body is a `422` `idempotency_mismatch`.",
+            "description": "Records a payment received outside Invoice-AI (bank transfer, cash) — no money moves. Without `amount` the whole remaining balance is paid; with a smaller `amount` the payment is partial and the invoice stays `open`. `paid_on` is an ISO 8601 date or timestamp (defaults to now); `reference` is up to 200 characters. Drafts, void and already-paid invoices return `409`; an amount above the balance returns `422`. The response omits `lines`. Emits `invoice.payment_succeeded`, and `invoice.paid` once nothing remains.\n\n**Scope:** `payments:write`\n\n**Idempotency:** `Idempotency-Key` **required** (`428` without it). A retry with the same key and body replays the first response (`Idempotent-Replayed: true`); the same key with a different body is a `422` `idempotency_mismatch`.",
             "url": {
               "raw": "{{base_url}}/invoices/{{invoice_id}}/pay",
               "host": [

@@ -27,6 +27,12 @@ export type InvoiceEventType =
   | 'emailed'
   | 'email_failed'
   | 'voided'
+  | 'payment_succeeded'
+  | 'payment_failed'
+  | 'refunded'
+  | 'credited'
+  | 'dispute_opened'
+  | 'dispute_closed'
 
 export type ProfileRow = {
   id: string
@@ -92,6 +98,11 @@ export type BusinessRow = {
   gst_fetched_at: string | null
   created_at: string
   updated_at: string
+  /** Defaults copied onto each new invoice's payment_options (0017). */
+  pay_online_default: boolean
+  show_bank_details_default: boolean
+  allow_partial_default: boolean
+  partial_min_percent: number | null
 }
 
 export type ClientRow = {
@@ -154,6 +165,20 @@ export type InvoiceRow = {
   cancel_reason: string | null
   created_at: string
   updated_at: string
+  /** How this invoice may be paid; copied from the business defaults (0017). */
+  payment_options: InvoicePaymentOptions
+  /** Net money applied: payments minus refunds, in major units. */
+  amount_paid: number
+  /** Amounts the merchant agreed are no longer owed (refund credits). */
+  amount_credited: number
+  has_test_payments: boolean
+}
+
+export type InvoicePaymentOptions = {
+  online: boolean
+  bank_details: boolean
+  allow_partial: boolean
+  partial_min_percent: number | null
 }
 
 export type InvoiceItemRow = {
@@ -402,4 +427,105 @@ export type ApiRequestRow = {
   idempotency_key: string | null
   ip_hash: string | null
   created_at: string
+}
+
+// ---------------------------------------------------------------------------
+// Payments (0017)
+// ---------------------------------------------------------------------------
+
+export type PaymentProvider = 'manual' | 'stripe'
+export type PaymentMode = 'test' | 'live'
+export type PaymentStatus = 'pending' | 'succeeded' | 'failed' | 'refunded' | 'partially_refunded' | 'disputed'
+export type PaymentAttention = 'overpaid' | 'invoice_void' | 'invoice_paid' | 'currency_mismatch'
+
+export type PaymentConnectionRow = {
+  id: string
+  owner_id: string
+  provider: 'stripe'
+  mode: PaymentMode
+  external_account_id: string
+  status: 'active' | 'restricted' | 'disconnected'
+  display_name: string | null
+  country: string | null
+  default_currency: string | null
+  charges_ready: boolean
+  connected_at: string
+  disconnected_at: string | null
+  updated_at: string
+}
+
+export type PaymentRow = {
+  id: string
+  public_id: string
+  owner_id: string
+  invoice_id: string
+  provider: PaymentProvider
+  mode: PaymentMode
+  status: PaymentStatus
+  amount: number
+  currency: string
+  amount_applied: number
+  amount_refunded: number
+  needs_attention: PaymentAttention | null
+  external_payment_id: string | null
+  checkout_session_id: string | null
+  charge_id: string | null
+  external_account_id: string | null
+  method_type: string | null
+  reference: string | null
+  paid_at: string
+  receipt_sent_at: string | null
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type RefundRow = {
+  id: string
+  public_id: string
+  owner_id: string
+  payment_id: string
+  invoice_id: string
+  amount: number
+  reason: string | null
+  client_still_owes: boolean
+  status: 'pending' | 'succeeded' | 'failed'
+  external_refund_id: string | null
+  created_by: string | null
+  created_at: string
+}
+
+export type InvoiceCreditRow = {
+  id: string
+  owner_id: string
+  invoice_id: string
+  amount: number
+  reason: string | null
+  refund_id: string | null
+  created_by: string | null
+  created_at: string
+}
+
+export type CheckoutSessionRow = {
+  id: string
+  owner_id: string
+  invoice_id: string
+  provider: 'stripe'
+  mode: PaymentMode
+  external_session_id: string
+  external_account_id: string
+  amount: number
+  currency: string
+  status: 'open' | 'complete' | 'expired'
+  url: string | null
+  expires_at: string
+  created_at: string
+}
+
+export type ProviderEventRow = {
+  provider: string
+  event_id: string
+  event_type: string
+  received_at: string
+  processed_at: string | null
 }

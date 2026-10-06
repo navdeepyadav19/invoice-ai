@@ -119,11 +119,12 @@ export async function sendInvoice(ctx: AuthContext, id: string, input: { to?: st
 export async function payInvoice(
   ctx: AuthContext,
   id: string,
-  input: { paid_on?: string | null; reference?: string | null },
+  input: { paid_on?: string | null; reference?: string | null; amount?: number | null },
 ) {
   const invoice = await invoices.pay(ctx, id, {
     paidOn: input.paid_on ?? undefined,
     reference: input.reference ?? undefined,
+    amountMinor: input.amount ?? undefined,
   })
   const refs = await invoices.refsForInvoice(ctx, invoice, [])
 

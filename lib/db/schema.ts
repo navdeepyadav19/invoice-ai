@@ -11,7 +11,7 @@ export type Generated<T> = T extends ColumnType<infer S, infer I, infer U>
   ? ColumnType<S, I | undefined, U>
   : ColumnType<T, T | undefined, T>;
 
-export type InvoiceEventType = "created" | "downloaded" | "email_failed" | "emailed" | "finalized" | "paid" | "updated" | "viewed" | "voided";
+export type InvoiceEventType = "created" | "credited" | "dispute_closed" | "dispute_opened" | "downloaded" | "email_failed" | "emailed" | "finalized" | "paid" | "payment_failed" | "payment_succeeded" | "refunded" | "updated" | "viewed" | "voided";
 
 export type InvoiceStatus = "draft" | "open" | "paid" | "void";
 
@@ -69,6 +69,7 @@ export interface Businesses {
   account_number: string | null;
   address_line1: string | null;
   address_line2: string | null;
+  allow_partial_default: Generated<boolean>;
   bank_name: string | null;
   business_type: string | null;
   city: string | null;
@@ -103,11 +104,14 @@ export interface Businesses {
   next_invoice_number: Generated<number>;
   owner_id: string;
   pan: string | null;
+  partial_min_percent: number | null;
+  pay_online_default: Generated<boolean>;
   phone: string | null;
   pincode: string | null;
   postal_code: string | null;
   region: string | null;
   routing_number: string | null;
+  show_bank_details_default: Generated<boolean>;
   signature_url: string | null;
   state_code: string | null;
   /**
@@ -117,6 +121,22 @@ export interface Businesses {
   trade_name: string | null;
   updated_at: Generated<string>;
   upi_id: string | null;
+}
+
+export interface CheckoutSessions {
+  amount: Numeric;
+  created_at: Generated<string>;
+  currency: string;
+  expires_at: string;
+  external_account_id: string;
+  external_session_id: string;
+  id: Generated<string>;
+  invoice_id: string;
+  mode: string;
+  owner_id: string;
+  provider: string;
+  status: Generated<string>;
+  url: string | null;
 }
 
 export interface CliDeviceCodes {
@@ -188,6 +208,17 @@ export interface IdempotencyKeys {
   state: Generated<string>;
 }
 
+export interface InvoiceCredits {
+  amount: Numeric;
+  created_at: Generated<string>;
+  created_by: string | null;
+  id: Generated<string>;
+  invoice_id: string;
+  owner_id: string;
+  reason: string | null;
+  refund_id: string | null;
+}
+
 export interface InvoiceEvents {
   created_at: Generated<string>;
   id: Generated<string>;
@@ -225,7 +256,9 @@ export interface InvoiceItems {
 }
 
 export interface Invoices {
+  amount_credited: Generated<Numeric>;
   amount_in_words: string | null;
+  amount_paid: Generated<Numeric>;
   business_id: string;
   business_snapshot: Json | null;
   /**
@@ -245,6 +278,7 @@ export interface Invoices {
   currency: Generated<string>;
   discount_total: Generated<Numeric>;
   due_date: string | null;
+  has_test_payments: Generated<boolean>;
   id: Generated<string>;
   igst_total: Generated<Numeric>;
   invoice_number: string | null;
@@ -253,6 +287,7 @@ export interface Invoices {
   notes: string | null;
   owner_id: string;
   paid_at: string | null;
+  payment_options: Generated<Json>;
   place_of_supply_state_code: string | null;
   /**
    * API-facing invoice id: in_….
@@ -332,6 +367,48 @@ export interface OauthTokens {
   used_at: string | null;
 }
 
+export interface PaymentConnections {
+  charges_ready: Generated<boolean>;
+  connected_at: Generated<string>;
+  country: string | null;
+  default_currency: string | null;
+  disconnected_at: string | null;
+  display_name: string | null;
+  external_account_id: string;
+  id: Generated<string>;
+  mode: string;
+  owner_id: string;
+  provider: string;
+  status: Generated<string>;
+  updated_at: Generated<string>;
+}
+
+export interface Payments {
+  amount: Numeric;
+  amount_applied: Generated<Numeric>;
+  amount_refunded: Generated<Numeric>;
+  charge_id: string | null;
+  checkout_session_id: string | null;
+  created_at: Generated<string>;
+  created_by: string | null;
+  currency: string;
+  external_account_id: string | null;
+  external_payment_id: string | null;
+  id: Generated<string>;
+  invoice_id: string;
+  method_type: string | null;
+  mode: Generated<string>;
+  needs_attention: string | null;
+  owner_id: string;
+  paid_at: Generated<string>;
+  provider: string;
+  public_id: Generated<string>;
+  receipt_sent_at: string | null;
+  reference: string | null;
+  status: Generated<string>;
+  updated_at: Generated<string>;
+}
+
 export interface Prices {
   active: Generated<boolean>;
   created_at: Generated<string>;
@@ -381,6 +458,29 @@ export interface Profiles {
   updated_at: Generated<string>;
 }
 
+export interface ProviderEvents {
+  event_id: string;
+  event_type: string;
+  processed_at: string | null;
+  provider: string;
+  received_at: Generated<string>;
+}
+
+export interface Refunds {
+  amount: Numeric;
+  client_still_owes: Generated<boolean>;
+  created_at: Generated<string>;
+  created_by: string | null;
+  external_refund_id: string | null;
+  id: Generated<string>;
+  invoice_id: string;
+  owner_id: string;
+  payment_id: string;
+  public_id: Generated<string>;
+  reason: string | null;
+  status: Generated<string>;
+}
+
 export interface WebhookDeliveries {
   attempt: Generated<number>;
   created_at: Generated<string>;
@@ -411,10 +511,12 @@ export interface DB {
   api_keys: ApiKeys;
   api_requests: ApiRequests;
   businesses: Businesses;
+  checkout_sessions: CheckoutSessions;
   cli_device_codes: CliDeviceCodes;
   clients: Clients;
   email_verifications: EmailVerifications;
   idempotency_keys: IdempotencyKeys;
+  invoice_credits: InvoiceCredits;
   invoice_events: InvoiceEvents;
   invoice_items: InvoiceItems;
   invoices: Invoices;
@@ -422,9 +524,13 @@ export interface DB {
   oauth_clients: OauthClients;
   oauth_grants: OauthGrants;
   oauth_tokens: OauthTokens;
+  payment_connections: PaymentConnections;
+  payments: Payments;
   prices: Prices;
   products: Products;
   profiles: Profiles;
+  provider_events: ProviderEvents;
+  refunds: Refunds;
   webhook_deliveries: WebhookDeliveries;
   webhook_endpoints: WebhookEndpoints;
 }

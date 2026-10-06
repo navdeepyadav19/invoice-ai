@@ -137,6 +137,10 @@ export function serializeLineItem(row: InvoiceItemRow, currency: string, maps: C
 export function serializeInvoice(row: InvoiceRow, items?: InvoiceItemRow[], maps: CatalogMaps = {}) {
   const totals = invoiceTotalsToMinor(row)
   const status = deriveStatus(row)
+  const remaining = Math.max(
+    0,
+    totals.total - storedToMinor(row.amount_credited ?? 0, row.currency) - storedToMinor(row.amount_paid ?? 0, row.currency),
+  )
 
   return {
     id: row.public_id,
@@ -159,8 +163,14 @@ export function serializeInvoice(row: InvoiceRow, items?: InvoiceItemRow[], maps
     taxable: totals.taxable_total,
     tax: totals.tax_total,
     total: totals.total,
-    // What is still owed. Drafts, paid and void invoices owe nothing.
-    amount_due: status === 'open' || status === 'overdue' ? totals.total : 0,
+    // Payments ledger (0017). amount_paid is net of refunds; amount_credited is
+    // what the merchant agreed is no longer owed; the remainder is still owed.
+    amount_paid: storedToMinor(row.amount_paid ?? 0, row.currency),
+    amount_credited: storedToMinor(row.amount_credited ?? 0, row.currency),
+    amount_remaining: remaining,
+    // What is still owed right now. Drafts, paid and void invoices owe nothing.
+    amount_due: status === 'open' || status === 'overdue' ? remaining : 0,
+    payment_options: row.payment_options,
     amount_in_words: row.amount_in_words,
     public_url_token: row.public_token,
     finalized_at: row.sent_at,
@@ -183,6 +193,12 @@ const EVENT_NAMES: Record<InvoiceEventRow['type'], string> = {
   downloaded: 'invoice.downloaded',
   paid: 'invoice.paid',
   voided: 'invoice.voided',
+  payment_succeeded: 'invoice.payment_succeeded',
+  payment_failed: 'invoice.payment_failed',
+  refunded: 'invoice.refunded',
+  credited: 'invoice.credited',
+  dispute_opened: 'invoice.dispute_opened',
+  dispute_closed: 'invoice.dispute_closed',
 }
 
 export function serializeEvent(row: InvoiceEventRow) {

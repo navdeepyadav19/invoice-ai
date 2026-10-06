@@ -7,16 +7,20 @@ import { serializeInvoice } from '@/lib/api/serialize'
 import { currencyDecimals } from '@/lib/currency'
 
 /**
- * The webhook payload is built in SQL (0014's trigger) and the REST Invoice in
- * TypeScript (serializeInvoice). Nothing runs the SQL in CI, so this reads the
- * migration and checks the two can't drift: same fields, same currency table.
+ * The webhook payload is built in SQL (the enqueue trigger) and the REST Invoice
+ * in TypeScript (serializeInvoice). Nothing runs the SQL in CI, so this reads the
+ * migrations and checks the two can't drift: same fields, same currency table.
+ *
+ * TRIGGER_SQL must be the migration with the LATEST definition of
+ * enqueue_webhook_deliveries() — 0017 added the payment fields.
  */
 const SQL = readFileSync(resolve(import.meta.dirname, '../../db/migrations/0014_webhook_payload_v2.sql'), 'utf8')
+const TRIGGER_SQL = readFileSync(resolve(import.meta.dirname, '../../db/migrations/0017_payments.sql'), 'utf8')
 
 function sqlInvoiceKeys(): string[] {
-  const start = SQL.lastIndexOf('jsonb_build_object(', SQL.indexOf("'id', i.public_id"))
-  const end = SQL.indexOf(') as object', start)
-  const body = SQL.slice(start, end)
+  const start = TRIGGER_SQL.lastIndexOf('jsonb_build_object(', TRIGGER_SQL.indexOf("'id', i.public_id"))
+  const end = TRIGGER_SQL.indexOf(') as object', start)
+  const body = TRIGGER_SQL.slice(start, end)
   // Keys sit at the start of a line inside the jsonb_build_object call.
   return [...body.matchAll(/^\s+'([a-z_]+)',/gm)].map((m) => m[1])
 }
@@ -28,7 +32,7 @@ function sqlCurrencies(decimals: 0 | 3): string[] {
   return [...SQL.slice(start, end).matchAll(/'([A-Z]{3})'/g)].map((m) => m[1])
 }
 
-describe('webhook payload v2 (0014) matches the REST Invoice', () => {
+describe('webhook payload (0014 + 0017) matches the REST Invoice', () => {
   it('has exactly the fields serializeInvoice returns, minus lines', () => {
     const row = {
       public_id: 'in_x', status: 'open', due_date: null, currency: 'USD',
