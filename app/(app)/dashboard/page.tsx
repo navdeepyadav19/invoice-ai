@@ -31,13 +31,19 @@ export default async function DashboardPage() {
     displayStatus: deriveStatus(invoice),
   }))
 
+  // Balances come from the payments ledger (0017): an open invoice with a
+  // partial payment only owes what remains, and money collected counts every
+  // payment, partial ones included. Test-mode payments are not real revenue.
+  const remaining = (i: InvoiceRow) =>
+    Math.max(0, Number(i.total) - Number(i.amount_credited ?? 0) - Number(i.amount_paid ?? 0))
+
   const outstanding = rows
     .filter((i) => i.displayStatus === 'open' || i.displayStatus === 'overdue')
-    .reduce((sum, i) => sum + toPaise(Number(i.total)), 0)
+    .reduce((sum, i) => sum + toPaise(remaining(i)), 0)
 
   const paid = rows
-    .filter((i) => i.displayStatus === 'paid')
-    .reduce((sum, i) => sum + toPaise(Number(i.total)), 0)
+    .filter((i) => !i.has_test_payments)
+    .reduce((sum, i) => sum + toPaise(Number(i.amount_paid ?? 0)), 0)
 
   const overdueCount = rows.filter((i) => i.displayStatus === 'overdue').length
 

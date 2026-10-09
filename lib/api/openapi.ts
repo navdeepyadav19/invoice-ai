@@ -479,7 +479,18 @@ const invoiceOut = z
     taxable: minor('`subtotal` − `discount`.', 2550000),
     tax: minor('Total tax across lines.', 0),
     total: minor('`taxable` + `tax`.', 2550000),
-    amount_due: minor('What is still owed: `total` while `open` or `overdue`, otherwise 0.', 2550000),
+    amount_paid: minor('Money applied to this invoice so far: payments minus refunds.', 0),
+    amount_credited: minor('Amounts credited back so the client no longer owes them (for example a refund for cancelled work).', 0),
+    amount_remaining: minor('The balance on the document: `total` − `amount_credited` − `amount_paid`. Never negative.', 2550000),
+    amount_due: minor('What is owed right now: `amount_remaining` while `open` or `overdue`, otherwise 0.', 2550000),
+    payment_options: z
+      .object({
+        online: z.boolean().meta({ description: 'Show a Pay now option (needs a connected payment account).' }),
+        bank_details: z.boolean().meta({ description: 'Print the business bank details.' }),
+        allow_partial: z.boolean().meta({ description: 'Let the client pay part of the balance online.' }),
+        partial_min_percent: z.number().int().nullable().meta({ description: 'Smallest partial payment, as a percentage of the total, or `null` for no minimum.' }),
+      })
+      .meta({ description: 'How the client may pay this invoice.' }),
     amount_in_words: z.string().nullable().meta({
       description: 'The total spelled out, as printed on the PDF.',
       examples: ['Twenty Five Thousand Five Hundred USD Only'],
@@ -663,7 +674,11 @@ const draftInvoiceExample = {
   description: 'Consulting retainer.',
   footer: null,
   ...invoiceTotals(2550000),
+  amount_paid: 0,
+  amount_credited: 0,
+  amount_remaining: 2550000,
   amount_due: 0,
+  payment_options: { online: true, bank_details: true, allow_partial: false, partial_min_percent: null },
   amount_in_words: 'Twenty Five Thousand Five Hundred USD Only',
   public_url_token: EX.publicToken,
   finalized_at: null,
@@ -685,6 +700,7 @@ const updatedDraftExample = {
 const draftWithAddedLine = {
   ...draftInvoiceExample,
   ...invoiceTotals(2560000),
+  amount_remaining: 2560000,
   amount_in_words: 'Twenty Five Thousand Six Hundred USD Only',
   updated: EX.updated,
   lines: { data: [pricedLine, adHocLine, addedLine] },
@@ -705,6 +721,8 @@ void _lines
 const paidInvoiceExample = {
   ...openWithoutLines,
   status: 'paid',
+  amount_paid: 2550000,
+  amount_remaining: 0,
   amount_due: 0,
   paid_at: EX.paid,
   updated: EX.paid,
@@ -938,8 +956,13 @@ const payBody = z
       examples: ['2026-09-29'],
     }),
     reference: z.string().optional().meta({
-      description: 'Your payment reference (cheque number, bank transfer id), up to 200 characters. Recorded on the `invoice.paid` event.',
+      description: 'Your payment reference (cheque number, bank transfer id), up to 200 characters. Recorded on the payment and its events.',
       examples: ['chk_123456'],
+    }),
+    amount: z.number().int().positive().optional().meta({
+      description:
+        'How much was received, in minor units of the invoice currency. Defaults to the whole remaining balance. A smaller amount is a partial payment: the invoice stays `open` with `amount_remaining` > 0.',
+      examples: [100000],
     }),
   })
   .meta({ id: 'InvoicePay' })
@@ -1884,7 +1907,7 @@ export function buildOpenApiDocument(serverUrl: string) {
           tag: 'Invoices',
           summary: 'Mark an invoice paid',
           description:
-            'Marks an `open` (or overdue) invoice paid outside Invoice-AI — no money moves. `paid_on` is an ISO 8601 date or timestamp (defaults to now); `reference` is up to 200 characters. Drafts, void and already-paid invoices return `409`. The response omits `lines`. Emits `invoice.paid`, with `reference` in its meta.',
+            'Records a payment received outside Invoice-AI (bank transfer, cash) — no money moves. Without `amount` the whole remaining balance is paid; with a smaller `amount` the payment is partial and the invoice stays `open`. `paid_on` is an ISO 8601 date or timestamp (defaults to now); `reference` is up to 200 characters. Drafts, void and already-paid invoices return `409`; an amount above the balance returns `422`. The response omits `lines`. Emits `invoice.payment_succeeded`, and `invoice.paid` once nothing remains.',
           scope: 'payments:write',
           sdk: { call: 'invoices.pay', result: 'invoice', print: 'invoice.status, invoice.paid_at' },
           idempotency: 'required',

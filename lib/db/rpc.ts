@@ -43,6 +43,51 @@ export function getPublicInvoice(db: Db, token: string): Promise<unknown> {
   return scalar(db, sql<{ result: unknown }>`select public.get_public_invoice(${token}::uuid) as result`)
 }
 
+/** What the payments-ledger functions (0017) return. */
+export interface AppliedPayment {
+  payment_id: string
+  public_id: string
+  amount_applied: number
+  needs_attention: string | null
+  invoice_status: string
+  replayed: boolean
+}
+
+/**
+ * Records money received outside Invoice-AI against an open invoice, atomically
+ * (the invoice row is locked). A null amount means "the whole balance".
+ */
+export function recordManualPayment(
+  db: Db,
+  invoiceId: string,
+  args: { amount: number | null; paidAt: string | null; reference: string | null; meta: Record<string, unknown> },
+): Promise<AppliedPayment> {
+  return scalar(
+    db,
+    sql<{ result: AppliedPayment }>`select public.record_manual_payment(${invoiceId}::uuid, ${args.amount}::numeric, ${args.paidAt}::timestamptz, ${args.reference}, ${json(args.meta)}::jsonb) as result`,
+  )
+}
+
+export interface AppliedRefund {
+  refund_id: string
+  public_id: string
+  invoice_reopened: boolean
+  credited: boolean
+  replayed: boolean
+}
+
+/** Records money returned for a manual payment (cash or bank transfer back). */
+export function refundManualPayment(
+  db: Db,
+  paymentId: string,
+  args: { amount: number; reason: string | null; clientStillOwes: boolean; meta: Record<string, unknown> },
+): Promise<AppliedRefund> {
+  return scalar(
+    db,
+    sql<{ result: AppliedRefund }>`select public.refund_manual_payment(${paymentId}::uuid, ${args.amount}::numeric, ${args.reason}, ${args.clientStillOwes}, ${json(args.meta)}::jsonb) as result`,
+  )
+}
+
 export async function logPublicInvoiceEvent(db: Db, token: string, type: 'viewed' | 'downloaded'): Promise<void> {
   await sql`select public.log_public_invoice_event(${token}::uuid, ${type}::invoice_event_type)`.execute(db)
 }
