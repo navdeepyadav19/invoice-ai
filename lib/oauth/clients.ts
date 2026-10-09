@@ -120,8 +120,19 @@ export function validateCimdDocument(doc: unknown, url: string): Validation<Clie
     return invalid('Clients identified by a metadata document must use token_endpoint_auth_method "none".')
   }
 
-  const registration = validateRegistration({ ...d, token_endpoint_auth_method: 'none' })
-  return registration
+  // A document describes everything the app can do, not only what we offer:
+  // Claude's lists the JWT-bearer grant too. Keep the grants we support and let
+  // the rest go unused — the token endpoint only honours what we implement. An
+  // app that can't use authorization_code at all is still turned away.
+  let grantTypes = d.grant_types
+  if (Array.isArray(grantTypes)) {
+    grantTypes = grantTypes.filter((g) => GRANT_TYPES.has(g as string))
+    if (!(grantTypes as string[]).includes('authorization_code')) {
+      return invalid('grant_types must include authorization_code.')
+    }
+  }
+
+  return validateRegistration({ ...d, grant_types: grantTypes, token_endpoint_auth_method: 'none' })
 }
 
 /** How long to trust a fetched document: its own max-age, kept between 5 minutes and a day. */
