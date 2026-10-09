@@ -1,0 +1,113 @@
+---
+title: "Overview"
+description: "Connect Claude, ChatGPT, Cursor or any MCP client to your Invoice-AI account."
+icon: "robot"
+---
+
+The Invoice-AI MCP server lets an AI assistant work in your account. It can look up customers and invoices, draft invoices, and, if you allow it, finalize, email, mark paid or void them. Each of those last four asks you to confirm in the chat first.
+
+```text
+https://invoice.horizonpay.co/mcp
+```
+
+## Connect
+
+<Tabs>
+  <Tab title="Claude">
+    claude.ai and Claude Desktop share connectors.
+
+    1. Open **Customize → Connectors**. On some versions it's under **Settings → Connectors**.
+    2. Choose **Add custom connector** and name it `Invoice-AI`.
+    3. Paste `https://invoice.horizonpay.co/mcp` as the server URL.
+    4. Add it, then choose **Connect**. Claude opens Invoice-AI so you can approve it.
+
+    On a Team or Enterprise plan, an owner adds the connector once in the organization's connector settings. Each person then connects their own account.
+  </Tab>
+  <Tab title="ChatGPT">
+    1. In **Settings**, open **Apps & Connectors → Advanced settings** and turn on **Developer mode**.
+    2. Back in **Apps & Connectors**, choose **Create** and name it `Invoice-AI`.
+    3. Enter `https://invoice.horizonpay.co/mcp` as the MCP server URL and choose **OAuth** for authentication.
+    4. Create it. ChatGPT opens Invoice-AI so you can sign in and approve it.
+
+    <Note>
+      Menu names and Developer mode availability may differ by ChatGPT plan.
+    </Note>
+  </Tab>
+  <Tab title="Claude Code">
+    ```bash
+    claude mcp add --transport http invoice-ai https://invoice.horizonpay.co/mcp
+    ```
+
+    Then run `/mcp` in Claude Code and pick `invoice-ai` to sign in. Your browser opens so you can approve it.
+
+    To skip the sign-in, pass an [API key](/mcp/authentication#use-an-api-key) instead:
+
+    ```bash
+    claude mcp add --transport http invoice-ai https://invoice.horizonpay.co/mcp \
+      --header "Authorization: Bearer inv_live_..."
+    ```
+  </Tab>
+  <Tab title="Cursor">
+    Add this to `~/.cursor/mcp.json`, or to `.cursor/mcp.json` in one project:
+
+    ```json
+    {
+      "mcpServers": {
+        "invoice-ai": {
+          "url": "https://invoice.horizonpay.co/mcp"
+        }
+      }
+    }
+    ```
+
+    Connect it from Cursor's MCP settings. Cursor opens Invoice-AI so you can approve it.
+
+    To use an [API key](/mcp/authentication#use-an-api-key) instead, add a header:
+
+    ```json
+    {
+      "mcpServers": {
+        "invoice-ai": {
+          "url": "https://invoice.horizonpay.co/mcp",
+          "headers": { "Authorization": "Bearer inv_live_..." }
+        }
+      }
+    }
+    ```
+  </Tab>
+  <Tab title="Other">
+    Any client that supports remote MCP servers over Streamable HTTP can connect to `https://invoice.horizonpay.co/mcp`.
+
+    - If it supports MCP OAuth, it finds the sign-in page on its own. See [Authentication](/mcp/authentication).
+    - If it doesn't, create an API key with the **AI assistant** preset and send it as `Authorization: Bearer inv_live_...`.
+  </Tab>
+</Tabs>
+
+The same steps are in the app, in [Settings → AI assistants](https://invoice.horizonpay.co/settings/ai-assistants).
+
+## Approve access
+
+When you connect over OAuth, Invoice-AI shows a consent screen. It names the app, shows whether its domain is verified, and lists permissions in three groups:
+
+| Group | Pre-ticked |
+|---|---|
+| Look things up | Yes |
+| Create customers and draft invoices | Yes |
+| Finalize, email, and record payments | No. Tick these only if you want the assistant to do them. |
+
+Untick anything you don't want, then choose **Approve**. You can disconnect the app at any time in [Settings → AI assistants](https://invoice.horizonpay.co/settings/ai-assistants).
+
+## Try it
+
+- "Which invoices are overdue, and how much is owed in total?"
+- "Invoice Acme Ltd $1,500 for the October design retainer, due in 14 days."
+- "Email that invoice to Acme."
+- "Acme paid INV-0041 by bank transfer yesterday. Mark it paid."
+
+For the last two, the assistant shows you a preview and waits for your yes. See [Confirmations](/mcp/tools#confirmations).
+
+## How it works
+
+- **Transport:** Streamable HTTP, stateless. Each request stands alone, so there's no session to keep alive.
+- **Same rules as the API:** every tool runs the same operation as a REST endpoint, with the same validation, scopes and rate limits. See [Tools](/mcp/tools).
+- **Audited:** every tool call appears in [Settings → Activity](https://invoice.horizonpay.co/settings/activity) as `MCP <tool>`, for example `MCP send_invoice`, with the app that made it.

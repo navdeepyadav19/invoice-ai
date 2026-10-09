@@ -1,9 +1,17 @@
 # 04 · MCP server: Invoice-AI for AI assistants
 
-> **Depends on:** [02-sdk.md](02-sdk.md) for all calls, and [01-api.md](01-api.md) for API keys and scopes. The remote server's auth is an open decision (3.1); one option needs phase A4 (OAuth).
-> **Local version ships with:** [03-cli.md](03-cli.md) (`invoice-ai mcp`).
+> **Depends on:** [01-api.md](01-api.md) for scopes, the request pipeline and OAuth (A4, built alongside this module).
+> **Local version:** not built. Every client we target connects to the remote server, so `invoice-ai mcp` (stdio, [03-cli.md](03-cli.md)) is no longer needed to ship.
 >
-> **Status (Oct 2026): not built.** There is no `app/api/mcp` route and no `invoice-ai mcp` command. The tool designs below were written against the GST-era plan in 01; when this is built, map them onto the API that shipped: `customers` (not `clients`), `invoices.finalize` / `send` / `pay` / `void` with scope `invoices:finalize` (not `issue` / `cancel` / `invoices:issue`), amounts in minor units of the invoice currency, and a free-form per-line `tax_rate` computed by `lib/tax.ts` instead of a GST rate list and CGST/SGST/IGST split. The SDKs and CLI now live in [navdeepyadav19/invoice-ai-sdk](https://github.com/navdeepyadav19/invoice-ai-sdk), so a shared `mcp-tools` package belongs there.
+> **Status: Built (Oct 2026).** The remote server is live at `https://invoice.horizonpay.co/mcp`. User docs: [docs.horizonpay.co/mcp/overview](https://docs.horizonpay.co/mcp/overview). What shipped differs from the plan below in these ways:
+>
+> - **URL and transport:** `app/mcp/route.ts` (not `app/api/mcp`), `mcp-handler`, Streamable HTTP, stateless.
+> - **In-process, not over HTTP:** tools call `lib/operations/*` through the shared pipeline (`runOperation` in `lib/api/pipeline.ts`), the same code path `/api/v1` uses: rate limit, scope, idempotency, audit. One enforcement point without an extra HTTP hop or an SDK dependency. Audit rows have method `MCP` and route `mcp/<tool>`.
+> - **Auth: our own OAuth 2.1 authorization server** (option (b) in 3.1), plus API keys as Bearer (option (a)). Code in `lib/oauth/`, tables in `db/migrations/0016_oauth.sql`, consent screen at `/oauth/authorize`, connected apps in Settings → AI assistants. Supports Client ID Metadata Documents and dynamic client registration, PKCE S256 only, audience-bound tokens, rotating refresh tokens.
+> - **16 tools**, named for the Stripe-shaped API (3.2). Amounts are minor units of the invoice currency with a free-form `tax_rate` per line; no rupee conversion and no GST split.
+> - **Confirmation tokens on four tools, including pay:** `finalize_invoice`, `send_invoice`, `mark_invoice_paid`, `void_invoice` (`lib/mcp/confirmation.ts`, HMAC with a derived key, no `CONFIRMATION_TOKEN_SECRET`). A token binds action, invoice, connection and a hash of the invoice state plus the action's arguments, for 10 minutes.
+> - **Idempotency keyed on the token hash** (`mcp:<tool>:<sha256(token)>`, in `lib/mcp/define-tool.ts`): a retried confirmation replays, and "send it again" needs a fresh preview. This settles the resend question in section 6.
+> - **Least-privilege defaults** (`lib/mcp/scopes.ts`): read and draft scopes are pre-ticked on consent; finalize, send and payments are opt-in; `webhooks:manage` and `products:write` are never offered to an assistant. A matching "AI assistant" API key preset exists.
 
 ## 1. What this layer is, and what students learn
 
@@ -19,7 +27,7 @@ Students leave this module understanding:
 
 ## 2. How it works in this repo today
 
-- **There is no MCP server.**
+- **The MCP server is built** (see the status block above). The bullets below describe the starting point it was designed from.
 - **AI already exists in the product, in the opposite direction.** `app/api/ai/parse-invoice/route.ts` sends *our* prompt to OpenAI to fill the invoice builder, and it never touches the database (see `docs/ai-invoice-creation.md`). MCP flips this: an *outside* AI calls *our* tools.
 - **The pieces MCP needs arrive in earlier modules:**
   - scoped, idempotent operations (01)
@@ -54,41 +62,52 @@ packages/mcp-tools/ (new)
 - **`mcp-handler` is stateless.** A fresh MCP server is created per request over Streamable HTTP, so it runs as a normal Vercel Function with no Redis or session store.
 - **Requirements:** Node ≥ 20, the MCP SDK v2, and Zod ≥ 4.2. The repo already has `zod ^4.4.3`.
 
-**Auth for the remote server (open decision).** The original design pointed `/.well-known/oauth-protected-resource` at Supabase's OAuth 2.1 server, so Claude could discover it, register itself (dynamic client registration) and run OAuth with PKCE. That server went away with the move to Neon. Neon Auth (managed Better Auth) has no OAuth-server or OIDC-provider plugin; its plugins are organization, magic link, phone number, email and password, and social sign-in. Whatever we pick, `verifyToken` must end where an API key does: an owner id, a set of scopes, and `userDb(owner)` behind `withApi`.
+**Auth for the remote server (decided: (b) and (a)).** The original design pointed `/.well-known/oauth-protected-resource` at Supabase's OAuth 2.1 server, so Claude could discover it, register itself (dynamic client registration) and run OAuth with PKCE. That server went away with the move to Neon. Neon Auth (managed Better Auth) has no OAuth-server or OIDC-provider plugin; its plugins are organization, magic link, phone number, email and password, and social sign-in. Whatever we picked, `verifyToken` had to end where an API key does: an owner id, a set of scopes, and `userDb(owner)` behind the pipeline.
 
 | Option | How it works | Cost |
 |---|---|---|
 | **(a) API key as Bearer token** | The user creates a scoped key in Settings → API keys and pastes it into an MCP client that lets you set headers (e.g. `claude mcp add --transport http … --header "Authorization: Bearer inv_live_…"`). `verifyToken` calls the same `authenticate()` as `/api/v1`. | No discovery: clients whose connector setup only does OAuth can't use it. The user handles a secret by hand |
-| **(b) Our own OAuth 2.1 authorization server** | Self-host one (e.g. Better Auth's MCP/OIDC-provider plugin, or a small AS of our own) that issues tokens mapped to an owner + scopes, with dynamic client registration and an `/oauth/consent` page. `/.well-known/oauth-protected-resource` names it. | A second auth system to run and secure, plus `oauth_grants`, revocation and a connected-apps page (01, A4) |
+| **(b) Our own OAuth 2.1 authorization server** | Self-host one (e.g. Better Auth's MCP/OIDC-provider plugin, or a small AS of our own) that issues tokens mapped to an owner + scopes, with dynamic client registration and a consent page. `/.well-known/oauth-protected-resource` names it. | A second auth system to run and secure, plus `oauth_grants`, revocation and a connected-apps page (01, A4) |
 | **(c) Reuse the CLI device flow** | For clients that can't do (a): approve on `/cli/authorize` and receive a scoped API key (03, 3.3), which then works as in (a). | Not part of the MCP spec, so it's a setup step outside the client, not a connection flow inside it |
 
-**Recommendation:** start with **(a)**. It reuses `authenticate()`, scopes, rate limits and the audit log with no new code, and `invoice-ai mcp` (local) would work the same way. Build (b) only when a client we care about can't connect any other way.
+**What we built:** (a) first, then **(b) as a small authorization server of our own**, because Claude.ai and ChatGPT connectors only do OAuth, so (a) alone left out the clients that matter most.
+
+- **Discovery:** `POST /mcp` without a token returns `401` with `WWW-Authenticate: Bearer … resource_metadata="…/.well-known/oauth-protected-resource/mcp", scope="…"` (`lib/mcp/auth.ts`). That document names the issuer (this site); `/.well-known/oauth-authorization-server` lists the endpoints (`lib/oauth/metadata.ts`).
+- **Client identity:** Client ID Metadata Documents (the MCP spec's preferred way; the `client_id` is an https URL we fetch, so the consent screen shows a verified domain) and dynamic client registration at `/oauth/register` (shown as "Unverified app" with the redirect host). `lib/oauth/clients.ts`, `lib/oauth/redirect-uri.ts`.
+- **Flow:** authorization code + PKCE S256 only; consent at `/oauth/authorize` (`components/oauth/consent-form.tsx`), decision at `/oauth/authorize/decision` with a signed consent token; `/oauth/token`, `/oauth/revoke`. Scopes pull in their dependencies (`lib/oauth/scopes.ts`).
+- **Tokens:** `inv_oat_` access (1 h) and `inv_ort_` refresh (30 d, rotated on every use; a replayed refresh token or code revokes its whole family). Stored as HMACs. Bound to an audience (RFC 8707): an MCP token is refused on `/api/v1` and vice versa. The grant's current scopes narrow every token, so revoking or narrowing a connection takes effect on the next request.
+- **The same server serves REST:** `resource=…/api/v1` gets a token for the REST API, with all scopes offered.
 
 ### 3.2 The tools
 
-Money goes in as **rupees** (models handle "₹25,000" better than paise) and is converted to paise inside the tool. Amounts are **pre-tax** unless the user explicitly says "inclusive".
+> **As built:** amounts are integers in the minor unit of the invoice currency (the model is told `150000` = $1,500.00 and never to guess a tax rate or currency), and lines carry a free-form `tax_rate` percent. The rupee/GST input design in the original plan (`rate_rupees`, `gst_rate`, `hsn_sac`) was dropped with the move to worldwide invoicing. Definitions live in `lib/mcp/tools/{read,drafts,lifecycle}.ts`; the list and order in `lib/mcp/server.ts`; input schemas in `lib/mcp/schemas.ts`.
 
 Annotation key: RO = `readOnlyHint`, D = `destructiveHint`, I = `idempotentHint`, OW = `openWorldHint`. We set every annotation explicitly, because the spec's defaults are "not read-only, destructive, not idempotent, open-world".
 
-| Tool | Input (zod) | RO | D | I | OW | Scope |
+| Tool | Input | RO | D | I | OW | Scope |
 |---|---|---|---|---|---|---|
-| `get_business_profile` | `{}` | ✓ | – | – | ✗ | business:read |
-| `find_clients` | `{ query?: string, limit?: 1–20 }` | ✓ | – | – | ✗ | clients:read |
-| `create_client` | `{ name, email?, gstin?, state_code, address_line1?, city?, pincode? }` | ✗ | ✗ | ✗ | ✗ | clients:write |
-| `list_invoices` | `{ status?, client_id?, from?, to?, cursor? }` | ✓ | – | – | ✗ | invoices:read |
-| `get_invoice` | `{ invoice_id }` | ✓ | – | – | ✗ | invoices:read |
-| `create_invoice_draft` | `{ client_id, issue_date?, due_date?, notes?, items: [{ description, hsn_sac?, quantity, rate_rupees, gst_rate: 0\|5\|12\|18\|28 }] }` | ✗ | ✗ | ✗ | ✗ | invoices:write |
-| `update_invoice_draft` | `{ invoice_id, …same fields, all optional }` | ✗ | ✗ | ✓ | ✗ | invoices:write |
-| `issue_invoice` | `{ invoice_id, confirmation_token? }` | ✗ | ✓ | ✓ | ✗ | invoices:issue |
-| `send_invoice` | `{ invoice_id, to?: email, confirmation_token? }` | ✗ | ✓ | ✓ | ✓ | invoices:send |
-| `mark_invoice_paid` | `{ invoice_id, paid_on?, reference? }` | ✗ | ✗ | ✓ | ✗ | payments:write |
-| `cancel_invoice` | `{ invoice_id, reason, confirmation_token? }` | ✗ | ✓ | ✓ | ✗ | invoices:issue |
+| `get_business_profile` | `{}` | ✓ | ✗ | ✓ | ✗ | business:read |
+| `search_customers` | `{ query?, limit?, cursor?, include_archived? }` | ✓ | ✗ | ✓ | ✗ | clients:read |
+| `get_customer` | `{ customer_id }` | ✓ | ✗ | ✓ | ✗ | clients:read |
+| `create_customer` | `{ name, email?, phone?, tax_id?, address? }` | ✗ | ✗ | ✗ | ✗ | clients:write |
+| `list_products` | `{ query?, active?, limit?, cursor? }` | ✓ | ✗ | ✓ | ✗ | products:read |
+| `list_prices` | `{ product?, active?, currency?, limit?, cursor? }` | ✓ | ✗ | ✓ | ✗ | products:read |
+| `list_invoices` | `{ status?, customer?, from?, to?, limit?, cursor? }` | ✓ | ✗ | ✓ | ✗ | invoices:read |
+| `get_invoice` | `{ invoice_id }` | ✓ | ✗ | ✓ | ✗ | invoices:read |
+| `list_invoice_events` | `{ invoice_id, limit?, cursor? }` | ✓ | ✗ | ✓ | ✗ | invoices:read |
+| `create_invoice_draft` | `{ customer, currency?, due_date?, days_until_due?, description?, footer?, items: [{ description?, quantity?, unit_amount?, tax_rate?, discount_percent?, unit?, price? }] }` | ✗ | ✗ | ✗ | ✗ | invoices:write |
+| `update_invoice_draft` | `{ invoice_id, customer?, …same fields, all optional }` | ✗ | ✗ | ✓ | ✗ | invoices:write |
+| `delete_invoice_draft` | `{ invoice_id }` | ✗ | ✓ | ✓ | ✗ | invoices:write |
+| `finalize_invoice` | `{ invoice_id, confirmation_token? }` | ✗ | ✓ | ✓ | ✗ | invoices:finalize |
+| `send_invoice` | `{ invoice_id, to?, confirmation_token? }` | ✗ | ✓ | ✓ | ✓ | invoices:send |
+| `mark_invoice_paid` | `{ invoice_id, paid_on?, reference?, confirmation_token? }` | ✗ | ✓ | ✓ | ✗ | payments:write |
+| `void_invoice` | `{ invoice_id, reason, confirmation_token? }` | ✗ | ✓ | ✓ | ✗ | invoices:finalize |
 
 `send_invoice` is the only open-world tool, because it emails someone outside the system.
 
-**Deliberately missing:** tools for API keys, webhooks, AI parsing or GSTIN lookup, and **any bulk tool** (no "cancel all overdue"). A tool the model doesn't have is a mistake it can't make.
+**Deliberately missing:** tools for API keys, webhooks, catalog editing, AI parsing or GSTIN lookup, and **any bulk tool** (no "cancel all overdue"). A tool the model doesn't have is a mistake it can't make.
 
-**Descriptions are prompts.** For example:
+**Descriptions are prompts.** For example (from the original GST plan; the shipped descriptions are in `lib/mcp/tools/*.ts`, and the cross-tool workflow the model gets on connect is in `lib/mcp/instructions.ts`):
 
 ```
 create_invoice_draft: Create a DRAFT GST invoice. Drafts have no invoice number and can be edited or deleted.
@@ -98,6 +117,8 @@ create_invoice_draft: Create a DRAFT GST invoice. Drafts have no invoice number 
 ```
 
 ### 3.3 Confirmation for irreversible actions (server-enforced)
+
+> **As built** (`lib/mcp/confirmation.ts`, `lib/mcp/tools/lifecycle.ts`): four tools confirm, `finalize_invoice`, `send_invoice`, `mark_invoice_paid` and `void_invoice` (pay was added: it can't be undone and fires webhooks). The preview body is `{ requires_confirmation, action, preview: { invoice, …details, warnings }, confirmation_token, expires_at }`. The token is `ct_<payload>.<HMAC>`, signed with a key derived by `lib/auth/derive-key.ts` (no separate `CONFIRMATION_TOKEN_SECRET`), and binds action, invoice, credential (API key or OAuth grant), user and a state hash (status, `updated`, total, currency, customer, line count, plus the action's own arguments: recipient, payment date and reference, void reason). Confirmed calls are idempotent on `mcp:<tool>:<sha256(token)>`, so a retry replays and a second send needs a new preview. Public docs: [docs.horizonpay.co/mcp/tools#confirmations](https://docs.horizonpay.co/mcp/tools#confirmations).
 
 The MCP spec says AI apps **should** ask the user before sensitive operations, and our annotations encourage that. But a hint can't *guarantee* a human saw what's about to happen, and issuing a GST invoice can't be undone. So the server adds a **two-step call**.
 
@@ -134,6 +155,8 @@ Step 2: issue_invoice({ invoice_id, confirmation_token })
 - **Later enhancement:** MCP *elicitation* lets the server ask the user directly through the AI app's UI, when the app supports it.
 
 ### 3.4 The north-star conversation, tool by tool
+
+> **As built** the names are `search_customers`, `create_customer`, `finalize_invoice` and `send_invoice`, with amounts in minor units and invoice numbers like `INV-0042`. The flow is the same.
 
 > **User:** "Invoice Acme ₹25,000 for September consulting and email it."
 
@@ -184,18 +207,18 @@ If the business is registered in another state from Acme, step 2's totals show a
   - scopes cap the blast radius
 - **Least-privilege connections:** encourage connecting assistants with read + draft scopes first, and adding `invoices:issue` / `invoices:send` deliberately.
 - **Unverified clients (option b only):** dynamically registered MCP clients show an **"Unverified app"** badge and their redirect host on the consent screen.
-- **Quotas per credential** in `withApi` (per API key today, per OAuth `client_id` under option b), so a runaway agent loop gets `429`, not a thousand emails. Giving Claude its own key keeps its quota separate from your scripts'.
-- **Audit:** every call is logged in `api_requests` with its `api_key_id` (or `client_id` under option b), answering "did Claude or the user do this?"
+- **Quotas per credential** in the shared pipeline (per API key, or per OAuth grant, never per app-wide `client_id`), plus 300 requests/minute at the MCP transport (`lib/mcp/auth.ts`), so a runaway agent loop gets `429`, not a thousand emails. Giving Claude its own key keeps its quota separate from your scripts'.
+- **Audit:** every call is logged in `api_requests` with method `MCP`, route `mcp/<tool>`, and its `api_key_id` or OAuth `client_id`, answering "did Claude or the user do this?"
 - **Never echo tokens** or credentials in tool output or errors.
-- **`CONFIRMATION_TOKEN_SECRET`** lives in Vercel env (sensitive) and is rotated like other secrets. Rotation invalidates outstanding previews, which is harmless.
+- **The confirmation signing key** is derived from `API_KEY_PEPPER` (`lib/auth/derive-key.ts`, label `mcp-confirmation/v1`). Bumping the label's version rotates it alone and only invalidates outstanding previews, which is harmless; changing the pepper rotates every API key and OAuth token too.
 
 ## 6. Open decisions
 
-- **Remote auth:** options (a)–(c) in 3.1. Recommended: (a) first.
+- ~~**Remote auth:** options (a)–(c) in 3.1.~~ **Decided:** our own OAuth 2.1 server (b) plus API keys (a). See 3.1.
 - **Elicitation:** add server-initiated confirmation through MCP elicitation once major AI apps support it widely, possibly replacing the two-step token for those apps.
 - **Composite tool:** keep issue and send as separate steps (recommended for v1, since two confirmations for two irreversible effects), or add `issue_and_send_invoice` later.
-- **Resend semantics:** the idempotency key `send:{id}:{to}` makes "send it again" within 24h a replay. Decide whether an explicit `resend: true` should create a new key.
-- **Remote hosting of the tool package:** the SDKs moved to invoice-ai-sdk, so the Next.js app would consume `mcp-tools` as a published package (or keep the remote server's tool definitions in this repo).
+- ~~**Resend semantics.**~~ **Decided for MCP:** the idempotency key is the confirmation token's hash, so retrying a confirmation replays, and "send it again" needs a fresh preview and a fresh yes. (REST still uses the caller's `Idempotency-Key`.)
+- ~~**Remote hosting of the tool package.**~~ **Decided:** the tool definitions live in this repo (`lib/mcp/`) and call `lib/operations/*` in-process. A local `invoice-ai mcp` would need its own copy or a shared package.
 - **Verify at build time:** the MCP SDK v2 and `mcp-handler` APIs at the time of building, and Claude's remote-connector requirements.
 
 > ### How the MCP story uses this layer

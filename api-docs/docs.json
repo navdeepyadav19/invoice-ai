@@ -107,6 +107,21 @@
             ]
           }
         ]
+      },
+      {
+        "tab": "MCP",
+        "icon": "robot",
+        "groups": [
+          {
+            "group": "MCP server",
+            "pages": [
+              "mcp/overview",
+              "mcp/tools",
+              "mcp/authentication",
+              "mcp/safety"
+            ]
+          }
+        ]
       }
     ]
   },

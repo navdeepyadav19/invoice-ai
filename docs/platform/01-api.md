@@ -5,7 +5,7 @@
 >
 > **Backend note:** this module was planned on Supabase, where an API key was exchanged for a short-lived JWT so PostgREST would apply RLS. Since the move to **Neon** there is no JWT and no PostgREST: the key resolves to an owner id and the request gets a database handle scoped to that owner. Section 3.2 describes the mechanism as it works now; see also [../neon-overview.md](../neon-overview.md).
 >
-> **Status (Oct 2026):** phases A1–A3 are built; A4 (OAuth) is not. The shipped API went **Stripe-shaped** (`0011_stripe_api.sql`) and **worldwide** (`0009_global_breaking.sql`), so the names below differ from this plan: `customers` not `clients`, `finalize` / `pay` / `void` not `issue` / `mark-paid` / `cancel`, scope `invoices:finalize` not `invoices:issue`, statuses `draft` / `open` / `paid` / `void`, amounts in integer minor units of the invoice currency. Sections 3.4, 3.5, 3.7 and 3.9 are updated to what shipped. The live contract is `GET /api/v1/openapi.json`; [api-getting-started.md](api-getting-started.md) is the user-facing guide.
+> **Status (Oct 2026):** phases A1–A4 are built. A4 (OAuth) is our own authorization server; see 3.3. The shipped API went **Stripe-shaped** (`0011_stripe_api.sql`) and **worldwide** (`0009_global_breaking.sql`), so the names below differ from this plan: `customers` not `clients`, `finalize` / `pay` / `void` not `issue` / `mark-paid` / `cancel`, scope `invoices:finalize` not `invoices:issue`, statuses `draft` / `open` / `paid` / `void`, amounts in integer minor units of the invoice currency. Sections 3.4, 3.5, 3.7 and 3.9 are updated to what shipped. The live contract is `GET /api/v1/openapi.json`; [api-getting-started.md](api-getting-started.md) is the user-facing guide.
 
 ## 1. What this layer is, and what students learn
 
@@ -127,7 +127,18 @@ There is no token to mint and no signing key to protect. There is also no public
 
 ### 3.3 OAuth for third-party apps (built second)
 
-**Not built yet.** The original plan used Supabase Auth's built-in OAuth 2.1 server, which went away with the move to Neon. The design below still holds; what provides the authorization server is open again. Neon's managed Better Auth doesn't expose one: its plugins are organization, magic link, phone number, email/password and social login, with no OAuth-provider or OIDC-provider plugin (checked with `neon neon-auth plugins list`, Oct 2026). So the candidates are a self-hosted Better Auth instance running its OIDC-provider plugin, or a small authorization server of our own. [04-mcp](04-mcp.md) weighs the same choice for the MCP server. Either way, an access token must end in the same place an API key does: a verified user id handed to `userDb()`.
+**Built (Oct 2026): our own OAuth 2.1 authorization server**, in `lib/oauth/` with tables, grants and token functions in `db/migrations/0016_oauth.sql`. The original plan used Supabase Auth's built-in OAuth 2.1 server, which went away with the move to Neon, and Neon's managed Better Auth has no OAuth-provider or OIDC-provider plugin (checked with `neon neon-auth plugins list`, Oct 2026). So we wrote a small one. Its main client is the MCP server ([04-mcp](04-mcp.md)), but it issues tokens for `/api/v1` too. An access token ends in the same place an API key does: a verified user id handed to `userDb()`, through `authenticateBearer()` in `lib/api/authenticate.ts`.
+
+What shipped, against the plan below:
+
+- **Discovery:** `/.well-known/oauth-authorization-server` (RFC 8414) and `/.well-known/oauth-protected-resource/{mcp,api/v1}` (RFC 9728), built in `lib/oauth/metadata.ts`.
+- **Clients:** Client ID Metadata Documents (verified domain on consent) and dynamic client registration at `/oauth/register` ("Unverified app"). Public clients use PKCE S256, which is required for everyone; confidential clients may also use a secret.
+- **Consent:** `/oauth/authorize` (not `/oauth/consent`), posting to `/oauth/authorize/decision` with a signed consent token.
+- **Tokens are opaque, not signed:** `inv_oat_…` (access, 1 h) and `inv_ort_…` (refresh, 30 d, rotated on use; a replayed refresh token or authorization code revokes its family). Only HMACs are stored, in `oauth_tokens`. Each token is bound to a resource (RFC 8707), so an MCP token is refused on `/api/v1` and vice versa.
+- **Grants:** `oauth_grants` as planned. Every request re-reads the grant, so a revoked or narrowed grant takes effect immediately.
+- **Connected apps page:** Settings → AI assistants (`app/(app)/settings/ai-assistants/page.tsx`), not `connected-apps`.
+
+The original design:
 
 | Piece | What it does |
 |---|---|
@@ -142,8 +153,6 @@ There is no token to mint and no signing key to protect. There is also no public
 **New table `oauth_grants`**: `id`, `owner_id`, `client_id`, `scopes text[]`, `granted_at`, `revoked_at`, unique (`owner_id`, `client_id`).
 
 On each OAuth request, `withApi` verifies the token, then looks up the grant by (`sub`, `client_id`). A revoked grant gets `401` immediately, even if the token hasn't expired.
-
-> **Verify at build time:** re-check `neon neon-auth plugins list` in case Neon has since added an OAuth-provider plugin. Otherwise, check that whichever authorization server we pick supports dynamic client registration, a consent page we control, and loopback redirect port rules for public clients.
 
 ### 3.4 Scopes
 

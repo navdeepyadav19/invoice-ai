@@ -9,6 +9,9 @@ icon: "gauge"
 | 120 requests per 60 seconds | Every endpoint except `send` | API key |
 | 10 emails per hour | `POST /invoices/{id}/send` | API key |
 | 50 emails per hour | Every invoice email, from the API or the dashboard | Account |
+| 300 requests per 60 seconds | Every request to the [MCP server](/mcp/overview), before any tool runs | API key or connected app |
+
+MCP tool calls count against the first three limits too. The `send_invoice` tool uses the 10-per-hour bucket for confirmed sends; its preview call (no `confirmation_token`) only counts as an ordinary request. Over the 300-per-minute MCP limit, `/mcp` answers `429` with `Retry-After`. With OAuth, "API key" means the connected app.
 
 Every authenticated response includes these headers for the key's bucket:
 

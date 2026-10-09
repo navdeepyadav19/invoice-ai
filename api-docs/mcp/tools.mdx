@@ -1,0 +1,116 @@
+---
+title: "Tools"
+description: "The 16 tools, the scope each one needs, and how confirmations work."
+icon: "screwdriver-wrench"
+---
+
+Each tool runs the same operation as its REST endpoint. The assistant gets the same validation, the same error messages, and the same data back.
+
+## Tool list
+
+| Tool | What it does | Scope | Kind | REST equivalent |
+|---|---|---|---|---|
+| `get_business_profile` | Your business name, address, tax id and default currency | `business:read` | Read-only | [Retrieve the business profile](/api-reference/business/retrieve-the-business-profile) |
+| `search_customers` | Find customers by part of the name | `clients:read` | Read-only | [List customers](/api-reference/customers/list-customers) |
+| `get_customer` | One customer, with email and address | `clients:read` | Read-only | [Retrieve a customer](/api-reference/customers/retrieve-a-customer) |
+| `create_customer` | Add a customer | `clients:write` | Write | [Create a customer](/api-reference/customers/create-a-customer) |
+| `list_products` | Your product catalog | `products:read` | Read-only | [List products](/api-reference/products/list-products) |
+| `list_prices` | Saved prices, active only by default | `products:read` | Read-only | [List prices](/api-reference/prices/list-prices) |
+| `list_invoices` | Invoices, newest first. Filter by status (including `overdue`), customer or date. | `invoices:read` | Read-only | [List invoices](/api-reference/invoices/list-invoices) |
+| `get_invoice` | One invoice with its lines and totals | `invoices:read` | Read-only | [Retrieve an invoice](/api-reference/invoices/retrieve-an-invoice) |
+| `list_invoice_events` | An invoice's history: created, emailed, viewed, paid | `invoices:read` | Read-only | [List invoice events](/api-reference/invoices/list-invoice-events) |
+| `create_invoice_draft` | Create a draft for an existing customer | `invoices:write` | Write | [Create a draft invoice](/api-reference/invoices/create-a-draft-invoice) |
+| `update_invoice_draft` | Change a draft. Sending `items` replaces all lines. | `invoices:write` | Write | [Update a draft invoice](/api-reference/invoices/update-a-draft-invoice) |
+| `delete_invoice_draft` | Permanently delete a draft | `invoices:write` | Destructive | [Delete a draft invoice](/api-reference/invoices/delete-a-draft-invoice) |
+| `finalize_invoice` | Give a draft its number and open it | `invoices:finalize` | Destructive, confirms | [Finalize an invoice](/api-reference/invoices/finalize-an-invoice) |
+| `send_invoice` | Email the invoice, finalizing a draft first | `invoices:send` | Destructive, confirms | [Send an invoice](/api-reference/invoices/send-an-invoice) |
+| `mark_invoice_paid` | Record a payment made outside Invoice-AI | `payments:write` | Destructive, confirms | [Mark an invoice paid](/api-reference/invoices/mark-an-invoice-paid) |
+| `void_invoice` | Cancel a finalized invoice. Needs a reason. | `invoices:finalize` | Destructive, confirms | [Void an invoice](/api-reference/invoices/void-an-invoice) |
+
+Every tool sets all four MCP annotations, so clients know how careful to be:
+
+- **Read-only:** `readOnlyHint: true`. Safe to call any number of times.
+- **Write:** changes only things nobody outside your account sees. Drafts have no number and send nothing.
+- **Destructive:** `destructiveHint: true`. Can't be undone.
+- **Confirms:** the server itself asks first. See [Confirmations](#confirmations).
+
+Only `send_invoice` has `openWorldHint: true`, because it emails someone outside Invoice-AI.
+
+Each tool checks its own scope, so a connection with only read scopes can still use the read tools. A call without the scope fails with a message that names the missing scope.
+
+## What a tool returns
+
+Each result has two copies of the same answer:
+
+- `structuredContent`: the exact JSON the REST endpoint returns.
+- A text block: a one-line summary, then that JSON, introduced as data entered by people, not instructions.
+
+Errors come back as a tool result with `isError: true` and a message the assistant can act on.
+
+## Confirmations
+
+`finalize_invoice`, `send_invoice`, `mark_invoice_paid` and `void_invoice` can't be undone, so each one takes two calls.
+
+<Steps>
+  <Step title="Call without a token">
+    Nothing changes. The tool returns a preview and a `confirmation_token`:
+
+    ```json
+    {
+      "name": "send_invoice",
+      "arguments": { "invoice_id": "in_Pb2Xk7Mv4Qs9Lr1Wd6Tn3Fh8" }
+    }
+    ```
+
+    ```json Result (structuredContent)
+    {
+      "requires_confirmation": true,
+      "action": "send",
+      "preview": {
+        "invoice": "INV-0042 (in_Pb2Xk7Mv4Qs9Lr1Wd6Tn3Fh8): open, total $1,500.00",
+        "to": "billing@acme.example",
+        "warnings": []
+      },
+      "confirmation_token": "ct_eyJhIjoic2VuZCIsImkiOiI...IfQ.k3Xv9QmZ2pR4vNt6LwYb8HsJ3dGc5eAu",
+      "expires_at": "2026-10-05T09:22:00.000Z"
+    }
+    ```
+
+    `action` is `finalize`, `send`, `pay` or `void`. `warnings` flags anything the user should notice, for example a recipient that isn't the customer's email on file, or a draft that will be numbered first.
+  </Step>
+  <Step title="Show the preview and wait for a yes">
+    The assistant shows the preview to the user. If they say no, it stops.
+  </Step>
+  <Step title="Call again with the token">
+    ```json
+    {
+      "name": "send_invoice",
+      "arguments": {
+        "invoice_id": "in_Pb2Xk7Mv4Qs9Lr1Wd6Tn3Fh8",
+        "confirmation_token": "ct_eyJhIjoic2VuZCIsImkiOiI...IfQ.k3Xv9QmZ2pR4vNt6LwYb8HsJ3dGc5eAu"
+      }
+    }
+    ```
+
+    The tool acts and returns the REST response, here `{ "data": Invoice, "emailed_to": "billing@acme.example" }`.
+  </Step>
+</Steps>
+
+Rules:
+
+- A token expires after **10 minutes**.
+- A token is bound to the action, the invoice, the connection, and the exact state of the invoice and the arguments: status, total, currency, customer, line count, last update, and the recipient, payment date or void reason. If any of these changed since the preview, the call fails. Call again without a token for a fresh preview.
+- Retrying a confirmed call with the same token replays the first result. It doesn't email or act twice.
+- So "send it again" needs a new preview and a new yes. An old token only replays the old send.
+- If there's nothing to do (the invoice is already finalized, paid or void), the tool says so and changes nothing.
+
+The token proves the assistant saw the real state before acting. It can't prove a person read the preview. That's why these tools are also opt-in on the consent screen. See [Safety](/mcp/safety).
+
+## Money and ids
+
+- Amounts are integers in the minor unit of the invoice currency: `150000` is $1,500.00 in USD. Currencies without a minor unit, such as JPY, use whole units.
+- `unit_amount` is before tax. Tax is a per-line `tax_rate` percent.
+- If no currency is given, a draft uses your business currency from `get_business_profile`.
+- Ids have prefixes: `cus_` customers, `in_` invoices, `prod_` products, `price_` prices. A line can use a `price_` id instead of a description and amount.
+
+See [Money and ids](/money-and-ids) for the full rules.
