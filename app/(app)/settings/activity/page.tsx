@@ -3,7 +3,9 @@ import { Activity } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { contextFromSession } from '@/lib/auth/context'
+import { requestCaller, requestLabel } from '@/lib/connected-apps'
 import type { ApiKeyRow, ApiRequestRow } from '@/lib/database.types'
+import { oauthListGrants } from '@/lib/db/rpc'
 
 export const metadata: Metadata = { title: 'API activity' }
 
@@ -21,13 +23,18 @@ export const metadata: Metadata = { title: 'API activity' }
 export default async function ActivityPage() {
   const ctx = await contextFromSession()
 
-  const [requests, keys] = await Promise.all([
+  const [requests, keys, grants] = await Promise.all([
     ctx.db.selectFrom('api_requests').selectAll().orderBy('created_at', 'desc').limit(100).execute(),
     ctx.db.selectFrom('api_keys').select(['id', 'name']).execute(),
+    // Revoked grants too: a request made last week by an app disconnected
+    // yesterday should still say which app it was.
+    oauthListGrants(ctx.db, true),
   ])
 
   const rows = requests as ApiRequestRow[]
   const keyNames = new Map((keys as Pick<ApiKeyRow, 'id' | 'name'>[]).map((key) => [key.id, key.name]))
+  // api_requests.client_id is the oauth_clients uuid, which is client_uuid here.
+  const appNames = new Map(grants.map((grant) => [grant.client_uuid, grant.client_name]))
 
   return (
     <div className="space-y-8">
@@ -38,8 +45,9 @@ export default async function ActivityPage() {
           <Activity className="mx-auto size-6 text-muted-foreground" />
           <p className="mt-3 text-sm font-medium">No API requests yet</p>
           <p className="mx-auto mt-1 max-w-sm text-xs text-muted-foreground">
-            Once something calls the API with one of your keys, every request shows up here — including
-            the ones that failed, which is usually what you want to see.
+            Once something calls the API with one of your keys, or a connected assistant uses a tool,
+            every request shows up here — including the ones that failed, which is usually what you
+            want to see.
           </p>
         </section>
       ) : (
@@ -49,7 +57,7 @@ export default async function ActivityPage() {
               <tr>
                 <th className="px-4 py-2 text-left font-medium">Request</th>
                 <th className="px-4 py-2 text-left font-medium">Result</th>
-                <th className="px-4 py-2 text-left font-medium">Key</th>
+                <th className="px-4 py-2 text-left font-medium">Caller</th>
                 <th className="px-4 py-2 text-left font-medium">Took</th>
                 <th className="px-4 py-2 text-left font-medium">When</th>
               </tr>
@@ -58,9 +66,7 @@ export default async function ActivityPage() {
               {rows.map((row) => (
                 <tr key={row.id}>
                   <td className="px-4 py-2">
-                    <code className="text-xs">
-                      {row.method} {row.route}
-                    </code>
+                    <code className="text-xs">{requestLabel(row)}</code>
                     {row.idempotency_key ? (
                       <span className="mt-0.5 block text-[11px] text-muted-foreground">
                         Idempotency-Key set
@@ -71,11 +77,7 @@ export default async function ActivityPage() {
                     <StatusBadge status={row.status} />
                   </td>
                   <td className="px-4 py-2 text-xs text-muted-foreground">
-                    {row.api_key_id
-                      ? (keyNames.get(row.api_key_id) ?? 'Deleted key')
-                      : row.via === 'session'
-                        ? 'This browser'
-                        : '—'}
+                    {requestCaller(row, keyNames, appNames)}
                   </td>
                   <td className="px-4 py-2 text-xs text-muted-foreground">{row.duration_ms}ms</td>
                   <td className="whitespace-nowrap px-4 py-2 text-xs text-muted-foreground">
@@ -103,7 +105,8 @@ function Header() {
     <div>
       <h2 className="text-lg font-medium">API activity</h2>
       <p className="mt-1 text-sm text-muted-foreground">
-        Every request made with one of your API keys, newest first.
+        Every request made with one of your API keys or by a connected app, newest first. Assistant
+        tool calls show as <code className="text-xs">MCP</code> and the tool&rsquo;s name.
       </p>
     </div>
   )
@@ -118,9 +121,9 @@ function StatusBadge({ status }: { status: number }) {
 
   const hint =
     status === 401
-      ? 'Bad or missing key'
+      ? 'Bad or missing credential'
       : status === 403
-        ? 'Key lacks the scope'
+        ? 'Lacks the scope'
         : status === 404
           ? 'Not found'
           : status === 409

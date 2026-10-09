@@ -21,6 +21,8 @@ import {
 import { createApiKeyAction, revokeApiKeyAction, type CreateKeyState } from '@/lib/actions/api-keys'
 import { SCOPES, SCOPE_DESCRIPTIONS, type Scope } from '@/lib/auth/scopes'
 import type { ApiKeyRow } from '@/lib/database.types'
+// Client-safe: lib/mcp/scopes.ts holds constants and imports only a type.
+import { MCP_DEFAULT_SCOPES } from '@/lib/mcp/scopes'
 
 /** The list never carries the secret hash. */
 type ApiKeyListRow = Omit<ApiKeyRow, 'secret_hash'>
@@ -55,6 +57,15 @@ const PRESETS: { id: string; label: string; hint: string; scopes: Scope[] }[] = 
       'invoices:send',
       'payments:write',
     ],
+  },
+  {
+    // For an assistant that can't do OAuth (or a Claude Code --header setup).
+    // Same scopes the consent screen pre-ticks, so a key and an OAuth grant
+    // for the same assistant start with the same blast radius.
+    id: 'assistant',
+    label: 'AI assistant',
+    hint: 'Look things up and prepare drafts. Cannot finalize, send, or mark anything paid.',
+    scopes: [...MCP_DEFAULT_SCOPES],
   },
   { id: 'custom', label: 'Custom', hint: 'Pick exactly what this integration needs.', scopes: [] },
 ]

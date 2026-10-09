@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Activity, Building2, KeyRound, Webhook } from 'lucide-react'
+import { Activity, Bot, Building2, KeyRound, Webhook } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
 
@@ -18,6 +18,12 @@ const SECTIONS = [
     label: 'API keys',
     icon: KeyRound,
     description: 'Let other systems raise invoices',
+  },
+  {
+    href: '/settings/ai-assistants',
+    label: 'AI assistants',
+    icon: Bot,
+    description: 'Connect Claude, ChatGPT and other assistants',
   },
   {
     href: '/settings/webhooks',
