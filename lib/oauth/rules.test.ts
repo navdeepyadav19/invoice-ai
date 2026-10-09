@@ -92,6 +92,25 @@ describe('client registration and metadata documents', () => {
     expect(validateCimdDocument({ ...doc, token_endpoint_auth_method: 'private_key_jwt' }, url).ok).toBe(false)
   })
 
+  it('ignores grant types we do not offer in a metadata document (Claude lists jwt-bearer)', () => {
+    const url = 'https://claude.ai/oauth/mcp-oauth-client-metadata'
+    const doc = {
+      client_id: url,
+      client_name: 'Claude',
+      redirect_uris: ['https://claude.ai/api/mcp/auth_callback'],
+      grant_types: ['authorization_code', 'refresh_token', 'urn:ietf:params:oauth:grant-type:jwt-bearer'],
+      response_types: ['code'],
+      token_endpoint_auth_method: 'none',
+    }
+    const result = validateCimdDocument(doc, url)
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.value.grantTypes).toEqual(['authorization_code', 'refresh_token'])
+    // Nothing we can serve → still refused.
+    expect(validateCimdDocument({ ...doc, grant_types: ['urn:ietf:params:oauth:grant-type:jwt-bearer'] }, url).ok).toBe(false)
+    // Dynamic registration stays strict.
+    expect(validateRegistration({ ...doc, client_id: undefined }).ok).toBe(false)
+  })
+
   it('caches a document for between five minutes and a day', () => {
     expect(cimdCacheSeconds(null)).toBe(3600)
     expect(cimdCacheSeconds(10)).toBe(300)
