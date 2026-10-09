@@ -101,8 +101,10 @@ export async function runTool(
     {
       scope: tool.scope,
       idempotent: tool.confirmable ? 'optional' : 'none',
-      rateLimit: tool.rateLimit,
-      rateLimitBucket: tool.rateLimitBucket,
+      // A preview (a confirmable tool called without its token) changes
+      // nothing, so it spends only the ordinary request budget — not, say,
+      // the 10-an-hour email budget, which is for emails actually sent.
+      ...(tool.confirmable && !token ? {} : { rateLimit: tool.rateLimit, rateLimitBucket: tool.rateLimitBucket }),
     },
     call,
     () => tool.run(ctx, args),

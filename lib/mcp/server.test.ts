@@ -115,6 +115,17 @@ describe('MCP endpoint', () => {
     expect(response.headers.get('www-authenticate')).toContain('error_description="This API key has been revoked."')
   })
 
+  it('answers 429, not a sign-in challenge, when a connection sends too many requests', async () => {
+    configureRateLimit({ hit: async (key, windowSeconds) => ({ count: key.startsWith('mcp-transport:') ? 999 : 1, resetAt: Date.now() + windowSeconds * 1000 }) })
+    const response = await handler(
+      new Request('https://invoice.test/mcp', { method: 'POST', headers: { authorization: 'Bearer inv_live_x' }, body: '{}' }),
+    )
+
+    expect(response.status).toBe(429)
+    expect(response.headers.get('retry-after')).toBeTruthy()
+    expect(response.headers.get('www-authenticate')).toBeNull()
+  })
+
   it('verifies the credential for the MCP audience', async () => {
     await rpc('tools/list')
     expect(authenticateBearer).toHaveBeenCalledWith('inv_live_test', expect.any(String), { audience: 'mcp' })
@@ -159,6 +170,33 @@ describe('MCP endpoint', () => {
     expect(body.result.isError).toBeFalsy()
     expect(body.result.content[0].text).toContain('Finalized INV-0001')
     expect(operations.finalizeInvoice).toHaveBeenCalledTimes(1)
+  })
+
+  it('charges a preview to the ordinary request budget, not the tool’s own (e.g. emails)', async () => {
+    const buckets: string[] = []
+    configureRateLimit({ hit: async (key, windowSeconds) => (buckets.push(key.split(':')[0]), { count: 1, resetAt: Date.now() + windowSeconds * 1000 }) })
+    const { defineTool, runTool } = await import('@/lib/mcp/define-tool')
+    const { toAuthInfo } = await import('@/lib/mcp/context')
+    const { z } = await import('zod')
+    const tool = defineTool({
+      name: 'email_thing',
+      title: 't',
+      description: 'd',
+      input: z.object({ confirmation_token: z.string().optional() }),
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+      scope: 'invoices:send',
+      rateLimit: { limit: 10, windowSeconds: 3600 },
+      rateLimitBucket: 'send',
+      confirmable: true,
+      run: async () => ({ summary: 'ok', body: {} }),
+    })
+    const ctx = { userId: 'user-1', via: 'api_key', scopes: new Set(['invoices:send']), apiKeyId: 'key-1', requestId: 'r' }
+    const mcp = { http: { authInfo: toAuthInfo(ctx as never, 'inv_live_x') } } as never
+
+    await runTool(tool as never, {}, mcp)
+    expect(buckets).toEqual(['request'])
+    await runTool(tool as never, { confirmation_token: 'ct_x.y' }, mcp)
+    expect(buckets).toEqual(['request', 'send'])
   })
 
   it('refuses a tool outside the connection’s scopes, as a readable tool error', async () => {

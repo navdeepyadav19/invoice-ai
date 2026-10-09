@@ -47,7 +47,17 @@ export function withBearerAuth(handler: (request: Request) => Promise<Response>)
     if (!match) return challenge('No credential provided.')
 
     const verified = await verifyMcpToken(request, match[1].trim())
-    if (!verified.ok) return challenge(verified.detail)
+    if (!verified.ok) {
+      // Too many requests is not a bad credential: answering 401 here would
+      // make a client throw its token away and send the user to sign in again.
+      if ('retryAfter' in verified) {
+        return Response.json(
+          { error: 'rate_limited', error_description: verified.detail },
+          { status: 429, headers: { 'retry-after': String(verified.retryAfter) } },
+        )
+      }
+      return challenge(verified.detail)
+    }
 
     // mcp-handler passes `request.auth` to the SDK, which hands it to every
     // tool as `ctx.http.authInfo`.
@@ -59,14 +69,14 @@ export function withBearerAuth(handler: (request: Request) => Promise<Response>)
 export async function verifyMcpToken(
   request: Request,
   token: string,
-): Promise<{ ok: true; auth: AuthInfo } | { ok: false; detail: string }> {
+): Promise<{ ok: true; auth: AuthInfo } | { ok: false; detail: string; retryAfter?: number }> {
   const result = await authenticateBearer(token, readRequestId(request), { audience: 'mcp' })
   if (!result.ok) return result
 
   const { ctx } = result
   const credential = ctx.apiKeyId ?? (ctx.grantId ? `oauth:${ctx.grantId}` : ctx.userId)
   const limit = await checkRateLimit(credential, 'mcp-transport', TRANSPORT_LIMIT)
-  if (!limit.ok) return { ok: false, detail: `Too many requests. Retry in ${limit.retryAfter}s.` }
+  if (!limit.ok) return { ok: false, detail: `Too many requests. Retry in ${limit.retryAfter}s.`, retryAfter: limit.retryAfter }
 
   return { ok: true, auth: toAuthInfo(ctx, token, result.expiresAt) }
 }

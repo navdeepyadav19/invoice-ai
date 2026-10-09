@@ -38,6 +38,13 @@ const nextConfig: NextConfig = {
           { key: 'Referrer-Policy', value: 'no-referrer' },
         ],
       },
+      // The consent screen's URL carries the app's state and PKCE challenge,
+      // and the redirect back carries the authorization code. Neither should
+      // leak to another site in a Referer header.
+      {
+        source: '/oauth/:path*',
+        headers: [{ key: 'Referrer-Policy', value: 'no-referrer' }],
+      },
       {
         source: '/api/public/:path*',
         headers: [

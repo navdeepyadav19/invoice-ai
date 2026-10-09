@@ -1,12 +1,15 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
+import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 
 import { getPrimaryBusiness, requireUser, sessionDb } from '@/lib/queries'
 import { persistBusiness } from '@/lib/actions/business'
 import { paymentDetailsSchema } from '@/lib/validators'
 import { toFieldErrors, withValues, type StepState } from '@/lib/form-state'
+import { RETURN_TO_COOKIE } from '@/lib/auth/return-to'
+import { safeNextPath } from '@/lib/safe-redirect'
 
 /**
  * Onboarding is two steps.
@@ -35,7 +38,13 @@ async function finishOnboarding(): Promise<never> {
     .where('id', '=', user.id)
     .execute()
 
-  redirect('/invoices/new')
+  // Back to the flow that sent them here (an assistant's consent screen, the
+  // CLI login), if one is waiting — see lib/auth/return-to.ts.
+  const cookieStore = await cookies()
+  const returnTo = cookieStore.get(RETURN_TO_COOKIE)?.value
+  if (returnTo) cookieStore.delete(RETURN_TO_COOKIE)
+
+  redirect(safeNextPath(returnTo, '/invoices/new'))
 }
 
 /** Step 1 — identity, whether it came from the GST registry or was typed. */
